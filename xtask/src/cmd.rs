@@ -19,12 +19,23 @@ pub fn cargo() -> String {
 }
 
 pub fn run(cmd: &mut Command) -> Result<()> {
-    println!("> {cmd:?}");
-    let status = cmd.status().with_context(|| format!("failed to start {cmd:?}"))?;
+    let line = shown(cmd);
+    println!("> {line}");
+    let status = cmd.status().with_context(|| format!("failed to start {line}"))?;
     if !status.success() {
-        bail!("command failed ({status}): {cmd:?}");
+        bail!("command failed ({status}): {line}");
     }
     Ok(())
+}
+
+/// A command as it is shown: the program and its arguments, never its environment (on Unix the
+/// debug form lists the variables set for it, the CurseForge key among them).
+fn shown(cmd: &Command) -> String {
+    let mut line = format!("{:?}", cmd.get_program());
+    for arg in cmd.get_args() {
+        line.push_str(&format!(" {arg:?}"));
+    }
+    line
 }
 
 pub fn trunk(spec: &BuildSpec, serve: bool, release: bool) -> Command {
@@ -289,6 +300,16 @@ pub fn new_module(id: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_shown_command_carries_no_environment() {
+        // On Unix a command's debug form lists the variables set for it: the API key among them.
+        let mut cmd = std::process::Command::new("cargo");
+        cmd.args(["build", "-p", "launcher-app"]).env("CURSEFORGE_API_KEY", "secret-key");
+        let line = super::shown(&cmd);
+        assert!(!line.contains("secret-key"), "{line}");
+        assert!(line.contains("cargo") && line.contains("launcher-app"), "{line}");
+    }
+
     use super::*;
 
     fn spec(modules: &[&str]) -> BuildSpec {
