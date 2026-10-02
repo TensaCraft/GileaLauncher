@@ -63,6 +63,15 @@ fn tokens_and_home_are_hidden_everywhere() {
 }
 
 #[test]
+fn a_home_folder_written_with_escaped_backslashes_is_hidden_too() {
+    // The launcher's log shows paths as Rust debug strings, every backslash doubled.
+    let raw = r#"Game exited: Crashed { log: Some("C:\\Users\\Steve\\AppData\\crash.txt") }"#;
+    let out = Redactor::new(Some(Path::new(HOME))).text(raw);
+    assert!(!out.contains("Steve"), "{out}");
+    assert!(out.contains("<USER_HOME>"), "{out}");
+}
+
+#[test]
 fn legacy_session_tokens_are_hidden() {
     // Minecraft 1.7–1.8 print the session and very old ones pass it on the command line.
     let raw = "[Client thread/INFO]: (Session ID is token:abc123def:0f9e8d7c)

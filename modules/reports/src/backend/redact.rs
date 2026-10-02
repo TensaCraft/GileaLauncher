@@ -24,6 +24,8 @@ impl Redactor {
         {
             forms.push(home.clone());
             forms.push(home.replace('\\', "/"));
+            // As a debug string or JSON writes it (the launcher's log does): every `\` doubled.
+            forms.push(home.replace('\\', "\\\\"));
         }
         forms.sort_by_key(|f| std::cmp::Reverse(f.len()));
         forms.dedup();
