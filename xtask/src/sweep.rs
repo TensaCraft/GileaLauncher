@@ -96,8 +96,20 @@ pub fn target_dir() -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| crate::cmd::root().join("target"), PathBuf::from)
 }
 
-/// Sweeps `target` at most once a day, before a command that builds; says what it removed.
+/// Sweeps `target` at most once a day, before a command that builds; says what it removed. Never in
+/// CI: a cache restored there keeps its files' old times, and the sweep would empty it every run.
 pub fn daily(target: &Path) {
+    if !in_ci(|key| std::env::var(key).ok()) {
+        once_a_day(target);
+    }
+}
+
+/// Whether this runs in CI (`CI` or `GITHUB_ACTIONS` set, as GitHub Actions sets them).
+fn in_ci(var: impl Fn(&str) -> Option<String>) -> bool {
+    ["CI", "GITHUB_ACTIONS"].iter().any(|key| var(key).is_some_and(|v| !v.is_empty() && v != "false"))
+}
+
+fn once_a_day(target: &Path) {
     let stamp = target.join(STAMP);
     let now = SystemTime::now();
     let fresh = fs::metadata(&stamp)
@@ -171,9 +183,9 @@ mod tests {
     fn the_sweep_runs_once_a_day() {
         let tmp = tempfile::tempdir().unwrap();
         let now = SystemTime::now();
-        daily(tmp.path());
+        once_a_day(tmp.path());
         let old = file(tmp.path().join("debug/deps/libold-1.rlib"), 40, now);
-        daily(tmp.path());
+        once_a_day(tmp.path());
         assert!(old.exists(), "swept today already");
         File::options()
             .write(true)
@@ -181,8 +193,20 @@ mod tests {
             .unwrap()
             .set_modified(now - DAY * 2)
             .unwrap();
-        daily(tmp.path());
+        once_a_day(tmp.path());
         assert!(!old.exists(), "a day later the sweep runs again");
+    }
+
+    #[test]
+    fn a_ci_run_never_sweeps_the_cache_it_restored() {
+        // A restored cache keeps its files' old times: the sweep would empty it on every run.
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |key: &str| pairs.iter().find(|(k, _)| *k == key).map(|(_, v)| v.to_string())
+        };
+        assert!(in_ci(env(&[("CI", "true")])));
+        assert!(in_ci(env(&[("GITHUB_ACTIONS", "true")])));
+        assert!(!in_ci(env(&[])));
+        assert!(!in_ci(env(&[("CI", "false")])));
     }
 
     #[test]
