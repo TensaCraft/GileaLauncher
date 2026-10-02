@@ -3,6 +3,7 @@
 
 use chrono::Utc;
 use launcher_core::feedback::OperationSpec;
+use launcher_core::launch::alive::game_open;
 use launcher_core::launch::hooks::{HookFuture, LaunchContext, LaunchHook};
 use launcher_shared::{AppError, Text};
 
@@ -26,6 +27,15 @@ impl LaunchHook for AutoBackup {
             }
             let settings = settings::read(ctx.config, ctx.mc_dir);
             if !settings.enabled {
+                return Ok(());
+            }
+            // Another copy of the build is playing: its worlds are mid-write, and a torn archive
+            // would count as their newest backup.
+            let game = ctx.game_dir.to_path_buf();
+            let open = tokio::task::spawn_blocking(move || game_open(&game))
+                .await
+                .map_err(|e| AppError::internal(e.to_string()))?;
+            if open {
                 return Ok(());
             }
             let game = ctx.game_dir.to_path_buf();
@@ -121,6 +131,25 @@ mod tests {
         launch(&game, &mc, &config, &build).await;
         let left = store.list(&build_folder(&build), "W");
         assert_eq!(left.len(), 1, "the new one replaced the old: {left:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn worlds_a_running_copy_of_the_build_writes_are_not_archived() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (game, mc) = (tmp.path().join("game"), tmp.path().join("mc"));
+        world(&game, "W");
+        let config = ConfigStore::open(tmp.path().join("config.json"));
+        config.set("world_backups_enabled", json!("yes")).unwrap();
+        let build = Build::new("Aero");
+        // Another copy of the build plays world W: the game holds its session.lock.
+        let lock = fs::File::create(game.join("saves/W/session.lock")).unwrap();
+        lock.lock().unwrap();
+        launch(&game, &mc, &config, &build).await;
+        let store = Store::new(mc.join("backups").join("worlds"));
+        assert!(store.list(&build_folder(&build), "W").is_empty(), "a world mid-write is no backup");
+        drop(lock);
+        launch(&game, &mc, &config, &build).await;
+        assert_eq!(store.list(&build_folder(&build), "W").len(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]

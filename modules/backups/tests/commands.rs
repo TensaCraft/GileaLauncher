@@ -16,6 +16,7 @@ struct World {
     _tmp: tempfile::TempDir,
     config: Arc<ConfigStore>,
     running: Arc<AtomicBool>,
+    instances: Arc<Coordinator>,
     service: BackupsService,
     key: String,
     game: PathBuf,
@@ -33,14 +34,15 @@ fn world() -> World {
     let config = Arc::new(ConfigStore::open(state.join("config.json")));
     let running = Arc::new(AtomicBool::new(false));
     let seen = running.clone();
+    let instances = Arc::new(Coordinator::instances());
     let service = BackupsService::new(Deps {
         config: config.clone(),
         versions,
-        instances: Arc::new(Coordinator::instances()),
+        instances: instances.clone(),
         feedback: FeedbackService::new(Arc::new(NullSink)),
         running: Arc::new(move |_: &str| seen.load(Ordering::SeqCst)),
     });
-    World { _tmp: tmp, config, running, service, key: build.key, game }
+    World { _tmp: tmp, config, running, instances, service, key: build.key, game }
 }
 
 fn add_world(w: &World, name: &str) {
@@ -63,6 +65,26 @@ async fn worlds_backups_and_actions_go_through_the_service() {
     w.service.create(&w.key, "World").await.unwrap();
     w.service.delete_build(&w.key).await.unwrap();
     assert!(w.service.backups(&w.key, "World").await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn listing_worlds_leaves_a_restore_in_progress_alone() {
+    let w = world();
+    add_world(&w, "World");
+    // A restore under way holds the build's folder; its journal says the copy is unpacked.
+    let saves = w.game.join("saves");
+    let staged = saves.join(".World.restore-1");
+    fs::create_dir_all(&staged).unwrap();
+    let journal = saves.join(".World-world-restore.json");
+    let entry = r#"{"staged_name": ".World.restore-1", "previous_name": ".World.restore-1.previous",
+        "target_name": "World", "had_original": true}"#;
+    fs::write(&journal, entry).unwrap();
+    let restoring = w.instances.try_acquire(&w.game, "world_restore").unwrap();
+    assert_eq!(w.service.worlds(&w.key).await.unwrap().len(), 1, "the list still shows");
+    assert!(staged.exists() && journal.exists(), "the restore's own files are its to finish");
+    drop(restoring);
+    w.service.worlds(&w.key).await.unwrap();
+    assert!(!staged.exists() && !journal.exists(), "a restore a crash cut short is finished");
 }
 
 #[tokio::test(flavor = "multi_thread")]

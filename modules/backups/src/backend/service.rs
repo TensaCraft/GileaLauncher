@@ -111,10 +111,14 @@ impl BackupsService {
     pub async fn worlds(&self, key: &str) -> AppResult<Vec<WorldDto>> {
         let build = self.build(key)?;
         let (game, store, folder) = (self.game(&build), self.store(), build_folder(&build));
+        // Only a restore a crash cut short is finished here: one under way holds the folder, and
+        // its files are its own to finish.
+        let lease = self.deps.instances.try_acquire(&game, "world_backup").ok();
         blocking(move || {
-            // A restore a crash cut short is finished first, so the world shows again.
-            for e in recover_all(&game.join("saves")) {
-                tracing::warn!("An interrupted restore could not be finished: {}", e.detail);
+            if let Some(_lease) = lease {
+                for e in recover_all(&game.join("saves")) {
+                    tracing::warn!("An interrupted restore could not be finished: {}", e.detail);
+                }
             }
             let found = worlds(&game).map_err(io_error)?;
             Ok(found
