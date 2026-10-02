@@ -6,9 +6,9 @@ use std::path::Path;
 use std::process::Command;
 
 /// Where the brand may appear (paths from the repository root): the profiles, the app's product
-/// config, the one module that reads the profile, this guard's own cases, the docs and the
-/// app's icons.
-const ALLOWED: [&str; 7] = [
+/// config, the one module that reads the profile, this guard's own cases, the docs (with the
+/// privacy statement) and the app's icons.
+const ALLOWED: [&str; 8] = [
     "build-profiles/",
     "crates/launcher-app/tauri.conf.json",
     "crates/launcher-app/icons/",
@@ -16,6 +16,7 @@ const ALLOWED: [&str; 7] = [
     "xtask/src/brand.rs",
     "docs/",
     "README.md",
+    "PRIVACY.md",
 ];
 
 /// Whether `line` names the brand: `ualauncher` in any case, `ua://`, `--ua-`, a word that

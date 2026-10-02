@@ -100,6 +100,8 @@ On first launch, the setup wizard shows where settings and games will be kept, a
 - If the game crashes, click "Send report" in the error window.
 - Bugs and suggestions: [Issues](https://github.com/TensaCraft/GileaLauncher/issues).
 
+What the launcher keeps and sends: [PRIVACY.md](PRIVACY.md).
+
 For developers: [docs/](docs/README.md).
 
 ## License
