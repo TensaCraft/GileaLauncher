@@ -14,7 +14,6 @@ use launcher_shared::{
     ErrorCode, JavaList, LoaderKind, LoaderOption, MemoryInfo, Text, names,
 };
 use tauri::{AppHandle, Emitter, State};
-use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::AppState;
 
@@ -169,9 +168,7 @@ pub fn build_open_dir(app: AppHandle, state: State<'_, AppState>, key: String) -
         AppError::new(ErrorCode::DirectoryCreateFailed, e.to_string())
             .with_param("path", dir.to_string_lossy())
     })?;
-    app.opener()
-        .open_path(dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| AppError::new(ErrorCode::Io, e.to_string()))
+    crate::commands::open_folder(&app, &dir)
 }
 
 #[tauri::command]

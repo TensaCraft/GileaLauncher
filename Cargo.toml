@@ -24,6 +24,9 @@ authors = ["Launcher contributors"]
 repository = ""
 
 [workspace.dependencies]
+# Linux: folders open through the desktop's file manager over D-Bus (as the opener plugin does).
+zbus = "5.9"
+url = "2"
 launcher-shared = { path = "crates/launcher-shared" }
 launcher-core = { path = "crates/launcher-core" }
 ui-kit = { path = "crates/ui-kit" }

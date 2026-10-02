@@ -158,10 +158,16 @@ pub fn openable_dir(path: &str) -> AppResult<std::path::PathBuf> {
 
 #[tauri::command(async)]
 pub fn open_path(app: AppHandle, path: String) -> AppResult<()> {
-    let dir = openable_dir(&path)?;
-    app.opener()
-        .open_path(dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| AppError::new(ErrorCode::Io, e.to_string()))
+    open_folder(&app, &openable_dir(&path)?)
+}
+
+/// Opens folder `dir` in the system file manager (on Linux over D-Bus, see
+/// `launcher_core::platform::folder`), the system opener when that fails.
+pub fn open_folder(app: &AppHandle, dir: &std::path::Path) -> AppResult<()> {
+    launcher_core::platform::folder::open_folder(dir, |dir| {
+        app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+    })
+    .map_err(|e| AppError::new(ErrorCode::Io, e))
 }
 
 /// The launcher log for the in-app viewer.

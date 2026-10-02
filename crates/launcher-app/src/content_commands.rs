@@ -65,10 +65,10 @@ pub fn content_open_dir(
     key: String,
     kind: ContentKind,
 ) -> AppResult<()> {
-    let dir = state.core.content.dir(&key, kind)?;
-    open(&app, &dir)
+    crate::commands::open_folder(&app, &state.core.content.dir(&key, kind)?)
 }
 
+/// Opens a file (a screenshot) in its program.
 fn open(app: &AppHandle, path: &Path) -> AppResult<()> {
     app.opener()
         .open_path(path.to_string_lossy(), None::<&str>)
@@ -116,6 +116,5 @@ pub fn screenshot_open(
 
 #[tauri::command(async)]
 pub fn screenshots_open_dir(app: AppHandle, state: State<'_, AppState>, key: String) -> AppResult<()> {
-    let dir = state.core.content.screenshots_dir(&key)?;
-    open(&app, &dir)
+    crate::commands::open_folder(&app, &state.core.content.screenshots_dir(&key)?)
 }

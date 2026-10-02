@@ -1,8 +1,7 @@
 //! IPC for the Components page.
 
-use launcher_shared::{AppError, AppResult, ComponentsSnapshot, ErrorCode, LoaderKind, VerifyOutcome};
+use launcher_shared::{AppError, AppResult, ComponentsSnapshot, LoaderKind, VerifyOutcome};
 use tauri::{AppHandle, State};
-use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::AppState;
 
@@ -50,8 +49,5 @@ pub async fn component_delete(state: State<'_, AppState>, id: String) -> AppResu
 
 #[tauri::command(async)]
 pub fn component_open_dir(app: AppHandle, state: State<'_, AppState>, id: String) -> AppResult<()> {
-    let dir = state.core.component_manager.dir(&id)?;
-    app.opener()
-        .open_path(dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| AppError::new(ErrorCode::Io, e.to_string()))
+    crate::commands::open_folder(&app, &state.core.component_manager.dir(&id)?)
 }
