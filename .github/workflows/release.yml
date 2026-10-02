@@ -1,11 +1,10 @@
 name: Release
 
-# Builds every edition (the profiles with an update repository) on Windows, Linux and macOS and
-# uploads the files to the release, named the way the launcher's updater looks for them.
+# Started by hand from main: builds every edition (the profiles with an update repository) on
+# Windows, Linux and macOS, then tags the commit and publishes the release with the files, named the
+# way the launcher's updater looks for them.
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       prerelease:
@@ -24,8 +23,9 @@ on:
 permissions:
   contents: read
 
+# One release at a time: two runs could tag one version on two commits.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 env:
@@ -50,16 +50,16 @@ jobs:
         id: meta
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           tag="$(cargo xtask release-meta --field tag)"
-          if [ -n "$RELEASE_TAG" ]; then
-            cargo xtask release-meta --check-tag "$RELEASE_TAG"
-            tag="$RELEASE_TAG"
-          elif [ "$DRY_RUN" != "true" ]; then
-            # A manual release never rebuilds a published tag from other code.
+          if [ "$DRY_RUN" != "true" ]; then
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+              echo "::error::A release is made from main only (this run is on $GITHUB_REF)."
+              exit 1
+            fi
+            # A release never rebuilds a published tag from other code.
             cargo xtask release-meta --check-new-tag "$tag"
           fi
           title="$(cargo xtask release-meta --field title)"
@@ -98,6 +98,19 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: trunk,tauri-cli@2
+      - name: The CurseForge key is there
+        # A missing secret would hide CurseForge in the release without a word.
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          CURSEFORGE_API_KEY: ${{ secrets.CURSE_FORGE_KEY }}
+          PROFILE: ${{ matrix.edition.profile }}
+        run: |
+          set -euo pipefail
+          if cargo xtask profiles | grep -q "^$PROFILE: .*curseforge" && [ -z "$CURSEFORGE_API_KEY" ]; then
+            echo "::error::The CURSE_FORGE_KEY secret is missing: the $PROFILE profile has CurseForge."
+            exit 1
+          fi
       - name: Package
         run: cargo xtask package --profile ${{ matrix.edition.profile }}
         env:
@@ -156,8 +169,7 @@ jobs:
           merge-multiple: true
       - name: Linux files stay executable
         run: chmod +x artifacts/*-x86_64 artifacts/*.AppImage
-      - name: Tag the commit (manual runs)
-        if: github.event_name != 'release'
+      - name: Tag the commit
         shell: bash
         env:
           TAG: ${{ needs.meta.outputs.tag }}
@@ -165,25 +177,37 @@ jobs:
           set -euo pipefail
           git config user.name "${{ github.actor }}"
           git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git fetch --tags --force origin
           if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
-            echo "Tag $TAG already exists."
+            # Made meanwhile (another run, by hand): this commit's files never go to another's tag.
+            if [ "$(git rev-parse "refs/tags/$TAG^{commit}")" != "$(git rev-parse HEAD)" ]; then
+              echo "::error::Tag $TAG names another commit."
+              exit 1
+            fi
           else
             git tag -a "$TAG" -m "Release $TAG"
             git push origin "$TAG"
           fi
       - name: Release notes
         run: cargo xtask release-notes --tag ${{ needs.meta.outputs.tag }} --output RELEASE_NOTES.md && cat RELEASE_NOTES.md
+      # A draft until every file is in: no one sees a release with half its files.
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.meta.outputs.tag }}
-          name: ${{ github.event.release.name || needs.meta.outputs.title }}
-          draft: ${{ github.event_name != 'release' && inputs.draft }}
-          prerelease: ${{ needs.meta.outputs.prerelease == 'true' || (github.event_name == 'release' && github.event.release.prerelease) || (github.event_name != 'release' && inputs.prerelease) }}
+          name: ${{ needs.meta.outputs.title }}
+          draft: true
+          prerelease: ${{ needs.meta.outputs.prerelease == 'true' || inputs.prerelease }}
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
           files: artifacts/*
+      - name: Publish
+        if: ${{ !inputs.draft }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ needs.meta.outputs.tag }}" --draft=false
+      # Only after a success: a failed publish can be run again with these files.
       - name: Delete this run's temporary artifacts
-        if: always()
+        if: success()
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

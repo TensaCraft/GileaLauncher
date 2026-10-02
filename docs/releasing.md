@@ -63,19 +63,18 @@ The notes are made from the commit subjects since the previous tag. For a stable
 ## How to release
 
 1. Raise the version in `Cargo.toml` and commit it: `release: bump version to 0.2.0`.
-2. Push the commit to GitHub. Create a release with the tag `v0.2.0` (mark a beta as a pre-release) and publish it.
-3. The **Release** workflow (`.github/workflows/release.yml`) then:
-   1. checks that the tag matches the version;
-   2. builds every edition on Windows, Linux and macOS and smoke-tests every package;
-   3. writes the notes and puts them in the release's description;
-   4. uploads the files to the release;
-   5. deletes the temporary artifacts.
+2. Push the commit to `main`.
+3. Start the **Release** workflow (`.github/workflows/release.yml`) by hand on `main` (**Run workflow**, or `gh workflow run release.yml --ref main`), with the `prerelease` and `draft` switches if needed. Never create the tag or the release yourself. The workflow:
+   1. checks that the run is on `main` and that the tag `v<version>` does not name another commit: a published release is never rebuilt from other code;
+   2. checks that the CurseForge key (the `CURSE_FORGE_KEY` secret) is there for every edition with CurseForge;
+   3. builds every edition on Windows, Linux and macOS and smoke-tests every package;
+   4. tags the commit, writes the notes and uploads the files to a draft release;
+   5. publishes the release once every file is in (unless `draft` is on);
+   6. deletes the temporary artifacts. When a step fails they stay, so **Re-run failed jobs** can finish the release.
 
-The workflow can also be started by hand (**Run workflow**), with the `prerelease` and `draft` switches. It then creates the tag `v<version>` on the current commit itself. When that tag already names another commit, the workflow stops before building: a published release is never rebuilt from other code. Raise the version for a new release.
+Only one release runs at a time.
 
 The `dry_run` switch only builds every package and runs their smoke tests, with no tag and no release. The files stay in the run's artifacts for a day. Use it to check the builds on every system before the first release.
-
-A draft made by a manual run already has its files. When it is published, the workflow builds everything again and replaces the files with the same ones.
 
 While a release's files are uploading, the updater does not offer that release: it has no file of the right edition yet.
 
