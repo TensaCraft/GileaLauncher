@@ -37,13 +37,13 @@ fn dto(core: &CoreApp, build: &Build) -> BuildDto {
     build_dto(build, &core.paths.minecraft_dir, core.launcher.is_running(&build.key))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn builds_list(state: State<'_, AppState>) -> BuildsSnapshot {
     builds_snapshot(&state.core)
 }
 
 /// Puts the builds in the order of `keys` (dragged on Home or in Builds).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn builds_reorder(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -81,7 +81,7 @@ pub async fn build_create_loader(
     Ok(dto(&core, &build))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn build_settings_get(state: State<'_, AppState>, key: String) -> AppResult<BuildSettingsDto> {
     state.core.builds.settings(&key)
 }
@@ -155,7 +155,7 @@ pub async fn build_launch(
     Ok(started.pid)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn build_stop(state: State<'_, AppState>, key: String) -> usize {
     state.core.launcher.terminate(&key)
 }
@@ -206,7 +206,7 @@ pub async fn catalog_loader(
     core.components.catalog(loader, unstable).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn java_list(state: State<'_, AppState>) -> JavaList {
     state.core.java_settings.list()
 }
@@ -240,7 +240,7 @@ pub async fn java_scan(state: State<'_, AppState>) -> AppResult<JavaList> {
     Ok(core.java_settings.list())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_info() -> MemoryInfo {
     MemoryInfo::from(MemoryLimits::detect())
 }
