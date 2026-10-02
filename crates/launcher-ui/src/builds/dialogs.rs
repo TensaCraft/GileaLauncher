@@ -233,8 +233,10 @@ pub struct BuildMenu {
 }
 
 impl BuildMenu {
+    /// The menu outlives the row that opened it (a game starting or stopping redraws the row), so
+    /// everything the choice needs is taken now: nothing the row owns is read afterwards.
     pub fn open(&self, build: BuildDto, x: i32, y: i32) {
-        let actions = self.parts.with_untracked(|p| p.build_actions.clone());
+        let Some(actions) = self.parts.try_with_untracked(|p| p.build_actions.clone()) else { return };
         let entries = build_menu_items_with(&build, &actions)
             .into_iter()
             .map(|item| match item {
@@ -246,10 +248,10 @@ impl BuildMenu {
             })
             .collect();
         let this = *self;
-        self.menu.open_with(x, y, entries, move |id| this.run(&id, build.clone()));
+        self.menu.open_with(x, y, entries, move |id| this.run(&id, build.clone(), &actions));
     }
 
-    fn run(&self, id: &str, build: BuildDto) {
+    fn run(&self, id: &str, build: BuildDto, actions: &[ui_kit::module::ModuleBuildAction]) {
         match id {
             "play" => self.flow.start(build),
             "copy" => self.dialogs.copy(build),
@@ -260,8 +262,7 @@ impl BuildMenu {
             }
             "delete" => self.dialogs.delete(build),
             other => {
-                let action =
-                    self.parts.with_untracked(|p| p.build_actions.iter().copied().find(|a| a.id == other));
+                let action = actions.iter().copied().find(|a| a.id == other);
                 match action.as_ref().map(menu_run) {
                     Some(MenuRun::Open(open)) => open(build),
                     Some(MenuRun::Command(module, command)) => {
