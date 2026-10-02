@@ -10,7 +10,6 @@ use launcher_shared::{
     UpdateStatus, names,
 };
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_opener::OpenerExt;
 
 /// How often a pending close checks whether operations have finished.
 const CLOSE_POLL: Duration = Duration::from_millis(250);
@@ -106,7 +105,7 @@ impl EventSink for TauriSink {
             Some(Leave::ToTray) => crate::tray::hide(&self.app),
             None => {}
         }
-        if comes_back_on(event) && crate::tray::hidden(&self.app) {
+        if comes_back_on(event) && crate::tray::hidden() {
             crate::tray::restore(&self.app);
         }
     }
@@ -133,7 +132,7 @@ impl UrlOpener for TauriOpener {
             tracing::warn!("Refusing to open a non-https address in the browser");
             return false;
         }
-        match self.app.opener().open_url(url, None::<&str>) {
+        match crate::commands::open_link(&self.app, url) {
             Ok(()) => true,
             Err(e) => {
                 tracing::warn!("Unable to open the browser: {e}");

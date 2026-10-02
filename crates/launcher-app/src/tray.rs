@@ -5,6 +5,7 @@
 //! libayatana-appindicator) the window is minimized instead.
 
 use std::panic::AssertUnwindSafe;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use launcher_shared::GameStartAction;
 use tauri::menu::{Menu, MenuItem};
@@ -16,6 +17,10 @@ use crate::commands::AppState;
 const TRAY_ID: &str = "main";
 const MAIN_WINDOW: &str = "main";
 
+/// The window is hidden in the tray. Kept apart from the tray icon itself, which only the main
+/// thread may touch (a game's watcher asks too).
+static HIDDEN: AtomicBool = AtomicBool::new(false);
+
 /// The user chose the tray over quitting.
 pub fn wanted(app: &AppHandle) -> bool {
     app.try_state::<AppState>()
@@ -23,8 +28,8 @@ pub fn wanted(app: &AppHandle) -> bool {
 }
 
 /// The window is hidden in the tray now.
-pub fn hidden(app: &AppHandle) -> bool {
-    app.tray_by_id(TRAY_ID).is_some()
+pub fn hidden() -> bool {
+    HIDDEN.load(Ordering::SeqCst)
 }
 
 /// Hides the window into a tray icon.
@@ -32,7 +37,7 @@ pub fn hide(app: &AppHandle) {
     let handle = app.clone();
     let done = app.run_on_main_thread(move || {
         let window = handle.get_webview_window(MAIN_WINDOW);
-        if !hidden(&handle) {
+        if handle.tray_by_id(TRAY_ID).is_none() {
             // A tray library that is missing panics inside it: the window is minimized instead.
             let built = std::panic::catch_unwind(AssertUnwindSafe(|| build(&handle)));
             if !matches!(built, Ok(Ok(()))) {
@@ -46,6 +51,7 @@ pub fn hide(app: &AppHandle) {
         if let Some(window) = &window {
             let _ = window.hide();
         }
+        HIDDEN.store(true, Ordering::SeqCst);
         tracing::info!("The launcher is hidden in the tray");
     });
     if let Err(e) = done {
@@ -53,14 +59,22 @@ pub fn hide(app: &AppHandle) {
     }
 }
 
-/// Brings the window back (shown, not minimized, focused) and takes the tray icon away.
+/// Brings the window back (shown, not minimized, focused) and takes the tray icon away, on the main
+/// thread (a game's watcher or a second start may ask from another).
 pub fn restore(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+    let handle = app.clone();
+    let done = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window(MAIN_WINDOW) {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        let _ = handle.remove_tray_by_id(TRAY_ID);
+        HIDDEN.store(false, Ordering::SeqCst);
+    });
+    if let Err(e) = done {
+        tracing::warn!("The launcher cannot come back from the tray: {e}");
     }
-    let _ = app.remove_tray_by_id(TRAY_ID);
 }
 
 /// The launcher's language now.

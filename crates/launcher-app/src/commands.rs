@@ -162,12 +162,36 @@ pub fn open_path(app: AppHandle, path: String) -> AppResult<()> {
 }
 
 /// Opens folder `dir` in the system file manager (on Linux over D-Bus, see
-/// `launcher_core::platform::folder`), the system opener when that fails.
+/// `launcher_core::platform::open`), the system opener when that fails.
 pub fn open_folder(app: &AppHandle, dir: &std::path::Path) -> AppResult<()> {
-    launcher_core::platform::folder::open_folder(dir, |dir| {
-        app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
-    })
-    .map_err(|e| AppError::new(ErrorCode::Io, e))
+    launcher_core::platform::open::open_folder(dir, |dir| open_file(app, dir))
+        .map_err(|e| AppError::new(ErrorCode::Io, e))
+}
+
+/// Opens a file or a folder in its program; on Linux without the AppImage's environment.
+pub fn open_file(app: &AppHandle, path: &std::path::Path) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app;
+        launcher_core::platform::open::open_detached(path.as_os_str())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+    }
+}
+
+/// Opens a link in the browser; on Linux without the AppImage's environment.
+pub fn open_link(app: &AppHandle, url: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app;
+        launcher_core::platform::open::open_detached(url.as_ref())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+    }
 }
 
 /// The launcher log for the in-app viewer.
@@ -203,14 +227,14 @@ pub fn revealable_file(path: &str) -> AppResult<std::path::PathBuf> {
     Ok(file)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_url(app: AppHandle, url: String) -> AppResult<()> {
     if !url.starts_with("https://") {
         return Err(
             AppError::new(ErrorCode::InvalidInput, "only https links can be opened").with_param("url", url)
         );
     }
-    app.opener().open_url(&url, None::<&str>).map_err(|e| AppError::new(ErrorCode::Io, e.to_string()))
+    open_link(&app, &url).map_err(|e| AppError::new(ErrorCode::Io, e))
 }
 
 /// A module's command: one dispatcher instead of a Tauri plugin per module.

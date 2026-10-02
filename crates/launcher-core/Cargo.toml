@@ -53,6 +53,7 @@ libc.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus.workspace = true
 url.workspace = true
+open.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true

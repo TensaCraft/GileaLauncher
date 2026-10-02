@@ -13,6 +13,7 @@ fn main() {
         "args": args,
         "cwd": cwd,
         "java_tool_options": std::env::var("JAVA_TOOL_OPTIONS").ok(),
+        "jdk_java_options": std::env::var("JDK_JAVA_OPTIONS").ok(),
         "dri_prime": std::env::var("DRI_PRIME").ok(),
     });
     let _ = std::fs::write("fake-game.json", record.to_string());

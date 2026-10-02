@@ -38,6 +38,7 @@ fn the_game_runs_in_its_folder_with_output_in_the_launch_log() {
     let env = vec![
         ("DRI_PRIME".to_string(), "1".to_string()),
         ("JAVA_TOOL_OPTIONS".to_string(), "-Xmx1M".to_string()),
+        ("JDK_JAVA_OPTIONS".to_string(), "-XX:+UseZGC".to_string()),
     ];
     let argv = vec![fake_game().to_string_lossy().into_owned(), "-Dfake.exit=3".into(), "Main".into()];
     let command = GameCommand::new(argv, &game, env, Some(log.clone()));
@@ -53,6 +54,7 @@ fn the_game_runs_in_its_folder_with_output_in_the_launch_log() {
     assert_eq!(record["args"], json!(["-Dfake.exit=3", "Main"]));
     assert_eq!(record["dri_prime"], json!("1"));
     assert_eq!(record["java_tool_options"], Value::Null, "Java option variables are removed");
+    assert_eq!(record["jdk_java_options"], Value::Null, "the Java 9+ launcher's one too");
     assert_eq!(fs::canonicalize(record["cwd"].as_str().unwrap()).unwrap(), fs::canonicalize(&game).unwrap());
     let text = fs::read_to_string(&log).unwrap();
     assert!(

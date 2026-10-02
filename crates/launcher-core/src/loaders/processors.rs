@@ -200,8 +200,8 @@ pub trait ProcessorRunner: Send + Sync {
     fn run(&self, java: &Path, call: &ProcessorCall, cwd: &Path) -> Result<(), String>;
 }
 
-/// `java -cp <classpath> <Main-Class> <args>` without a console window; `JAVA_TOOL_OPTIONS` and
-/// `_JAVA_OPTIONS` are not passed on.
+/// `java -cp <classpath> <Main-Class> <args>` without a console window, the JVM's global options
+/// (`JAVA_OPTION_VARIABLES`) or the AppImage's environment.
 pub struct JavaProcessorRunner;
 
 impl ProcessorRunner for JavaProcessorRunner {
@@ -216,6 +216,7 @@ impl ProcessorRunner for JavaProcessorRunner {
             .args(&call.args)
             .current_dir(cwd)
             .stdin(Stdio::null());
+        crate::platform::child_env::clean(&mut command);
         for key in JAVA_OPTION_VARIABLES {
             command.env_remove(key);
         }

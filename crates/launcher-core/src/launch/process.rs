@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 pub const LAUNCH_LOG: &str = "launch.log";
-pub const JAVA_OPTION_VARIABLES: [&str; 2] = ["JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS"];
+/// The JVM's global options from the environment (`JDK_JAVA_OPTIONS`: the Java 9+ launcher's): the
+/// game and the installers run with their own options only.
+pub const JAVA_OPTION_VARIABLES: [&str; 3] = ["JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS"];
 pub const LOG_TAIL_LINES: usize = 40;
 pub const LOG_TAIL_BYTES: u64 = 256 * 1024;
 /// Files older than the launch by more than this belong to an earlier run.
@@ -77,6 +79,8 @@ impl Spawner for SystemSpawner {
     fn spawn(&self, c: &GameCommand) -> io::Result<Box<dyn GameProcess>> {
         let mut command = Command::new(&c.program);
         command.args(&c.args).current_dir(&c.cwd).stdin(Stdio::null());
+        // The game opens folders and links itself (xdg-open): not with the AppImage's environment.
+        crate::platform::child_env::clean(&mut command);
         for (key, value) in &c.env {
             command.env(key, value);
         }

@@ -5,7 +5,6 @@ use std::path::Path;
 use launcher_core::content::screenshots::ScreenshotFile;
 use launcher_shared::{AppError, AppResult, ContentKind, ContentList, ErrorCode, ScreenshotDto};
 use tauri::{AppHandle, State};
-use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::AppState;
 use crate::screenshot_protocol::screenshot_url;
@@ -70,9 +69,7 @@ pub fn content_open_dir(
 
 /// Opens a file (a screenshot) in its program.
 fn open(app: &AppHandle, path: &Path) -> AppResult<()> {
-    app.opener()
-        .open_path(path.to_string_lossy(), None::<&str>)
-        .map_err(|e| AppError::new(ErrorCode::Io, e.to_string()))
+    crate::commands::open_file(app, path).map_err(|e| AppError::new(ErrorCode::Io, e))
 }
 
 fn shots(key: &str, files: Vec<ScreenshotFile>) -> Vec<ScreenshotDto> {
