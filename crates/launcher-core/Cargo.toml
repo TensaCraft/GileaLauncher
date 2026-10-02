@@ -1,0 +1,79 @@
+[package]
+name = "launcher-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Trusts an update server on this machine (the mock GitHub): the tests and the `mock-updates`
+# profile only.
+mock-updates = []
+
+[dependencies]
+launcher-shared.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio = { workspace = true, features = ["net", "io-util"] }
+dirs.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+sha2.workspace = true
+hex.workspace = true
+fernet.workspace = true
+md-5.workspace = true
+base64.workspace = true
+image.workspace = true
+rodio.workspace = true
+hound.workspace = true
+getrandom.workspace = true
+tokio-util.workspace = true
+fs4.workspace = true
+sha1.workspace = true
+zip.workspace = true
+toml.workspace = true
+lzma-rs.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+# The tests talk to a mock GitHub on this machine.
+launcher-core = { path = ".", features = ["mock-updates"] }
+tempfile.workspace = true
+mock-github.workspace = true
+axum.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+mslnk.workspace = true
+
+[[bin]]
+name = "update-fixture"
+path = "src/bin/update-fixture.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "install"
+path = "src/bin/install.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fake-game"
+path = "src/bin/fake-game.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "launch"
+path = "src/bin/launch.rs"
+test = false
+doc = false

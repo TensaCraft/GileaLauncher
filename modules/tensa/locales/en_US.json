@@ -1,0 +1,8 @@
+{
+    "module_tensa_name": "Server builds",
+    "module_tensa_desc": "Catalog, installation and synchronization of TensaCraft server builds",
+    "server_builds_unavailable": "Server unavailable",
+    "settings_tab_tensa": "Tensa",
+    "tensa_settings_desc": "Settings of the Tensa module",
+    "tensa_added_content_synced_away": "This is a server build: mods and other content added to the folders the server manages will be removed at the next sync."
+}

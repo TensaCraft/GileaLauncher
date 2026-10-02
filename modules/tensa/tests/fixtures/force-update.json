@@ -1,0 +1,58 @@
+{
+  "manifest_version": 1,
+  "hash_algorithm": "sha256",
+  "summary": {
+    "manifest_hash": "d79e792e426f27c4b39e0a4377b407bc737a41e28328987a2c770a4eb3b136fe",
+    "directories_count": 1,
+    "returned_files_count": 2,
+    "affected_files_count": 2,
+    "total_size": 42948083,
+    "last_modified_at": "2026-09-23T07:13:10+00:00",
+    "last_modified_timestamp": 1790147590,
+    "include_directory_files": true
+  },
+  "directories": [
+    {
+      "path": "mods/",
+      "sync_scope": "directory",
+      "mode": "recursive",
+      "files_count": 2,
+      "total_size": 42948083,
+      "manifest_hash": "a3c4a7d4aa8aaaf05a45c377cbdb60c23d39dd2ff9d7aed58817f490e558af68",
+      "last_modified_at": "2026-09-23T07:13:10+00:00",
+      "last_modified_timestamp": 1790147590
+    }
+  ],
+  "files": [
+    {
+      "name": "badoptimizations.jar",
+      "size": 60760,
+      "type": "application/java-archive",
+      "path": "mods/",
+      "relative_path": "mods/badoptimizations.jar",
+      "force_update": true,
+      "force_update_locked": true,
+      "sha256": "b72d071777ebf832e7e441754385be06f942d08a8c3f5b9f317eb8c050490eaf",
+      "last_modified_at": "2026-09-23T07:12:59+00:00",
+      "last_modified_timestamp": 1790147579,
+      "download_url": "https://gigabait.uk/api/mods/download/tensa-lite?name=badoptimizations.jar&path=mods%2F",
+      "sync_scope": "directory",
+      "force_update_directory": "mods/"
+    },
+    {
+      "name": "bettergrassify.jar",
+      "size": 89214,
+      "type": "application/zip",
+      "path": "mods/",
+      "relative_path": "mods/bettergrassify.jar",
+      "force_update": true,
+      "force_update_locked": true,
+      "sha256": "eb88628b69aaa5029667cab63deb46a5149fb693901b2cf269edefb3d2a05c2a",
+      "last_modified_at": "2026-09-23T07:13:00+00:00",
+      "last_modified_timestamp": 1790147580,
+      "download_url": "https://gigabait.uk/api/mods/download/tensa-lite?name=bettergrassify.jar&path=mods%2F",
+      "sync_scope": "directory",
+      "force_update_directory": "mods/"
+    }
+  ]
+}

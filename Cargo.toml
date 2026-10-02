@@ -1,0 +1,109 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/launcher-shared",
+    "crates/launcher-core",
+    "crates/ui-kit",
+    "crates/launcher-ui",
+    "crates/launcher-app",
+    "crates/mock-github",
+    "modules/tensa",
+    "modules/modrinth",
+    "modules/curseforge",
+    "modules/backups",
+    "modules/reports",
+    "modules/diagnostics",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+authors = ["Launcher contributors"]
+repository = ""
+
+[workspace.dependencies]
+launcher-shared = { path = "crates/launcher-shared" }
+launcher-core = { path = "crates/launcher-core" }
+ui-kit = { path = "crates/ui-kit" }
+module-tensa = { path = "modules/tensa" }
+module-modrinth = { path = "modules/modrinth" }
+module-diagnostics = { path = "modules/diagnostics" }
+module-curseforge = { path = "modules/curseforge" }
+module-backups = { path = "modules/backups" }
+module-reports = { path = "modules/reports" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+dirs = "6"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+tauri = { version = "2.11", features = ["tray-icon"] }
+tauri-build = { version = "2.6", features = [] }
+tauri-plugin-single-instance = "2.4"
+tauri-plugin-dialog = "2.7"
+tauri-plugin-opener = "2.5"
+leptos = { version = "0.8", features = ["csr"] }
+leptos_router = "0.8"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
+clap = { version = "4", features = ["derive"] }
+toml = "1"
+anyhow = "1"
+regex = "1"
+sys-locale = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "charset", "form"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+sha2 = "0.10"
+hex = "0.4"
+secrecy = "0.10"
+mslnk = "0.1.8"
+mock-github = { path = "crates/mock-github" }
+axum = "0.8"
+futures-util = "0.3"
+libc = "0.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_RestartManager"] }
+fernet = { version = "0.2", default-features = false, features = ["rustcrypto"] }
+md-5 = "0.10"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
+hound = "3.5"
+getrandom = "0.3"
+tokio-util = "0.7"
+fs4 = "1.1"
+sha1 = "0.10"
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+lzma-rs = "0.3"
+
+# Dependencies optimised in dev builds too: hashing and unzipping a build's mods (sha2, zip) are
+# tens of times slower unoptimised, while the workspace's own crates stay quick to rebuild.
+[profile.dev.package."*"]
+opt-level = 3
+
+# CurseForge's fingerprint walks every byte of every mod in the module's own code.
+[profile.dev.package.module-curseforge]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.release.package.launcher-ui]
+opt-level = "z"
+
+# Release-like build for `cargo xtask mock-releases` (no debug assertions, but fast: no LTO).
+[profile.mock]
+inherits = "release"
+lto = false
+codegen-units = 16

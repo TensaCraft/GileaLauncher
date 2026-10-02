@@ -1,0 +1,51 @@
+[package]
+name = "launcher-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Launcher desktop application"
+
+[lib]
+name = "launcher_app_lib"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[features]
+# A plain `cargo build` embeds the frontend; `cargo xtask dev` turns default features off to load
+# the dev server.
+default = ["custom-protocol", "mod-modrinth", "mod-curseforge", "mod-backups", "mod-reports"]
+# Embeds the built frontend instead of loading the dev server.
+custom-protocol = ["tauri/custom-protocol"]
+# Trusts the update server on this machine (`cargo xtask mock-releases`); only profiles whose
+# `update_api` is local turn it on, and `cargo xtask build --release` refuses them.
+mock-updates = ["launcher-core/mock-updates"]
+mod-tensa = ["dep:module-tensa"]
+mod-modrinth = ["dep:module-modrinth"]
+mod-curseforge = ["dep:module-curseforge"]
+mod-backups = ["dep:module-backups"]
+mod-reports = ["dep:module-reports"]
+# Postponed until after the release: not in `--modules all`.
+mod-diagnostics = ["dep:module-diagnostics"]
+
+[dependencies]
+launcher-shared.workspace = true
+launcher-core.workspace = true
+tauri.workspace = true
+tauri-plugin-single-instance.workspace = true
+tauri-plugin-dialog.workspace = true
+tauri-plugin-opener.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+sys-locale.workspace = true
+module-tensa = { workspace = true, features = ["backend"], optional = true }
+module-modrinth = { workspace = true, features = ["backend"], optional = true }
+module-curseforge = { workspace = true, features = ["backend"], optional = true }
+module-backups = { workspace = true, features = ["backend"], optional = true }
+module-reports = { workspace = true, features = ["backend"], optional = true }
+module-diagnostics = { workspace = true, features = ["backend"], optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true

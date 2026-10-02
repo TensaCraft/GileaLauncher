@@ -1,0 +1,29 @@
+name: Guards
+
+# On every change, docs too: no API key and no brand where they must not be (xtask's guards). A
+# minute, where the full checks (ci.yml) take half an hour and run only when the code changes.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guards-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  guards:
+    name: Keys and brand
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: No API key, no brand out of place
+        run: cargo test -p xtask -- secrets brand

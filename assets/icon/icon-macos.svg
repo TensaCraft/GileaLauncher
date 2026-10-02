@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- The launcher's icon, with no brand: a cube of blocks. Rendered to PNG as a 1024 x 1024
+       headless Chromium screenshot with a transparent background, then turned into the app's
+       icons by `cargo xtask icons` (see docs/development.md). -->
+  <defs>
+    <radialGradient id="tile" cx="0.5" cy="0.42" r="0.75"><stop offset="0" stop-color="#1c2622"/><stop offset="0.65" stop-color="#111614"/><stop offset="1" stop-color="#0a0d0c"/></radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#3fe08a" stop-opacity="0.32"/><stop offset="1" stop-color="#3fe08a" stop-opacity="0"/></radialGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#a8f5c4"/><stop offset="1" stop-color="#55c983"/></linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3f9f66"/><stop offset="1" stop-color="#2c7c4c"/></linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#4fbd78"/><stop offset="1" stop-color="#2b8b50"/></linearGradient>
+    <linearGradient id="inner_left" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#2f8a53"/><stop offset="1" stop-color="#226a3f"/></linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#2c8c4f"/><stop offset="1" stop-color="#15592f"/></linearGradient>
+    <linearGradient id="inner_right" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#1d6a3c"/><stop offset="1" stop-color="#134b2a"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="14.8" stdDeviation="18.1" flood-color="#000" flood-opacity="0.55"/></filter>
+    <filter id="lift" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="0" stdDeviation="24.7" flood-color="#38d27e" flood-opacity="0.45"/></filter>
+  </defs>
+  <rect x="100.0" y="100.0" width="824" height="824" rx="185" fill="url(#tile)" filter="url(#shadow)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="3"/>
+  <circle cx="512.0" cy="520.2" r="395.5" fill="url(#glow)"/>
+  <g filter="url(#lift)">
+    <polygon points="512.0,207.1 647.6,285.4 512.0,363.6 376.4,285.4" fill="url(#top)"/>
+    <polygon points="647.6,285.4 783.2,363.6 647.6,441.9 512.0,363.6" fill="url(#top)"/>
+    <polygon points="376.4,285.4 512.0,363.6 376.4,441.9 240.8,363.6" fill="url(#top)"/>
+    <polygon points="512.0,520.2 647.6,598.5 512.0,676.8 376.4,598.5" fill="url(#floor)"/>
+    <polygon points="783.2,676.8 647.6,755.0 647.6,598.5 783.2,520.2" fill="url(#right)"/>
+    <polygon points="647.6,755.0 512.0,833.3 512.0,676.8 647.6,598.5" fill="url(#right)"/>
+    <polygon points="783.2,520.2 647.6,598.5 647.6,441.9 783.2,363.6" fill="url(#right)"/>
+    <polygon points="512.0,520.2 376.4,598.5 376.4,441.9 512.0,363.6" fill="url(#inner_right)"/>
+    <polygon points="240.8,676.8 376.4,755.0 376.4,598.5 240.8,520.2" fill="url(#left)"/>
+    <polygon points="376.4,755.0 512.0,833.3 512.0,676.8 376.4,598.5" fill="url(#left)"/>
+    <polygon points="240.8,520.2 376.4,598.5 376.4,441.9 240.8,363.6" fill="url(#left)"/>
+    <polygon points="512.0,520.2 647.6,598.5 647.6,441.9 512.0,363.6" fill="url(#inner_left)"/>
+  </g>
+    <polygon points="512.0,207.1 647.6,285.4 512.0,363.6 376.4,285.4" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="647.6,285.4 783.2,363.6 647.6,441.9 512.0,363.6" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="376.4,285.4 512.0,363.6 376.4,441.9 240.8,363.6" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="512.0,520.2 647.6,598.5 512.0,676.8 376.4,598.5" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="783.2,676.8 647.6,755.0 647.6,598.5 783.2,520.2" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="647.6,755.0 512.0,833.3 512.0,676.8 647.6,598.5" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="783.2,520.2 647.6,598.5 647.6,441.9 783.2,363.6" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="512.0,520.2 376.4,598.5 376.4,441.9 512.0,363.6" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="240.8,676.8 376.4,755.0 376.4,598.5 240.8,520.2" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="376.4,755.0 512.0,833.3 512.0,676.8 376.4,598.5" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="240.8,520.2 376.4,598.5 376.4,441.9 240.8,363.6" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="512.0,520.2 647.6,598.5 647.6,441.9 512.0,363.6" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.0" stroke-linejoin="round"/>
+    <polygon points="512.0,207.1 647.6,285.4 512.0,363.6 376.4,285.4" fill="url(#shine)"/>
+    <polygon points="647.6,285.4 783.2,363.6 647.6,441.9 512.0,363.6" fill="url(#shine)"/>
+    <polygon points="376.4,285.4 512.0,363.6 376.4,441.9 240.8,363.6" fill="url(#shine)"/>
+</svg>

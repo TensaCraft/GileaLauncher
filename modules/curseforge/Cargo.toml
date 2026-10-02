@@ -1,0 +1,48 @@
+[package]
+name = "module-curseforge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+backend = ["dep:launcher-core", "dep:reqwest", "dep:secrecy", "dep:serde", "dep:tokio", "dep:tracing", "dep:zip"]
+ui = ["dep:ui-kit"]
+# Plain HTTP files from this machine: the tests' fake CurseForge only (never an app build).
+test-servers = []
+
+[dependencies]
+launcher-shared.workspace = true
+serde_json.workspace = true
+launcher-core = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+secrecy = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+ui-kit = { workspace = true, optional = true }
+zip = { workspace = true, optional = true }
+
+[dev-dependencies]
+module-curseforge = { path = ".", features = ["test-servers"] }
+tempfile.workspace = true
+axum.workspace = true
+tokio = { workspace = true, features = ["net"] }
+sha1.workspace = true
+hex.workspace = true
+zip.workspace = true
+
+[[test]]
+name = "api"
+required-features = ["backend"]
+
+[[test]]
+name = "plan"
+required-features = ["backend"]
+
+[[test]]
+name = "service"
+required-features = ["backend"]
+
+[[test]]
+name = "packs"
+required-features = ["backend"]

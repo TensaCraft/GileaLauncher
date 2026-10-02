@@ -1,0 +1,22 @@
+# Rust / build output
+/target/
+**/target/
+/dist/
+**/dist/
+/.build/
+
+# Local launcher state used in dev mode
+/.dev/
+
+# Tauri generated schemas
+/crates/launcher-app/gen/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

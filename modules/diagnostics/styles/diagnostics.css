@@ -1,0 +1,11 @@
+/* Diagnosis: a finding, its log lines, the tab's actions */
+.finding { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: rgba(0, 0, 0, 0.18); }
+.finding + .finding { margin-top: 8px; }
+.finding__title { font-weight: 600; color: var(--text-1); }
+.finding__message { margin: 0; color: var(--text-2); line-height: 1.45; }
+.finding__evidence { margin: 0; padding: 8px 10px; max-height: 120px; overflow: auto; border-radius: var(--r-sm); background: rgba(0, 0, 0, 0.3); color: var(--text-3); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.finding__more { margin: 12px 0 4px; color: var(--text-2); }
+.finding__others { margin: 0; padding-left: 20px; color: var(--text-3); }
+.diagnostics { display: flex; flex-direction: column; gap: 14px; }
+.diagnostics__actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 12px; }
+.diagnostics__last { display: flex; flex-direction: column; gap: 8px; }

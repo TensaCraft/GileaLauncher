@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- The launcher's icon, with no brand: a cube of blocks. Rendered to PNG as a 1024 x 1024
+       headless Chromium screenshot with a transparent background, then turned into the app's
+       icons by `cargo xtask icons` (see docs/development.md). -->
+  <defs>
+    <radialGradient id="tile" cx="0.5" cy="0.42" r="0.75"><stop offset="0" stop-color="#1c2622"/><stop offset="0.65" stop-color="#111614"/><stop offset="1" stop-color="#0a0d0c"/></radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#3fe08a" stop-opacity="0.32"/><stop offset="1" stop-color="#3fe08a" stop-opacity="0"/></radialGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#a8f5c4"/><stop offset="1" stop-color="#55c983"/></linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#3f9f66"/><stop offset="1" stop-color="#2c7c4c"/></linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#4fbd78"/><stop offset="1" stop-color="#2b8b50"/></linearGradient>
+    <linearGradient id="inner_left" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#2f8a53"/><stop offset="1" stop-color="#226a3f"/></linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#2c8c4f"/><stop offset="1" stop-color="#15592f"/></linearGradient>
+    <linearGradient id="inner_right" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#1d6a3c"/><stop offset="1" stop-color="#134b2a"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="16.7" stdDeviation="20.4" flood-color="#000" flood-opacity="0.55"/></filter>
+    <filter id="lift" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="0" stdDeviation="27.8" flood-color="#38d27e" flood-opacity="0.45"/></filter>
+  </defs>
+  <rect x="48.0" y="48.0" width="928" height="928" rx="210" fill="url(#tile)" filter="url(#shadow)"/>
+  <rect x="49.5" y="49.5" width="925" height="925" rx="208.5" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="3"/>
+  <circle cx="512.0" cy="520.2" r="445.4" fill="url(#glow)"/>
+  <g filter="url(#lift)">
+    <polygon points="512.0,167.6 664.7,255.7 512.0,343.9 359.3,255.7" fill="url(#top)"/>
+    <polygon points="664.7,255.7 817.4,343.9 664.7,432.0 512.0,343.9" fill="url(#top)"/>
+    <polygon points="359.3,255.7 512.0,343.9 359.3,432.0 206.6,343.9" fill="url(#top)"/>
+    <polygon points="512.0,520.2 664.7,608.4 512.0,696.5 359.3,608.4" fill="url(#floor)"/>
+    <polygon points="817.4,696.5 664.7,784.7 664.7,608.4 817.4,520.2" fill="url(#right)"/>
+    <polygon points="664.7,784.7 512.0,872.8 512.0,696.5 664.7,608.4" fill="url(#right)"/>
+    <polygon points="817.4,520.2 664.7,608.4 664.7,432.0 817.4,343.9" fill="url(#right)"/>
+    <polygon points="512.0,520.2 359.3,608.4 359.3,432.0 512.0,343.9" fill="url(#inner_right)"/>
+    <polygon points="206.6,696.5 359.3,784.7 359.3,608.4 206.6,520.2" fill="url(#left)"/>
+    <polygon points="359.3,784.7 512.0,872.8 512.0,696.5 359.3,608.4" fill="url(#left)"/>
+    <polygon points="206.6,520.2 359.3,608.4 359.3,432.0 206.6,343.9" fill="url(#left)"/>
+    <polygon points="512.0,520.2 664.7,608.4 664.7,432.0 512.0,343.9" fill="url(#inner_left)"/>
+  </g>
+    <polygon points="512.0,167.6 664.7,255.7 512.0,343.9 359.3,255.7" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="664.7,255.7 817.4,343.9 664.7,432.0 512.0,343.9" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="359.3,255.7 512.0,343.9 359.3,432.0 206.6,343.9" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="512.0,520.2 664.7,608.4 512.0,696.5 359.3,608.4" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="817.4,696.5 664.7,784.7 664.7,608.4 817.4,520.2" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="664.7,784.7 512.0,872.8 512.0,696.5 664.7,608.4" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="817.4,520.2 664.7,608.4 664.7,432.0 817.4,343.9" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="512.0,520.2 359.3,608.4 359.3,432.0 512.0,343.9" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="206.6,696.5 359.3,784.7 359.3,608.4 206.6,520.2" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="359.3,784.7 512.0,872.8 512.0,696.5 359.3,608.4" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="206.6,520.2 359.3,608.4 359.3,432.0 206.6,343.9" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="512.0,520.2 664.7,608.4 664.7,432.0 512.0,343.9" fill="none" stroke="#06200f" stroke-opacity="0.55" stroke-width="7.9" stroke-linejoin="round"/>
+    <polygon points="512.0,167.6 664.7,255.7 512.0,343.9 359.3,255.7" fill="url(#shine)"/>
+    <polygon points="664.7,255.7 817.4,343.9 664.7,432.0 512.0,343.9" fill="url(#shine)"/>
+    <polygon points="359.3,255.7 512.0,343.9 359.3,432.0 206.6,343.9" fill="url(#shine)"/>
+</svg>

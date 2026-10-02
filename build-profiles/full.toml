@@ -1,0 +1,18 @@
+[profile]
+name = "full"
+modules = ["tensa", "modrinth", "curseforge", "backups", "reports"]
+
+[branding]
+app_name = "GileaLauncher"
+identifier = "com.gilealauncher"
+edition = "tensa"
+support_url = "https://discord.com/invite/mftAjQA4Pp"
+issues_url = "https://github.com/TensaCraft/GileaLauncher/issues"
+update_repo = "TensaCraft/GileaLauncher"
+ms_client_id = "7181ef73-10e0-4354-9984-8b8343f1513d"
+
+[modules.reports]
+endpoint = "https://gigabait.uk/api/mods/launcher/logs"
+
+[modules.tensa]
+api_base = "https://gigabait.uk/api/mods"

@@ -1,0 +1,12 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+[watch]
+watch = ["src", "styles", "index.html", "../ui-kit", "../../assets", "../../modules"]
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 1420
+open = false
+ws_protocol = "ws"

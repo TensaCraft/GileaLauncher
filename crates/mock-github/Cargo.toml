@@ -1,0 +1,22 @@
+[package]
+name = "mock-github"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Local imitation of the GitHub Releases API for Launcher update tests"
+
+[dependencies]
+axum.workspace = true
+tokio = { workspace = true, features = ["net"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+futures-util.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+rustls.workspace = true
+tempfile.workspace = true

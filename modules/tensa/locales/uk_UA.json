@@ -1,0 +1,8 @@
+{
+    "module_tensa_name": "Серверні збірки",
+    "module_tensa_desc": "Каталог, встановлення та синхронізація збірок серверу TensaCraft",
+    "server_builds_unavailable": "Сервер недоступний",
+    "settings_tab_tensa": "Tensa",
+    "tensa_settings_desc": "Налаштування модуля Tensa",
+    "tensa_added_content_synced_away": "Це збірка сервера: моди й інший вміст, додані в теки, якими керує сервер, зникнуть після наступної синхронізації."
+}

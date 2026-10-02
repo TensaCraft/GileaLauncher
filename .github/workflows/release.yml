@@ -1,0 +1,194 @@
+name: Release
+
+# Builds every edition (the profiles with an update repository) on Windows, Linux and macOS and
+# uploads the files to the release, named the way the launcher's updater looks for them.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: Mark as a pre-release
+        type: boolean
+        default: false
+      draft:
+        description: Create as a draft
+        type: boolean
+        default: false
+      dry_run:
+        description: Only build and smoke-test every package (no tag, no release)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  meta:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      title: ${{ steps.meta.outputs.title }}
+      editions: ${{ steps.meta.outputs.editions }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Version, tag and editions
+        id: meta
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          tag="$(cargo xtask release-meta --field tag)"
+          if [ -n "$RELEASE_TAG" ]; then
+            cargo xtask release-meta --check-tag "$RELEASE_TAG"
+            tag="$RELEASE_TAG"
+          elif [ "$DRY_RUN" != "true" ]; then
+            # A manual release never rebuilds a published tag from other code.
+            cargo xtask release-meta --check-new-tag "$tag"
+          fi
+          title="$(cargo xtask release-meta --field title)"
+          prerelease="$(cargo xtask release-meta --field prerelease)"
+          editions="$(cargo xtask release-meta --editions)"
+          {
+            echo "tag=$tag"
+            echo "title=$title"
+            echo "prerelease=$prerelease"
+            echo "editions=$editions"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.edition.edition }} (${{ matrix.os }})
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+        edition: ${{ fromJSON(needs.meta.outputs.editions) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libasound2-dev patchelf libfuse2 file
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'wasm32-unknown-unknown,aarch64-apple-darwin,x86_64-apple-darwin' || 'wasm32-unknown-unknown' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.edition.edition }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk,tauri-cli@2
+      - name: Package
+        run: cargo xtask package --profile ${{ matrix.edition.profile }}
+        env:
+          # The CurseForge API key (a repository secret) reaches this step only; xtask keeps it out
+          # of the interface build. rust-cache never stores workspace crates, so it stays out of the cache.
+          CURSEFORGE_API_KEY: ${{ secrets.CURSE_FORGE_KEY }}
+      - name: Smoke test
+        shell: bash
+        env:
+          EDITION: ${{ matrix.edition.edition }}
+          LAUNCHER_APP_BASE: ${{ runner.temp }}/smoke
+        run: |
+          set -euo pipefail
+          cd dist/release
+          case "$RUNNER_OS" in
+            Windows)
+              ./*-"$EDITION".exe --smoke-test
+              ;;
+            Linux)
+              chmod +x ./*-"$EDITION"-x86_64 ./*-"$EDITION"-x86_64.AppImage
+              ./*-"$EDITION"-x86_64 --smoke-test
+              ./*-"$EDITION"-x86_64.AppImage --appimage-extract-and-run --smoke-test
+              ;;
+            macOS)
+              hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" ./*-"$EDITION"-universal.dmg
+              "$RUNNER_TEMP"/dmg/*.app/Contents/MacOS/* --smoke-test
+              hdiutil detach "$RUNNER_TEMP/dmg"
+              ;;
+          esac
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.edition.edition }}-${{ runner.os }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    name: Publish the release
+    needs: [meta, build]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: release-*
+          merge-multiple: true
+      - name: Linux files stay executable
+        run: chmod +x artifacts/*-x86_64 artifacts/*.AppImage
+      - name: Tag the commit (manual runs)
+        if: github.event_name != 'release'
+        shell: bash
+        env:
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists."
+          else
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
+      - name: Release notes
+        run: cargo xtask release-notes --tag ${{ needs.meta.outputs.tag }} --output RELEASE_NOTES.md && cat RELEASE_NOTES.md
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ github.event.release.name || needs.meta.outputs.title }}
+          draft: ${{ github.event_name != 'release' && inputs.draft }}
+          prerelease: ${{ needs.meta.outputs.prerelease == 'true' || (github.event_name == 'release' && github.event.release.prerelease) || (github.event_name != 'release' && inputs.prerelease) }}
+          body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: true
+          files: artifacts/*
+      - name: Delete this run's temporary artifacts
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[].id'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+          done

@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# Refuses commit messages that break the commit conventions. Checks kept outside the repository go in
+# .git/hooks/commit-msg.local.
+set -eu
+
+cargo xtask commit-msg "$1"
+
+local_hook="$(git rev-parse --git-common-dir)/hooks/commit-msg.local"
+if [ -f "$local_hook" ]; then
+  sh "$local_hook" "$1"
+fi

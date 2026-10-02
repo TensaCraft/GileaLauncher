@@ -1,0 +1,12 @@
+[profile]
+name = "core"
+modules = []
+
+[branding]
+app_name = "GileaLauncher"
+identifier = "com.gilealauncher"
+edition = "core"
+support_url = "https://discord.com/invite/mftAjQA4Pp"
+issues_url = "https://github.com/TensaCraft/GileaLauncher/issues"
+update_repo = ""
+ms_client_id = "7181ef73-10e0-4354-9984-8b8343f1513d"

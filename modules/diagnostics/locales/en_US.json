@@ -1,0 +1,8 @@
+{
+    "module_diagnostics_name": "Crash diagnostics",
+    "module_diagnostics_desc": "Explains why the game crashed and what to do about it",
+    "diagnostics_content_tab": "Diagnostics",
+    "diagnostic_no_diagnosis": "No crash after a launch yet.",
+    "diagnostic_last_title": "Last crash: {date}",
+    "launch_diagnostic_missing_mod_dependency": "{mod} needs {dependency}, which is not in this build. Install {dependency} with the mod manager, or remove {mod}."
+}

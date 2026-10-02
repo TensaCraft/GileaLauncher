@@ -1,0 +1,50 @@
+:root {
+  --primary: #17c3a2;
+  --primary-hi: #3fe0c0;
+  --primary-lo: #0f8d77;
+  --primary-light: #7be3d2;
+  --ok: #45c27e;
+  --danger: #f0524a;
+  --danger-text: #ff8c85;
+  --warn: #f2b544;
+  --info: #2db8da;
+
+  --text: #e6f6f2;
+  --text-2: #bed7d2;
+  --text-3: #8da7a2;
+  --text-4: #59706c;
+
+  --s-app: #0b1412;
+  --s-shell: rgba(10, 19, 17, 0.38);
+  --s-row: rgba(15, 28, 25, 0.84);
+  --s-sec: rgba(13, 25, 22, 0.86);
+  --s-input: rgba(7, 14, 12, 0.72);
+  --s-pop: rgba(12, 22, 20, 0.97);
+
+  --line: rgba(123, 227, 210, 0.09);
+  --line-2: rgba(123, 227, 210, 0.16);
+  --line-3: rgba(123, 227, 210, 0.32);
+  /* The edge of every control that sits in a row (buttons, actions, fields, segments). */
+  --line-ctl: rgba(123, 227, 210, 0.26);
+
+  --r-xs: 3px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  /* One height scale for every control that sits in a row: buttons, fields, selects, segmented. */
+  --h-sm: 28px;
+  --h-md: 36px;
+  --h-lg: 40px;
+
+  --f-ui: "Inter", "Segoe UI", system-ui, sans-serif;
+  --f-head: "Exo 2", "Inter", sans-serif;
+  --f-mono: "JetBrains Mono", Consolas, monospace;
+
+  --ring: 0 0 0 3px rgba(23, 195, 162, 0.18);
+  --cut: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  --shadow-pop: 0 18px 40px rgba(0, 0, 0, 0.55);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}

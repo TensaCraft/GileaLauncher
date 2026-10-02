@@ -1,0 +1,45 @@
+{
+  "name": "tensa-lite",
+  "slug": "tensa-lite",
+  "title": "Tensa",
+  "endpoint": "https://gigabait.uk/api/mods/tensa-lite",
+  "summary_endpoint": "https://gigabait.uk/api/mods/tensa-lite?include_summary=1&summary_only=1",
+  "archive_endpoint": "https://gigabait.uk/api/mods/archive/tensa-lite",
+  "download_endpoint": "https://gigabait.uk/api/mods/download/tensa-lite",
+  "client": {
+    "manifest_version": 2,
+    "id": "tensa-lite",
+    "name": "Tensa",
+    "description": "A server build (description shortened for the test).",
+    "minecraft_version": "26.3",
+    "loader_id": "fabric",
+    "loader_version": "0.19.5",
+    "server_host": "play.example",
+    "server_port": 25565,
+    "jvm_arguments": [
+      "-XX:+UseG1GC",
+      "-XX:+UseStringDeduplication",
+      "-XX:MaxGCPauseMillis=80",
+      "-XX:+ParallelRefProcEnabled"
+    ],
+    "gpu_preference": "discrete",
+    "image": "https://play.example/logo512.png",
+    "force_update_profile_fields": [
+      "id",
+      "name",
+      "description",
+      "minecraft_version",
+      "loader_id",
+      "loader_version",
+      "image"
+    ],
+    "preserve_rules": [],
+    "files_endpoint": "https://gigabait.uk/api/mods/tensa-lite",
+    "summary_endpoint": "https://gigabait.uk/api/mods/tensa-lite?include_summary=1&summary_only=1",
+    "archive_endpoint": "https://gigabait.uk/api/mods/archive/tensa-lite",
+    "force_update_endpoint": "https://gigabait.uk/api/mods/tensa-lite/force-update",
+    "download_endpoint": "https://gigabait.uk/api/mods/download/tensa-lite",
+    "file_hash_algorithm": "sha256",
+    "supports_conditional_requests": true
+  }
+}

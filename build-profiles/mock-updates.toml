@@ -1,0 +1,17 @@
+# Test build: launcher updates come from `cargo xtask mock-releases serve`. Never ship this profile.
+[profile]
+name = "mock-updates"
+modules = ["modrinth", "curseforge", "backups", "reports"]
+
+[branding]
+app_name = "GileaLauncher"
+identifier = "com.gilealauncher"
+edition = "standard"
+support_url = "https://discord.com/invite/mftAjQA4Pp"
+issues_url = "https://github.com/TensaCraft/GileaLauncher/issues"
+update_repo = "mock/launcher"
+update_api = "http://127.0.0.1:1430"
+ms_client_id = "7181ef73-10e0-4354-9984-8b8343f1513d"
+
+[modules.reports]
+endpoint = "https://gigabait.uk/api/mods/launcher/logs"

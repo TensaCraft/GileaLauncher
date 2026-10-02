@@ -1,0 +1,9 @@
+{
+    "module_reports_name": "Error reports",
+    "module_reports_desc": "Send crash and build problem reports",
+    "settings_tab_reports": "Reports",
+    "reports_settings_desc": "Error reports to the developers: your contact, so they can reach you",
+    "reports_attachments_title": "The report will attach",
+    "reports_no_attachments": "This build has no logs yet — your description and the launcher's log are sent",
+    "reports_alert_gone": "This alert's report is no longer available"
+}

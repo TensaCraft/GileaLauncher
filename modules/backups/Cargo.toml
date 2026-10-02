@@ -1,0 +1,31 @@
+[package]
+name = "module-backups"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+backend = ["dep:launcher-core", "dep:zip", "dep:chrono", "dep:tracing", "dep:tokio"]
+ui = ["dep:ui-kit", "dep:leptos", "dep:js-sys", "dep:wasm-bindgen"]
+
+[dependencies]
+launcher-shared.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zip = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+launcher-core = { workspace = true, optional = true }
+ui-kit = { workspace = true, optional = true }
+leptos = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
+
+[[test]]
+name = "commands"
+required-features = ["backend"]

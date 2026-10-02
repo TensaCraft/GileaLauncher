@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# Formatting, whitespace and clippy before each commit (LAUNCHER_SKIP_PRECOMMIT=1 skips them).
+# Checks kept outside the repository go in .git/hooks/pre-commit.local.
+set -eu
+
+cargo xtask hook pre-commit
+
+local_hook="$(git rev-parse --git-common-dir)/hooks/pre-commit.local"
+if [ -f "$local_hook" ]; then
+  sh "$local_hook"
+fi

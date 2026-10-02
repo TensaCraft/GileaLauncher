@@ -1,0 +1,34 @@
+[package]
+name = "launcher-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["mod-modrinth", "mod-curseforge", "mod-backups", "mod-reports"]
+mod-tensa = ["dep:module-tensa"]
+mod-modrinth = ["dep:module-modrinth"]
+mod-curseforge = ["dep:module-curseforge"]
+mod-backups = ["dep:module-backups"]
+mod-reports = ["dep:module-reports"]
+# Postponed until after the release: not in `--modules all`.
+mod-diagnostics = ["dep:module-diagnostics"]
+
+[dependencies]
+launcher-shared.workspace = true
+ui-kit.workspace = true
+leptos.workspace = true
+leptos_router.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = ["Window", "Navigator", "Location", "Document", "Element", "HtmlElement", "console", "Clipboard"] }
+console_error_panic_hook.workspace = true
+module-tensa = { workspace = true, features = ["ui"], optional = true }
+module-modrinth = { workspace = true, features = ["ui"], optional = true }
+module-curseforge = { workspace = true, features = ["ui"], optional = true }
+module-backups = { workspace = true, features = ["ui"], optional = true }
+module-reports = { workspace = true, features = ["ui"], optional = true }
+module-diagnostics = { workspace = true, features = ["ui"], optional = true }

@@ -1,0 +1,113 @@
+name: CI
+
+# The long checks run only when what is built changes: a change of the docs alone (README, docs/,
+# the licence) leaves them out. The guards (no key, no brand where they must not be) run on every
+# change in guards.yml.
+on:
+  push:
+    # Branches only: a tag (a release's) is code already checked on its branch.
+    branches: ['**']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.vscode/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/workflows/guards.yml'
+  # By hand too (Actions → CI → Run workflow), e.g. once its runs were cleaned away.
+  workflow_dispatch:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.vscode/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/workflows/guards.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  commits:
+    name: Commit messages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Every commit of the pull request follows the conventions
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          for sha in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            git log -1 --format=%B "$sha" > "$RUNNER_TEMP/message"
+            echo "$sha: $(head -n 1 "$RUNNER_TEMP/message")"
+            cargo xtask commit-msg "$RUNNER_TEMP/message"
+          done
+
+  check:
+    name: Check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libasound2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # Compiled crates are kept by their content between runs: the crates a change leaves alone
+      # are not compiled again. Not on Windows: there sccache cannot start rustc for a crate with a
+      # command line as long as web-sys's.
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        if: runner.os != 'Windows'
+        with:
+          disable_annotations: true
+      - name: Compiler cache on
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: fmt + clippy + tests
+        run: cargo xtask check
+      # The profiles and the app's start are the same Rust on every system: checked once, on Linux
+      # (the release still builds and starts every package on every system).
+      - name: Build core-only profile
+        if: runner.os == 'Linux'
+        run: cargo xtask build --profile core
+      - name: Build full profile
+        if: runner.os == 'Linux'
+        run: cargo xtask build --profile full
+      - name: Smoke test
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          LAUNCHER_DEV: "0"
+          LAUNCHER_APP_BASE: ${{ runner.temp }}/smoke
+        run: cargo run -p launcher-app -- --smoke-test
