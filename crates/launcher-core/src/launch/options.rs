@@ -74,7 +74,21 @@ pub fn server_address(options: &Map<String, Value>) -> Option<(String, u16)> {
         .or_else(|| options.get("serverHost").and_then(Value::as_str).map(str::to_string))
         .map(|h| h.trim().to_string())
         .filter(|h| !h.is_empty())?;
-    Some((host, port.or_else(|| number(options.get("serverPort"))).unwrap_or(DEFAULT_SERVER_PORT)))
+    let port = port.or_else(|| number(options.get("serverPort"))).unwrap_or(DEFAULT_SERVER_PORT);
+    Some(match host_port(&host) {
+        Some((host, typed)) => (host.to_string(), typed),
+        None => (host, port),
+    })
+}
+
+/// `host:port` typed into the host field (`[v6]:port` too); a bare IPv6 host has colons of its own.
+fn host_port(host: &str) -> Option<(&str, u16)> {
+    let (name, port) = host.rsplit_once(':')?;
+    let bracketed = name.starts_with('[') && name.ends_with(']');
+    if name.is_empty() || (name.contains(':') && !bracketed) {
+        return None;
+    }
+    Some((name, port.parse().ok()?))
 }
 
 /// `resolutionWidth`×`resolutionHeight` when `customResolution` is on (854×480 by default).
@@ -239,6 +253,14 @@ mod tests {
             Some(("c.example".into(), 25571))
         );
         assert_eq!(read(json!({"server": {"host": "  "}})), None);
+        // A port typed into the host field is the server's port, not a second one.
+        assert_eq!(
+            read(json!({"server": {"host": "play.x:25570", "port": 25565}})),
+            Some(("play.x".into(), 25570))
+        );
+        assert_eq!(read(json!({"server": "[::1]:25570"})), Some(("[::1]".into(), 25570)));
+        assert_eq!(read(json!({"server": "fe80::1"})), Some(("fe80::1".into(), 25565)), "a bare IPv6 host");
+        assert_eq!(read(json!({"server": "play.x:abc"})), Some(("play.x:abc".into(), 25565)));
         assert_eq!(read(json!({"serverPort": 1})), None);
         let size = |v: Value| resolution(v.as_object().unwrap());
         assert_eq!(
