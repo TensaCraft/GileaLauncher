@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the macOS app's Info.plist by Tauri. Java runs as the launcher's child, so macOS
+     asks for the microphone and the camera in the launcher's name: voice chat mods need them. -->
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Minecraft mods such as voice chat use the microphone.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Minecraft mods may use the camera.</string>
+</dict>
+</plist>

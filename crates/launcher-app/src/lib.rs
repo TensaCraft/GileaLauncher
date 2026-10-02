@@ -258,6 +258,15 @@ mod tests {
     }
 
     #[test]
+    fn macos_lets_the_game_ask_for_the_microphone_and_camera() {
+        // The game is the launcher's child: macOS asks with the launcher's Info.plist (voice chat mods).
+        let plist = include_str!("../Info.plist");
+        for key in ["NSMicrophoneUsageDescription", "NSCameraUsageDescription"] {
+            assert!(plist.contains(&format!("<key>{key}</key>")), "{key}");
+        }
+    }
+
+    #[test]
     fn the_launcher_draws_its_own_title_bar() {
         let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert_eq!(conf["app"]["windows"][0]["decorations"], serde_json::json!(false));
