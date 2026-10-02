@@ -40,22 +40,31 @@ impl SizeRotatingWriter {
         self.path.with_file_name(name)
     }
 
+    /// Starts a new log. The current one moves aside first: when another program holds it (a tail
+    /// tool on Windows), nothing changes and logging goes on in it until the next try, one
+    /// `max_bytes` later; no older log is lost and no line is dropped.
     fn rotate(&mut self) -> io::Result<()> {
         self.file.flush()?;
-        if self.backups == 0 {
-            self.file = OpenOptions::new().write(true).truncate(true).open(&self.path)?;
-        } else {
-            let _ = fs::remove_file(self.backup_path(self.backups));
-            for n in (1..self.backups).rev() {
-                let from = self.backup_path(n);
-                if from.exists() {
-                    fs::rename(&from, self.backup_path(n + 1))?;
-                }
-            }
-            fs::rename(&self.path, self.backup_path(1))?;
-            self.file = OpenOptions::new().create(true).append(true).open(&self.path)?;
-        }
         self.size = 0;
+        if self.backups == 0 {
+            if let Ok(file) = OpenOptions::new().write(true).truncate(true).open(&self.path) {
+                self.file = file;
+            }
+            return Ok(());
+        }
+        let aside = self.path.with_extension("log.rotating");
+        if fs::rename(&self.path, &aside).is_err() {
+            return Ok(());
+        }
+        let _ = fs::remove_file(self.backup_path(self.backups));
+        for n in (1..self.backups).rev() {
+            let from = self.backup_path(n);
+            if from.exists() {
+                let _ = fs::rename(&from, self.backup_path(n + 1));
+            }
+        }
+        let _ = fs::rename(&aside, self.backup_path(1));
+        self.file = OpenOptions::new().create(true).append(true).open(&self.path)?;
         Ok(())
     }
 }
@@ -221,6 +230,36 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::sync::{Arc, Mutex};
+
+    /// Another program holds the log open without letting it be renamed (a tail tool on Windows):
+    /// the older logs stay and nothing is dropped; the next rotation once it lets go works.
+    #[cfg(windows)]
+    #[test]
+    fn a_log_held_open_elsewhere_keeps_its_backups_and_every_line() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(LOG_FILE);
+        for n in 1..=3 {
+            fs::write(dir.path().join(format!("{LOG_FILE}.{n}")), format!("old {n}")).unwrap();
+        }
+        let mut w = SizeRotatingWriter::open(path.clone(), 100, 3, false).unwrap();
+        // FILE_SHARE_READ | FILE_SHARE_WRITE, no FILE_SHARE_DELETE: no rename while it is open.
+        let tail = fs::OpenOptions::new().read(true).share_mode(0x1 | 0x2).open(&path).unwrap();
+        for i in 0..6 {
+            writeln!(w, "line {i} {}", "x".repeat(40)).unwrap();
+        }
+        w.flush().unwrap();
+        for n in 1..=3 {
+            let kept = fs::read_to_string(dir.path().join(format!("{LOG_FILE}.{n}"))).unwrap();
+            assert_eq!(kept, format!("old {n}"), "backup {n} stays");
+        }
+        assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), 6, "every line is written");
+        drop(tail);
+        writeln!(w, "after {}", "y".repeat(90)).unwrap();
+        w.flush().unwrap();
+        assert_eq!(fs::read_to_string(dir.path().join(format!("{LOG_FILE}.1"))).unwrap().lines().count(), 6);
+        assert_eq!(fs::read_to_string(dir.path().join(format!("{LOG_FILE}.3"))).unwrap(), "old 2");
+    }
 
     #[test]
     fn rotates_by_size_and_keeps_three_backups() {
