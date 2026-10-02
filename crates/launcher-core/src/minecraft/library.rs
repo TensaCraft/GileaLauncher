@@ -91,6 +91,25 @@ fn entry_dest(entry: &Value, name: &str, libraries: &Path) -> AppResult<PathBuf>
     }
 }
 
+/// Forge's old Maven, which legacy Forge profiles (1.7.10, 1.12.2) still name.
+const OLD_FORGE_MAVEN: &str = "files.minecraftforge.net/maven";
+const FORGE_MAVEN: &str = "https://maven.minecraftforge.net";
+
+/// A library repository the downloader may reach: old profiles name theirs over plain `http`, and
+/// downloads go over `https` only (a local test server keeps its `http`). Forge's old Maven lives
+/// at `maven.minecraftforge.net` now.
+fn reachable_repo(repo: &str) -> String {
+    let Some(rest) = repo.strip_prefix("http://") else { return repo.to_string() };
+    let host = rest.split(['/', ':']).next().unwrap_or_default();
+    if matches!(host, "127.0.0.1" | "localhost") || rest.starts_with("[::1]") {
+        return repo.to_string();
+    }
+    match rest.strip_prefix(OLD_FORGE_MAVEN) {
+        Some(path) => format!("{FORGE_MAVEN}{path}"),
+        None => format!("https://{rest}"),
+    }
+}
+
 fn maven_url(repo: &str, relative: &Path) -> String {
     let parts: Vec<String> =
         relative.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
@@ -113,8 +132,9 @@ pub fn plan_libraries(
             continue;
         }
         let Some(name) = library.get("name").and_then(Value::as_str) else { continue };
-        let repo =
-            library.get("url").and_then(Value::as_str).filter(|u| !u.is_empty()).unwrap_or(default_repo);
+        let repo = reachable_repo(
+            library.get("url").and_then(Value::as_str).filter(|u| !u.is_empty()).unwrap_or(default_repo),
+        );
         let downloads = library.get("downloads");
         match downloads.and_then(|d| d.get("artifact")) {
             Some(artifact) => {
@@ -123,7 +143,7 @@ pub fn plan_libraries(
             }
             None if downloads.is_none() && library.get("natives").is_none() => {
                 let (dest, relative) = maven_dest(name, libraries_dir)?;
-                let mut task = DownloadTask::new(maven_url(repo, &relative), dest);
+                let mut task = DownloadTask::new(maven_url(&repo, &relative), dest);
                 if let Some(size) = library.get("size").and_then(Value::as_u64) {
                     task = task.size(size);
                 }
@@ -141,7 +161,7 @@ pub fn plan_libraries(
             Some(entry) => entry_task(entry, entry_dest(entry, &native_name, libraries_dir)?),
             None => {
                 let (dest, relative) = maven_dest(&native_name, libraries_dir)?;
-                Some(DownloadTask::new(maven_url(repo, &relative), dest))
+                Some(DownloadTask::new(maven_url(&repo, &relative), dest))
             }
         };
         let Some(task) = task else { continue };
@@ -243,6 +263,28 @@ mod tests {
         assert_eq!(natives_classifier(&lib, &windows()).as_deref(), Some("natives-windows-64"));
         let mac = GamePlatform { os: Os::MacOs, arch: GameArch::X64, os_version: String::new() };
         assert_eq!(natives_classifier(&lib, &mac), None);
+    }
+
+    #[test]
+    fn old_profiles_plain_http_repositories_are_asked_over_https() {
+        // Legacy Forge (1.7.10, 1.12.2) profiles name their libraries' repositories over http.
+        let libraries = vec![
+            json!({"name": "com.typesafe:config:1.2.1", "url": "http://files.minecraftforge.net/maven/"}),
+            json!({"name": "org.scala-lang:scala-library:2.11.1", "url": "http://repo.maven.apache.org/maven2/"}),
+            json!({"name": "a:local:1", "url": "http://127.0.0.1:8080/maven/"}),
+        ];
+        let plan = plan_libraries(&libraries, Path::new("L"), "https://libraries.minecraft.net", &windows())
+            .unwrap();
+        let urls: Vec<&str> = plan.tasks.iter().map(|t| t.url.as_str()).collect();
+        assert_eq!(
+            urls,
+            [
+                "https://maven.minecraftforge.net/com/typesafe/config/1.2.1/config-1.2.1.jar",
+                "https://repo.maven.apache.org/maven2/org/scala-lang/scala-library/2.11.1/scala-library-2.11.1.jar",
+                "http://127.0.0.1:8080/maven/a/local/1/local-1.jar",
+            ],
+            "Forge's old maven moved; a local test server stays as it is"
+        );
     }
 
     #[test]
