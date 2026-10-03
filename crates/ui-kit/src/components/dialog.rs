@@ -201,9 +201,13 @@ mod tests {
     }
 
     #[test]
-    fn a_full_dialog_fills_the_window_and_lets_its_body_flex() {
+    fn a_full_dialog_fills_the_window_below_its_buttons_and_lets_its_body_flex() {
+        // The window's own buttons stay above every layer and end 46px down: the dialog starts
+        // below them (top 60px with the backdrop's centring).
         let css = include_str!("../../styles/components.css");
-        assert!(css.contains(".dialog--full { width: 1100px; height: calc(100vh - 48px); }"));
+        assert!(
+            css.contains(".dialog--full { width: 1100px; height: calc(100vh - 88px); margin-top: 32px; }")
+        );
         assert!(css.contains(
             ".dialog--full .dialog__body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }"
         ));
