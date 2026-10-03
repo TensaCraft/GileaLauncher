@@ -159,6 +159,24 @@ pub fn crash_artifact(game_dir: &Path, launched_at: SystemTime) -> Option<PathBu
         .or_else(|| Some(game_dir.join("logs").join(LAUNCH_LOG)).filter(|p| fresh(p)))
 }
 
+/// What Java writes when the computer has no memory left for it.
+const OUT_OF_MEMORY: [&str; 3] = [
+    "There is insufficient memory for the Java Runtime Environment",
+    "Native memory allocation (malloc) failed",
+    "java.lang.OutOfMemoryError",
+];
+
+/// The game stopped for want of memory, by the end of the crash's own file or of the launch log
+/// (where Java prints it).
+pub fn ran_out_of_memory(game_dir: &Path, artifact: Option<&Path>) -> bool {
+    let launch_log = game_dir.join("logs").join(LAUNCH_LOG);
+    artifact
+        .into_iter()
+        .chain([launch_log.as_path()])
+        .filter_map(|path| log_tail(path).ok())
+        .any(|tail| OUT_OF_MEMORY.iter().any(|sign| tail.contains(sign)))
+}
+
 #[cfg(test)]
 pub(crate) mod fake {
     use std::time::Instant;

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 use launcher_shared::{GameEvent, GameState, Level, Text};
 
 use super::hooks::GameWatch;
-use super::process::{LAUNCH_LOG, SharedProcess, crash_artifact, log_tail};
+use super::process::{LAUNCH_LOG, SharedProcess, crash_artifact, log_tail, ran_out_of_memory};
 use super::registry::LaunchRegistry;
 use crate::feedback::{EventSink, FeedbackService, ReportContext, ReportKind};
 
@@ -75,7 +75,12 @@ fn crashed(
         tracing::error!("Last lines of {}:\n{tail}", path.display());
     }
     let shown = artifact.clone().unwrap_or_else(|| watch.game_dir.clone());
-    let message = Text::key("version_crashed_open_logs").param("path", shown.to_string_lossy());
+    let key = if ran_out_of_memory(&watch.game_dir, artifact.as_deref()) {
+        "version_crashed_out_of_memory"
+    } else {
+        "version_crashed_open_logs"
+    };
+    let message = Text::key(key).param("path", shown.to_string_lossy());
     // Every watch hears of it; one that told the user leaves the alert to the activity log.
     let told = watches.iter_mut().fold(false, |told, w| w.crashed(sink) | told);
     if told {
@@ -274,12 +279,44 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let latest = dir.path().join("logs").join("latest.log");
         std::fs::create_dir_all(latest.parent().unwrap()).unwrap();
-        std::fs::write(&latest, "java.lang.OutOfMemoryError").unwrap();
+        std::fs::write(&latest, "java.lang.NullPointerException").unwrap();
         let run = run(FakeProcess::exiting_after(1, Duration::from_millis(600), Some(1)), dir.path(), None);
         let log = Some(latest.to_string_lossy().into_owned());
         assert_eq!(run.state, GameState::Crashed { code: Some(1), early: false, log });
         let expected = Text::key("version_crashed_open_logs").param("path", latest.to_string_lossy());
         assert_eq!(crash_alerts(&run.recorder), [expected]);
+    }
+
+    #[test]
+    fn a_game_out_of_memory_is_told_so() {
+        // Two games of 16 GB each on a 32 GB computer: Java could not get memory and stopped. The
+        // alert says what to do rather than "an error".
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path().join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(
+            logs.join("latest.log"),
+            "[11:29:15] [Render thread/INFO] [Voxy/]: Creating new world engine",
+        )
+        .unwrap();
+        let hs_err = dir.path().join("hs_err_pid34608.log");
+        std::fs::write(
+            &hs_err,
+            "#
+# There is insufficient memory for the Java Runtime Environment to continue.
+# Native memory allocation (malloc) failed to allocate 984736 bytes.
+",
+        )
+        .unwrap();
+        let run = run(
+            FakeProcess::exiting_after(1, Duration::from_millis(600), Some(-1073740791)),
+            dir.path(),
+            None,
+        );
+        let expected = Text::key("version_crashed_out_of_memory").param("path", hs_err.to_string_lossy());
+        assert_eq!(crash_alerts(&run.recorder), [expected]);
+        let report = run.feedback.report_context(run.recorder.alerts.lock().unwrap()[0].id).unwrap();
+        assert_eq!(report.attachments[0], hs_err, "the reason goes with a report first");
     }
 
     #[test]
