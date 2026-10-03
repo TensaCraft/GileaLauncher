@@ -5,6 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use launcher_shared::{AppError, AppResult, ErrorCode};
+
 use super::inventory::ends_with_ci;
 
 /// The folder of a build's screenshots.
@@ -50,6 +52,75 @@ fn shot_at(name: String, path: PathBuf) -> Option<ScreenshotFile> {
 /// The MIME type of a screenshot file.
 pub fn image_type(name: &str) -> &'static str {
     if ends_with_ci(name, ".png") { "image/png" } else { "image/jpeg" }
+}
+
+/// The longest name (without its extension) a screenshot may be given.
+pub const NAME_MOST: usize = 120;
+/// Names Windows keeps for devices, with any extension.
+const DEVICES: [&str; 22] = [
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+    "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+];
+
+/// The file name a screenshot `old` gets when the user asks for `wanted`: trimmed, its own
+/// extension kept (typed again, it is not doubled). `FileNameInvalid` for a name no system takes.
+pub fn new_name(old: &str, wanted: &str) -> AppResult<String> {
+    let ext = old.rfind('.').map_or("", |at| &old[at..]);
+    let wanted = wanted.trim();
+    let stem = match wanted.len().checked_sub(ext.len()) {
+        Some(at)
+            if !ext.is_empty() && wanted.is_char_boundary(at) && wanted[at..].eq_ignore_ascii_case(ext) =>
+        {
+            wanted[..at].trim_end()
+        }
+        _ => wanted,
+    };
+    let bad_char = stem
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'));
+    let device = DEVICES.contains(&stem.to_ascii_lowercase().as_str());
+    if stem.is_empty()
+        || stem.chars().all(|c| c == '.')
+        || stem.ends_with(['.', ' '])
+        || bad_char
+        || device
+        || stem.chars().count() > NAME_MOST
+    {
+        return Err(AppError::new(ErrorCode::FileNameInvalid, format!("not a file name: {wanted:?}")));
+    }
+    Ok(format!("{stem}{ext}"))
+}
+
+/// Renames `shot` to the name `wanted` gives (`new_name`) beside it; another file of that name
+/// is never replaced (`FileNameTaken`). The same name changes nothing.
+pub fn rename_screenshot(shot: &ScreenshotFile, wanted: &str) -> AppResult<ScreenshotFile> {
+    let name = new_name(&shot.name, wanted)?;
+    if name == shot.name {
+        return Ok(shot.clone());
+    }
+    let to = shot.path.with_file_name(&name);
+    // A name that differs only in case is the same file on Windows and macOS: no collision then.
+    let same_file = name.eq_ignore_ascii_case(&shot.name) || name.to_lowercase() == shot.name.to_lowercase();
+    if !same_file && fs::symlink_metadata(&to).is_ok() {
+        return Err(AppError::new(ErrorCode::FileNameTaken, format!("{} exists", to.display()))
+            .with_param("name", &name));
+    }
+    fs::rename(&shot.path, &to).map_err(|e| {
+        AppError::new(ErrorCode::of_io(&e), format!("{}: {e}", shot.path.display()))
+            .with_param("name", &shot.name)
+    })?;
+    shot_at(name, to).ok_or_else(|| AppError::new(ErrorCode::NotFound, "the renamed screenshot is gone"))
+}
+
+/// The picture of `shot` as RGBA pixels, with its width and height (copying it to the
+/// clipboard).
+pub fn rgba(shot: &ScreenshotFile) -> AppResult<(u32, u32, Vec<u8>)> {
+    let picture = image::open(&shot.path).map_err(|e| {
+        AppError::new(ErrorCode::Unsupported, format!("{}: {e}", shot.path.display()))
+            .with_param("name", &shot.name)
+    })?;
+    let pixels = picture.to_rgba8();
+    Ok((pixels.width(), pixels.height(), pixels.into_raw()))
 }
 
 /// The screenshots in `<game>/screenshots`, newest first (then by name).
@@ -123,5 +194,71 @@ mod tests {
         ] {
             assert_eq!(find_screenshot(game.path(), name), None, "{name}");
         }
+    }
+
+    #[test]
+    fn a_new_name_keeps_the_picture_s_kind() {
+        assert_eq!(
+            renamed("2026-10-03_17.21.png", "  Аеродром на світанку "),
+            Ok("Аеродром на світанку.png".into())
+        );
+        assert_eq!(renamed("a.jpeg", "b.JPEG"), Ok("b.jpeg".into()), "a typed extension is not doubled");
+        assert_eq!(renamed("a.png", "b.jpg"), Ok("b.jpg.png".into()), "another kind stays part of the name");
+        for wanted in [
+            "",
+            "  ",
+            ".",
+            "..",
+            "a/b",
+            "a\\b",
+            "a:b",
+            "a*b",
+            "a?b",
+            "a\"b",
+            "a<b",
+            "a>b",
+            "a|b",
+            "tab\tname",
+            "CON",
+            "nul",
+            "Com1",
+            "LPT9",
+            "end.",
+            "end. ",
+        ] {
+            assert_eq!(renamed("a.png", wanted), Err(()), "{wanted:?}");
+        }
+        assert!(renamed("a.png", &"я".repeat(120)).is_ok());
+        assert_eq!(renamed("a.png", &"я".repeat(121)), Err(()));
+    }
+
+    fn renamed(old: &str, wanted: &str) -> Result<String, ()> {
+        new_name(old, wanted).map_err(|_| ())
+    }
+
+    #[test]
+    fn a_screenshot_is_renamed_beside_the_others_and_never_over_one() {
+        let game = tempfile::tempdir().unwrap();
+        let dir = game.path().join(SCREENSHOTS);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("a.png"), b"a").unwrap();
+        fs::write(dir.join("taken.png"), b"t").unwrap();
+        let shot = find_screenshot(game.path(), "a.png").unwrap();
+        let moved = rename_screenshot(&shot, "Мій кадр").unwrap();
+        assert_eq!(moved.name, "Мій кадр.png");
+        assert_eq!(fs::read(dir.join("Мій кадр.png")).unwrap(), b"a");
+        assert!(!dir.join("a.png").exists());
+        let err = rename_screenshot(&moved, "taken").unwrap_err();
+        assert_eq!(
+            (err.code, err.params.get("name").map(String::as_str)),
+            (ErrorCode::FileNameTaken, Some("taken.png"))
+        );
+        assert_eq!(fs::read(dir.join("taken.png")).unwrap(), b"t", "nothing replaced");
+        assert_eq!(rename_screenshot(&moved, "a/b").unwrap_err().code, ErrorCode::FileNameInvalid);
+        assert_eq!(
+            rename_screenshot(&moved, "Мій кадр").unwrap().name,
+            "Мій кадр.png",
+            "the same name is no change"
+        );
     }
 }

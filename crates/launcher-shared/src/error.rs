@@ -63,10 +63,14 @@ pub enum ErrorCode {
     ProviderFilesHeld,
     /// A game runs and less memory is free than the next one asks for.
     LowMemory,
+    /// A name a file cannot have (path characters, a device name, too long).
+    FileNameInvalid,
+    /// Another file already has the name.
+    FileNameTaken,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 54] = [
+    pub const ALL: [ErrorCode; 56] = [
         ErrorCode::Internal,
         ErrorCode::Io,
         ErrorCode::InvalidInput,
@@ -121,6 +125,8 @@ impl ErrorCode {
         ErrorCode::ProviderKeyRejected,
         ErrorCode::ProviderFilesHeld,
         ErrorCode::LowMemory,
+        ErrorCode::FileNameInvalid,
+        ErrorCode::FileNameTaken,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -179,6 +185,8 @@ impl ErrorCode {
             ErrorCode::ProviderKeyRejected => "provider_key_rejected",
             ErrorCode::ProviderFilesHeld => "provider_files_held",
             ErrorCode::LowMemory => "version_low_memory",
+            ErrorCode::FileNameInvalid => "file_name_invalid",
+            ErrorCode::FileNameTaken => "file_name_taken",
         }
     }
 

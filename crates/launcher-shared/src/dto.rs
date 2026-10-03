@@ -686,6 +686,23 @@ pub struct ScreenshotDto {
     pub modified_ms: Option<u64>,
     /// Where the page loads the picture from (the `shot` scheme).
     pub src: String,
+    /// Its thumbnail, 480 pixels wide (the same scheme).
+    #[serde(default)]
+    pub thumb: String,
+}
+
+/// One screenshot of one build (what the Screenshots page acts on several at once).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShotRef {
+    pub key: String,
+    pub name: String,
+}
+
+/// A build's screenshots, newest first (the Screenshots page).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildShots {
+    pub key: String,
+    pub shots: Vec<ScreenshotDto>,
 }
 
 #[cfg(test)]

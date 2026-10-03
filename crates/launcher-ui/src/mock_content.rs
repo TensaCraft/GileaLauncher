@@ -88,13 +88,15 @@ fn sample(kind: ContentKind) -> Vec<ContentItem> {
 }
 
 fn shot(name: &str, size: u64, minutes_ago: u64, color: &str) -> ScreenshotDto {
+    let src = format!(
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect width='16' height='9' fill='%23{color}'/%3E%3C/svg%3E"
+    );
     ScreenshotDto {
         name: name.into(),
         size,
         modified_ms: Some(1_790_000_000_000 - minutes_ago * 60_000),
-        src: format!(
-            "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect width='16' height='9' fill='%23{color}'/%3E%3C/svg%3E"
-        ),
+        thumb: src.clone(),
+        src,
     }
 }
 

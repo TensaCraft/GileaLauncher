@@ -53,6 +53,8 @@ tauri-build = { version = "2.6", features = [] }
 tauri-plugin-single-instance = "2.4"
 tauri-plugin-dialog = "2.7"
 tauri-plugin-opener = "2.5"
+# Puts a screenshot on the clipboard (the webview cannot write pictures there on every system).
+arboard = { version = "3", default-features = false, features = ["image-data"] }
 leptos = { version = "0.8", features = ["csr"] }
 leptos_router = "0.8"
 wasm-bindgen = "0.2"

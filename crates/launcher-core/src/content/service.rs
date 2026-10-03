@@ -18,7 +18,8 @@ use super::packs::{
     INCOMPATIBLE_RESOURCE_PACKS, RESOURCE_PACKS, legacy_pack_names, read_options_list, remove_options_entry,
     resourcepack_entry, write_options_list, write_properties,
 };
-use super::screenshots::{SCREENSHOTS, ScreenshotFile, find_screenshot, list_screenshots};
+use super::screenshots::{SCREENSHOTS, ScreenshotFile, find_screenshot, list_screenshots, rename_screenshot};
+use super::thumbs::Thumbs;
 use crate::feedback::FeedbackService;
 use crate::launch::options::{component_id, game_dir};
 use crate::lock::Coordinator;
@@ -31,6 +32,8 @@ pub struct ContentService {
     cache: MetadataCache,
     /// The backups' own: they never push the listed mods out of `cache`.
     backup_cache: MetadataCache,
+    /// Screenshot thumbnails for the Screenshots page.
+    thumbs: Thumbs,
 }
 
 fn io_error(path: &Path, e: io::Error) -> AppError {
@@ -135,6 +138,7 @@ impl ContentService {
         versions: Arc<VersionStore>,
         instances: Arc<Coordinator>,
         feedback: Arc<FeedbackService>,
+        thumbs_dir: PathBuf,
     ) -> ContentService {
         ContentService {
             versions,
@@ -142,6 +146,7 @@ impl ContentService {
             feedback,
             cache: MetadataCache::default(),
             backup_cache: MetadataCache::default(),
+            thumbs: Thumbs::new(thumbs_dir),
         }
     }
 
@@ -205,8 +210,60 @@ impl ContentService {
     pub fn delete_screenshot(&self, key: &str, name: &str) -> AppResult<Vec<ScreenshotFile>> {
         let shot = self.screenshot(key, name)?;
         fs::remove_file(&shot.path).map_err(|e| io_error(&shot.path, e).with_param("name", name))?;
+        self.thumbs.forget(&shot);
         self.feedback.info(Text::key("screenshot_deleted").param("name", name));
         self.screenshots(key)
+    }
+
+    /// Every build's screenshots, newest first, in the builds' order; builds with none are left
+    /// out (the Screenshots page).
+    pub fn all_screenshots(&self) -> Vec<(String, Vec<ScreenshotFile>)> {
+        self.versions
+            .list()
+            .iter()
+            .map(|build| (build.key.clone(), list_screenshots(&self.folder(build))))
+            .filter(|(_, shots)| !shots.is_empty())
+            .collect()
+    }
+
+    /// The thumbnail of screenshot `name` of build `key`, made the first time (blocking).
+    pub fn screenshot_thumb(&self, key: &str, name: &str) -> AppResult<PathBuf> {
+        self.thumbs.thumbnail(&self.screenshot(key, name)?)
+    }
+
+    /// Renames screenshot `name` of build `key` as the user asked (`screenshots::new_name`).
+    pub fn rename_screenshot(&self, key: &str, name: &str, wanted: &str) -> AppResult<ScreenshotFile> {
+        let shot = self.screenshot(key, name)?;
+        let renamed = rename_screenshot(&shot, wanted)?;
+        if renamed.name != shot.name {
+            self.thumbs.forget(&shot);
+        }
+        Ok(renamed)
+    }
+
+    /// Deletes the screenshots `items` (build key, file name) names; those not there or held are
+    /// skipped. How many went.
+    pub fn delete_screenshots(&self, items: &[(String, String)]) -> usize {
+        let deleted = items
+            .iter()
+            .filter(|(key, name)| {
+                let Ok(shot) = self.screenshot(key, name) else { return false };
+                match fs::remove_file(&shot.path) {
+                    Ok(()) => {
+                        self.thumbs.forget(&shot);
+                        true
+                    }
+                    Err(e) => {
+                        tracing::warn!("Screenshot {} was not deleted: {e}", shot.path.display());
+                        false
+                    }
+                }
+            })
+            .count();
+        if deleted > 0 {
+            self.feedback.info(Text::key("screenshots_deleted").param("count", deleted.to_string()));
+        }
+        deleted
     }
 
     /// `<game>/screenshots` of build `key`, created when missing.

@@ -24,8 +24,12 @@ fn world() -> World {
     fs::create_dir_all(&state).unwrap();
     let versions = Arc::new(VersionStore::open(&state, &mc));
     let instances = Arc::new(Coordinator::instances());
-    let service =
-        ContentService::new(versions.clone(), instances.clone(), FeedbackService::new(Arc::new(NullSink)));
+    let service = ContentService::new(
+        versions.clone(),
+        instances.clone(),
+        FeedbackService::new(Arc::new(NullSink)),
+        tmp.path().join("cache").join("thumbs"),
+    );
     World { _tmp: tmp, versions, instances, service }
 }
 
@@ -330,6 +334,45 @@ fn screenshots_are_listed_and_deleted() {
     );
     assert_eq!(w.service.screenshots_dir(&key).unwrap(), shots);
     assert_eq!(w.service.screenshots("ghost").unwrap_err().code, ErrorCode::VersionNotFound);
+}
+
+fn picture(path: &Path) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    image::RgbImage::from_pixel(960, 540, image::Rgb([40, 120, 200])).save(path).unwrap();
+}
+
+#[test]
+fn every_build_s_screenshots_are_listed_renamed_and_deleted_together() {
+    let w = world();
+    let (aero, aero_dir) = build(&w, "Aero", "Fabric", FABRIC);
+    let (_empty, _) = build(&w, "Empty", "Fabric", FABRIC);
+    let (zeta, zeta_dir) = build(&w, "Zeta", "Fabric", FABRIC);
+    picture(&aero_dir.join("screenshots/a.png"));
+    picture(&aero_dir.join("screenshots/b.png"));
+    picture(&zeta_dir.join("screenshots/z.png"));
+    let all = w.service.all_screenshots();
+    let listed: Vec<(&str, usize)> = all.iter().map(|(key, shots)| (key.as_str(), shots.len())).collect();
+    assert_eq!(listed, [(aero.as_str(), 2), (zeta.as_str(), 1)], "builds without screenshots are left out");
+
+    let thumb = w.service.screenshot_thumb(&aero, "a.png").unwrap();
+    assert_eq!(image::image_dimensions(&thumb).unwrap(), (480, 270));
+    let renamed = w.service.rename_screenshot(&aero, "a.png", "Світанок").unwrap();
+    assert_eq!(renamed.name, "Світанок.png");
+    assert!(!thumb.exists(), "the old name's thumbnail goes with it");
+    assert_eq!(
+        w.service.rename_screenshot(&aero, "Світанок.png", "b").unwrap_err().code,
+        ErrorCode::FileNameTaken
+    );
+
+    let asked = [
+        (aero.clone(), "Світанок.png".to_string()),
+        (zeta.clone(), "z.png".to_string()),
+        (zeta.clone(), "missing.png".to_string()),
+    ];
+    assert_eq!(w.service.delete_screenshots(&asked), 2, "what is not there is skipped");
+    let left: Vec<String> =
+        w.service.all_screenshots().into_iter().flat_map(|(_, s)| s).map(|s| s.name).collect();
+    assert_eq!(left, ["b.png"]);
 }
 
 fn versioned_mod(path: &Path, id: &str, version: &str) {

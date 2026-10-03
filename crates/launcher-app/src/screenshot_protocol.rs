@@ -20,6 +20,16 @@ pub fn screenshot_url(key: &str, name: &str, modified_ms: Option<u64>) -> String
     format!("{base}/{}/{}?v={}", url_escape(key), url_escape(name), modified_ms.unwrap_or(0))
 }
 
+/// The page's URL of the thumbnail of screenshot `name` of build `key` (`Thumbs`).
+pub fn thumbnail_url(key: &str, name: &str, modified_ms: Option<u64>) -> String {
+    format!("{}&thumb=1", screenshot_url(key, name, modified_ms))
+}
+
+/// Whether a request's query asks for the thumbnail.
+pub fn wants_thumb(query: Option<&str>) -> bool {
+    query.is_some_and(|q| q.split('&').any(|part| part == "thumb=1"))
+}
+
 /// The build key and file name of a request path `/<key>/<name>`.
 pub fn parse_path(path: &str) -> Option<(String, String)> {
     let (key, name) = path.strip_prefix('/')?.split_once('/')?;
@@ -30,14 +40,22 @@ fn status(code: u16) -> Response<Vec<u8>> {
     Response::builder().status(code).body(Vec::new()).unwrap_or_default()
 }
 
-/// The picture a request names (blocking): 404 for anything the build's list does not have.
+/// The picture a request names (blocking): 404 for anything the build's list does not have. A
+/// thumbnail that cannot be made is answered with the picture itself.
 pub fn respond(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let Some(state) = app.try_state::<AppState>() else { return status(503) };
     let Some((key, name)) = parse_path(request.uri().path()) else { return status(400) };
     let Ok(shot) = state.core.content.screenshot(&key, &name) else { return status(404) };
-    match std::fs::read(&shot.path) {
+    let thumb = wants_thumb(request.uri().query())
+        .then(|| state.core.content.screenshot_thumb(&key, &name))
+        .and_then(|made| made.inspect_err(|e| tracing::debug!("No thumbnail: {}", e.detail)).ok());
+    let (path, kind) = match &thumb {
+        Some(path) => (path.as_path(), "image/jpeg"),
+        None => (shot.path.as_path(), image_type(&shot.name)),
+    };
+    match std::fs::read(path) {
         Ok(bytes) => Response::builder()
-            .header("Content-Type", image_type(&shot.name))
+            .header("Content-Type", kind)
             .header("Cache-Control", "max-age=3600")
             .body(bytes)
             .unwrap_or_default(),
@@ -61,5 +79,14 @@ mod tests {
         for bad in ["", "/", "/only", "no-slash/x", "/a/%zz", "/%D0/x.png"] {
             assert_eq!(parse_path(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn a_thumbnail_is_asked_by_its_own_url() {
+        let thumb = thumbnail_url("a", "b.png", Some(7));
+        assert_eq!(thumb, format!("{}&thumb=1", screenshot_url("a", "b.png", Some(7))));
+        let query = thumb.split_once('?').map(|(_, q)| q);
+        assert!(wants_thumb(query));
+        assert!(!wants_thumb(Some("v=7")) && !wants_thumb(None) && !wants_thumb(Some("v=1&thumb=0")));
     }
 }

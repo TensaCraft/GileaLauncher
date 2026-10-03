@@ -86,7 +86,7 @@ fn update_error_codes_have_their_own_keys() {
     assert_eq!(ErrorCode::IntegrityMismatch.i18n_key(), "update_hash_mismatch");
     assert_eq!(ErrorCode::NoUpdateAsset.i18n_key(), "update_no_asset");
     assert_eq!(serde_json::to_value(ErrorCode::RateLimited).unwrap(), json!("rate_limited"));
-    assert_eq!(ErrorCode::ALL.len(), 54);
+    assert_eq!(ErrorCode::ALL.len(), 56);
     assert_eq!(
         (serde_json::to_value(ErrorCode::LowMemory).unwrap(), ErrorCode::LowMemory.i18n_key()),
         (json!("low_memory"), "version_low_memory")
@@ -501,6 +501,7 @@ fn screenshots_keep_their_wire_shape() {
         size: 2_048,
         modified_ms: Some(1_790_000_000_000),
         src: "http://shot.localhost/aero/2026-09-27_16.55.46.png?v=1".into(),
+        thumb: "http://shot.localhost/aero/2026-09-27_16.55.46.png?v=1&thumb=1".into(),
     };
     let v = serde_json::to_value(&shot).unwrap();
     assert_eq!((&v["modified_ms"], &v["size"]), (&json!(1_790_000_000_000u64), &json!(2_048)));
@@ -599,4 +600,24 @@ fn the_title_bar_names_what_it_asks_of_the_window() {
         names,
         [json!("look"), json!("minimize"), json!("maximize"), json!("close"), json!("tray"), json!("drag")]
     );
+}
+
+#[test]
+fn a_file_name_that_does_not_fit_or_is_taken_has_its_own_key() {
+    assert_eq!(ErrorCode::FileNameInvalid.i18n_key(), "file_name_invalid");
+    assert_eq!(ErrorCode::FileNameTaken.i18n_key(), "file_name_taken");
+    assert!(
+        ErrorCode::ALL.contains(&ErrorCode::FileNameInvalid)
+            && ErrorCode::ALL.contains(&ErrorCode::FileNameTaken)
+    );
+    assert_eq!(serde_json::to_value(ErrorCode::FileNameTaken).unwrap(), json!("file_name_taken"));
+}
+
+#[test]
+fn screenshots_carry_their_thumbnail_and_come_by_build() {
+    let old: launcher_shared::ScreenshotDto =
+        serde_json::from_value(json!({"name": "a.png", "size": 1, "modified_ms": null, "src": "s"})).unwrap();
+    assert_eq!(old.thumb, "", "an answer without thumbnails still reads");
+    let all = vec![launcher_shared::BuildShots { key: "aero".into(), shots: vec![old] }];
+    assert_eq!(serde_json::to_value(&all).unwrap()[0]["key"], json!("aero"));
 }

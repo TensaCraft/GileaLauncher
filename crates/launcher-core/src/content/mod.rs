@@ -8,3 +8,4 @@ pub mod jar;
 pub mod packs;
 pub mod screenshots;
 pub mod service;
+pub mod thumbs;

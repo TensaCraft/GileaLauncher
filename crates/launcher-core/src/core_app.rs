@@ -210,7 +210,12 @@ impl CoreApp {
             config.clone(),
             instances.clone(),
         ));
-        let content = Arc::new(ContentService::new(versions.clone(), instances.clone(), feedback.clone()));
+        let content = Arc::new(ContentService::new(
+            versions.clone(),
+            instances.clone(),
+            feedback.clone(),
+            paths.cache_dir.join("thumbs"),
+        ));
         let component_manager =
             Arc::new(ComponentManager::new(versions.clone(), components.clone(), feedback.clone()));
         let launcher = Arc::new(LaunchService::new(LaunchDeps {
