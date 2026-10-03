@@ -36,13 +36,18 @@ pub struct Record {
     pub release_type: Option<u64>,
 }
 
-/// The build's records by the file's place (`mods/x.jar`, as installed: enabled).
+/// The build's records by the file's place (`mods/x.jar`, as installed: enabled). Each is read on
+/// its own: one that cannot be (from a newer launcher, or damaged) costs no other.
 pub fn read(game: &Path) -> BTreeMap<String, Record> {
-    std::fs::read(game.join(PROVENANCE))
+    let doc = std::fs::read(game.join(PROVENANCE))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-        .and_then(|doc| serde_json::from_value(doc["files"].clone()).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let Some(files) = doc["files"].as_object() else { return BTreeMap::new() };
+    files
+        .iter()
+        .filter_map(|(place, record)| Some((place.clone(), serde_json::from_value(record.clone()).ok()?)))
+        .collect()
 }
 
 /// The records as their file.
@@ -94,6 +99,19 @@ mod tests {
             date: None,
             release_type: None,
         }
+    }
+
+    #[test]
+    fn one_record_that_cannot_be_read_loses_no_other() {
+        // A record from a newer launcher (or damaged) would empty the whole list, and the next
+        // install would write the list without them.
+        let tmp = tempfile::tempdir().unwrap();
+        let good = serde_json::to_value(record(1, "a.jar")).unwrap();
+        let doc = json!({"schema_version": 1, "files": {"mods/a.jar": good, "mods/b.jar": {"kind": "mods"}}});
+        std::fs::create_dir_all(tmp.path().join(".launcher")).unwrap();
+        std::fs::write(tmp.path().join(PROVENANCE), doc.to_string()).unwrap();
+        let read = read(tmp.path());
+        assert_eq!(read.keys().collect::<Vec<_>>(), ["mods/a.jar"]);
     }
 
     #[test]
