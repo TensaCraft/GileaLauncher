@@ -44,6 +44,12 @@ fn startup_failed(app: &AppHandle, lang: &str, detail: &str) {
     app.dialog().message(text).title(title).kind(MessageDialogKind::Error).show(move |_| handle.exit(1));
 }
 
+/// Whether this start installs an update waiting for it: not one from a build's shortcut, which
+/// came to play (the helper would start the new launcher without the build); the next start does.
+fn installs_pending_update(launch_version: Option<&str>) -> bool {
+    launch_version.is_none()
+}
+
 /// A deferred update is installed by the primary instance only (this runs after single-instance).
 fn resume_pending_update(env: &PathEnv) -> ResumeOutcome {
     if env.dev_root.is_some() {
@@ -112,7 +118,11 @@ pub fn run() -> i32 {
         })
         .setup(move |app| {
             let env = PathEnv::from_system();
-            let resumed = resume_pending_update(&env);
+            let resumed = if installs_pending_update(initial_launch.as_deref()) {
+                resume_pending_update(&env)
+            } else {
+                ResumeOutcome::Nothing
+            };
             if matches!(resumed, ResumeOutcome::Launched | ResumeOutcome::InProgress) {
                 app.handle().exit(0);
                 return Ok(());
@@ -273,6 +283,13 @@ mod tests {
         let csp = conf["app"]["security"]["csp"].as_str().unwrap();
         let connect = csp.split(';').map(str::trim).find(|d| d.starts_with("connect-src")).unwrap();
         assert!(connect.split_whitespace().any(|s| s == "'self'"), "{connect}");
+    }
+
+    #[test]
+    fn a_build_s_shortcut_plays_first_and_the_update_waits() {
+        // The helper would start the new launcher without the shortcut's build.
+        assert!(super::installs_pending_update(None));
+        assert!(!super::installs_pending_update(Some("aeronautics")));
     }
 
     #[test]
