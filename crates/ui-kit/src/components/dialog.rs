@@ -98,17 +98,15 @@ pub fn Dialog(
                     // The field the dialog asks for gets the keyboard once it is on screen.
                     let body = NodeRef::<leptos::html::Div>::new();
                     request_animation_frame(move || focus_first_autofocus(body));
+                    // Where the press began: a selection dragged out of the dialog ends on the
+                    // backdrop too.
+                    let pressed = StoredValue::new(false);
                     view! {
                         <div
                             class="backdrop"
+                            on:mousedown=move |ev| pressed.set_value(on_backdrop(&ev))
                             on:click=move |ev| {
-                                use wasm_bindgen::JsCast;
-                                let on_backdrop = ev
-                                    .target()
-                                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                                    .map(|el| el.class_list().contains("backdrop"))
-                                    .unwrap_or(false);
-                                if on_backdrop && !locked {
+                                if closes_on(pressed.get_value(), on_backdrop(&ev)) && !locked {
                                     close();
                                 }
                             }
@@ -147,6 +145,19 @@ pub fn Dialog(
     }
 }
 
+/// The mouse event happened on the backdrop itself, not inside the dialog.
+fn on_backdrop(ev: &web_sys::MouseEvent) -> bool {
+    use wasm_bindgen::JsCast;
+    ev.target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        .is_some_and(|el| el.class_list().contains("backdrop"))
+}
+
+/// A click closes the dialog when it both began (`pressed`) and ended (`released`) on the backdrop.
+fn closes_on(pressed: bool, released: bool) -> bool {
+    pressed && released
+}
+
 #[component]
 pub fn ConfirmDialog(
     open: RwSignal<bool>,
@@ -180,6 +191,15 @@ pub fn ConfirmDialog(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_click_begun_and_ended_on_the_backdrop_closes() {
+        // A text selection dragged out of the dialog ends on the backdrop: the browser sends a
+        // click there, and the dialog (with what was typed) must stay.
+        assert!(super::closes_on(true, true));
+        assert!(!super::closes_on(false, true));
+        assert!(!super::closes_on(true, false));
+    }
+
     #[test]
     fn a_full_dialog_fills_the_window_and_lets_its_body_flex() {
         let css = include_str!("../../styles/components.css");
