@@ -380,6 +380,15 @@ pub fn install() {
         "module_invoke" if args["module"] == "diagnostics" => {
             diagnostics.borrow_mut().handle(args["command"].as_str().unwrap_or_default(), &args["args"])
         }
+        // `?lowmem=1`: Play asks before a game that may not fit beside the running one.
+        "build_launch" if query_flag("lowmem") && args["allowLowMemory"] != Value::Bool(true) => {
+            let key = args["key"].as_str().unwrap_or_default().to_string();
+            let name = builds.borrow().snapshot().builds.into_iter().find(|b| b.key == key).map(|b| b.name);
+            Err(AppError::new(ErrorCode::LowMemory, "mock")
+                .with_param("version", name.unwrap_or(key))
+                .with_param("heap", "16")
+                .with_param("available", "9"))
+        }
         "open_path" | "open_url" => Ok(Value::Null),
         "window_control" => Ok(Value::Bool(false)),
         "app_quit" => Ok(Value::Null),

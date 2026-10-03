@@ -13,7 +13,9 @@ use super::alive::{game_open, game_processes};
 use super::hooks::{GameWatcher, LaunchContext, LaunchHook, PrepareContext, WatchedGame};
 use super::ledger::{AdoptedProcess, Entry, Ledger, kill_process, process_started};
 use super::monitor::{EARLY_EXIT, POLL, Watch, watch_game};
-use super::options::{OptionsInput, assigned_profile, component_id, game_dir, launch_options, resolve_java};
+use super::options::{
+    OptionsInput, assigned_profile, component_id, game_dir, launch_options, planned_heap_gb, resolve_java,
+};
 use super::process::{GameCommand, SharedProcess, Spawner, prepare_launch_log};
 use super::registry::{LAUNCH_COOLDOWN, LaunchRegistry};
 use crate::auth::service::AuthService;
@@ -46,6 +48,10 @@ impl Default for LaunchTimings {
     }
 }
 
+/// Memory left beside a game's heap for the system and Java's own needs: with less free than
+/// that and a game running already, Play asks first.
+const LOW_MEMORY_RESERVE_GB: u64 = 2;
+
 #[derive(Clone)]
 pub struct LaunchDeps {
     pub mc_dir: PathBuf,
@@ -69,6 +75,8 @@ pub struct LaunchDeps {
     /// The file of the games started (`ledger::LEDGER_FILE` in the state folder): a launcher
     /// that restarts takes them back (`adopt`). None: they are known only while this one runs.
     pub ledger: Option<PathBuf>,
+    /// The computer's memory now (`MemoryLimits::detect`).
+    pub memory: Arc<dyn Fn() -> MemoryLimits + Send + Sync>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -78,6 +86,8 @@ pub struct LaunchRequest {
     pub profile_key: Option<String>,
     /// Start although this build's folder already has a game running (the user confirmed).
     pub allow_duplicate: bool,
+    /// Start although a game runs and less memory is free than this one asks (the user confirmed).
+    pub allow_low_memory: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,6 +225,19 @@ impl LaunchService {
         if d.feedback.is_busy() {
             return Err(AppError::new(ErrorCode::Busy, "another operation is running"));
         }
+        if !request.allow_low_memory && self.registry.any_active() {
+            let limits = (d.memory)();
+            let heap = planned_heap_gb(&build, &d.config, &limits);
+            if let Some(available) = limits.available_gb.filter(|free| *free < heap + LOW_MEMORY_RESERVE_GB) {
+                return Err(AppError::new(
+                    ErrorCode::LowMemory,
+                    format!("{available} GiB free while a game runs; {} asks {heap} GiB", build.name),
+                )
+                .with_param("version", &build.name)
+                .with_param("heap", heap.to_string())
+                .with_param("available", available.to_string()));
+            }
+        }
         if let Err(remaining) = self.registry.try_reserve(&key, Instant::now()) {
             let seconds = remaining.as_secs_f64().ceil().max(1.0) as u64;
             return Err(AppError::new(ErrorCode::LaunchThrottled, "launched moments ago")
@@ -323,7 +346,7 @@ impl LaunchService {
             component: &component,
             java: java.clone(),
             config: &d.config,
-            limits: MemoryLimits::detect(),
+            limits: (d.memory)(),
         };
         let (options, gpu) = launch_options(input);
         fs::create_dir_all(&options.game_dir)

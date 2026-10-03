@@ -147,10 +147,11 @@ pub async fn build_launch(
     key: String,
     profile_key: Option<String>,
     allow_duplicate: bool,
+    allow_low_memory: bool,
 ) -> AppResult<u32> {
     let core = state.core.clone();
-    let started =
-        core.launcher.launch(LaunchRequest { build_key: key, profile_key, allow_duplicate }).await?;
+    let request = LaunchRequest { build_key: key, profile_key, allow_duplicate, allow_low_memory };
+    let started = core.launcher.launch(request).await?;
     announce_builds(&app, &core);
     Ok(started.pid)
 }

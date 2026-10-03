@@ -1,6 +1,6 @@
 //! IPC actions on builds. Create during component setup (`use_build_actions`), call from handlers.
 
-use launcher_shared::{BuildDto, BuildsSnapshot, ErrorCode, Level, LoaderKind};
+use launcher_shared::{AppError, BuildDto, BuildsSnapshot, ErrorCode, Level, LoaderKind};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::{I18nCtx, use_i18n};
@@ -53,6 +53,7 @@ struct LaunchArgs {
     key: String,
     profile_key: Option<String>,
     allow_duplicate: bool,
+    allow_low_memory: bool,
 }
 
 /// Reports the outcome of a finished call; nothing happens when the page that asked is gone.
@@ -199,21 +200,16 @@ impl BuildActions {
     }
 
     /// Starts `build` (the backend shows "starting"). A missing account opens "Profile required"
-    /// (`need_profile`).
-    pub fn launch(
-        &self,
-        build: BuildDto,
-        profile_key: Option<String>,
-        allow_duplicate: bool,
-        need_profile: RwSignal<bool>,
-    ) {
+    /// (`need_profile`); too little free memory beside a running game goes to `low_memory`.
+    pub fn launch(&self, build: BuildDto, profile_key: Option<String>, asks: LaunchAsks) {
+        let LaunchAsks { allow_duplicate, allow_low_memory, need_profile, low_memory } = asks;
         let this = *self;
         let key = build.key.clone();
         this.store.launching.update(|set| {
             set.insert(key.clone());
         });
         spawn_local(async move {
-            let args = LaunchArgs { key: key.clone(), profile_key, allow_duplicate };
+            let args = LaunchArgs { key: key.clone(), profile_key, allow_duplicate, allow_low_memory };
             let result = ipc::invoke::<_, u32>("build_launch", &args).await;
             this.store.launching.update(|set| {
                 set.remove(&key);
@@ -221,10 +217,22 @@ impl BuildActions {
             match result {
                 Ok(_) => {}
                 Err(e) if e.code == ErrorCode::NoProfile => need_profile.set(true),
+                Err(e) if e.code == ErrorCode::LowMemory => {
+                    let _ = low_memory.try_run(e);
+                }
                 Err(e) => this.toasts.show(Level::Warning, this.i18n.error(&e), None),
             }
         });
     }
+}
+
+/// What a launch was allowed and where its questions go.
+#[derive(Clone, Copy)]
+pub struct LaunchAsks {
+    pub allow_duplicate: bool,
+    pub allow_low_memory: bool,
+    pub need_profile: RwSignal<bool>,
+    pub low_memory: Callback<AppError>,
 }
 
 pub fn use_build_actions() -> BuildActions {
@@ -246,11 +254,15 @@ mod tests {
 
     #[test]
     fn ipc_arguments_use_tauri_names() {
-        let launch =
-            LaunchArgs { key: "aero".into(), profile_key: Some("Steve".into()), allow_duplicate: true };
+        let launch = LaunchArgs {
+            key: "aero".into(),
+            profile_key: Some("Steve".into()),
+            allow_duplicate: true,
+            allow_low_memory: false,
+        };
         assert_eq!(
             serde_json::to_value(launch).unwrap(),
-            json!({"key": "aero", "profileKey": "Steve", "allowDuplicate": true})
+            json!({"key": "aero", "profileKey": "Steve", "allowDuplicate": true, "allowLowMemory": false})
         );
         let delete = DeleteArgs { key: "aero".into(), delete_files: false };
         assert_eq!(serde_json::to_value(delete).unwrap(), json!({"key": "aero", "deleteFiles": false}));

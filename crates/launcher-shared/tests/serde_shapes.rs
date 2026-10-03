@@ -86,7 +86,11 @@ fn update_error_codes_have_their_own_keys() {
     assert_eq!(ErrorCode::IntegrityMismatch.i18n_key(), "update_hash_mismatch");
     assert_eq!(ErrorCode::NoUpdateAsset.i18n_key(), "update_no_asset");
     assert_eq!(serde_json::to_value(ErrorCode::RateLimited).unwrap(), json!("rate_limited"));
-    assert_eq!(ErrorCode::ALL.len(), 53);
+    assert_eq!(ErrorCode::ALL.len(), 54);
+    assert_eq!(
+        (serde_json::to_value(ErrorCode::LowMemory).unwrap(), ErrorCode::LowMemory.i18n_key()),
+        (json!("low_memory"), "version_low_memory")
+    );
     assert_eq!(
         (
             serde_json::to_value(ErrorCode::ProviderFilesHeld).unwrap(),

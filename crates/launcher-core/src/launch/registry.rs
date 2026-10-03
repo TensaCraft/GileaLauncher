@@ -74,6 +74,12 @@ impl LaunchRegistry {
             .any(|p| p.lock().unwrap_or_else(|e| e.into_inner()).pid() == pid)
     }
 
+    /// Some game the launcher started (or took back) still runs.
+    pub fn any_active(&self) -> bool {
+        let keys: Vec<String> = self.state().active.keys().cloned().collect();
+        keys.iter().any(|key| self.is_active(key))
+    }
+
     /// A game of `key` is still running (exited ones are dropped).
     pub fn is_active(&self, key: &str) -> bool {
         let mut state = self.state();

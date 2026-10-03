@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 use crate::auth::service::LaunchIdentity;
 use crate::builds::service::GPU_MODE_DEFAULT_KEY;
 use crate::java::gpu::GpuMode;
-use crate::java::memory::{MemoryLimits, parse_memory_value, sanitize_jvm_arguments};
+use crate::java::memory::{MemoryLimits, SanitizedJvm, parse_memory_value, sanitize_jvm_arguments};
 use crate::minecraft::command::LaunchOptions;
 use crate::storage::config::ConfigStore;
 use crate::storage::versions::Build;
@@ -143,16 +143,27 @@ fn memory_note(max_gb: Option<u64>, removed_initial_heap: bool) -> String {
     if removed_initial_heap { format!("{max}, removed -Xms") } else { max }
 }
 
-/// The launch options and GPU mode (the build's, else `gpu_mode_default`).
-pub fn launch_options(input: OptionsInput<'_>) -> (LaunchOptions, GpuMode) {
-    let OptionsInput { build, identity, mc_dir, component, java, config, limits } = input;
-    let options = &build.options;
+/// The heap a launch of `build` gives Java: its own `-Xmx`, else the launcher's default amount,
+/// else the amount recommended for this computer — within the computer's limits.
+fn sanitized_memory(build: &Build, config: &ConfigStore, limits: &MemoryLimits) -> SanitizedJvm {
     let fallback = config
         .get(DEFAULT_MAX_RAM_KEY)
         .as_ref()
         .and_then(parse_memory_value)
         .unwrap_or(limits.recommended_heap_gb);
-    let memory = sanitize_jvm_arguments(&jvm_arguments(options), Some(fallback), &limits);
+    sanitize_jvm_arguments(&jvm_arguments(&build.options), Some(fallback), limits)
+}
+
+/// How many GiB of heap a launch of `build` asks for.
+pub fn planned_heap_gb(build: &Build, config: &ConfigStore, limits: &MemoryLimits) -> u64 {
+    sanitized_memory(build, config, limits).max_gb.unwrap_or(limits.recommended_heap_gb)
+}
+
+/// The launch options and GPU mode (the build's, else `gpu_mode_default`).
+pub fn launch_options(input: OptionsInput<'_>) -> (LaunchOptions, GpuMode) {
+    let OptionsInput { build, identity, mc_dir, component, java, config, limits } = input;
+    let options = &build.options;
+    let memory = sanitized_memory(build, config, &limits);
     if memory.changed {
         tracing::info!(
             "Normalized JVM memory arguments of {}: {}",

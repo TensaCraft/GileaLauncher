@@ -127,11 +127,13 @@ async fn main() {
         watchers: Vec::new(),
         timings: LaunchTimings::default(),
         ledger: None,
+        memory: Arc::new(launcher_core::java::memory::MemoryLimits::detect),
     });
     let request = LaunchRequest {
         build_key: build.key.clone(),
         profile_key: Some(player.clone()),
         allow_duplicate: false,
+        allow_low_memory: false,
     };
     let started = launcher.launch(request).await.unwrap_or_else(|e| fail(e));
     println!("started pid {} with {}", started.pid, started.java.display());

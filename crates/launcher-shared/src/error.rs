@@ -61,10 +61,12 @@ pub enum ErrorCode {
     /// Files the provider may not hand to other apps: the user downloads them by hand first
     /// (`provider::held_files`).
     ProviderFilesHeld,
+    /// A game runs and less memory is free than the next one asks for.
+    LowMemory,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 53] = [
+    pub const ALL: [ErrorCode; 54] = [
         ErrorCode::Internal,
         ErrorCode::Io,
         ErrorCode::InvalidInput,
@@ -118,6 +120,7 @@ impl ErrorCode {
         ErrorCode::FileInUse,
         ErrorCode::ProviderKeyRejected,
         ErrorCode::ProviderFilesHeld,
+        ErrorCode::LowMemory,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -175,6 +178,7 @@ impl ErrorCode {
             ErrorCode::FileInUse => "error_file_in_use",
             ErrorCode::ProviderKeyRejected => "provider_key_rejected",
             ErrorCode::ProviderFilesHeld => "provider_files_held",
+            ErrorCode::LowMemory => "version_low_memory",
         }
     }
 

@@ -9,6 +9,7 @@ use launcher_core::auth::{AuthConfig, NoOpener};
 use launcher_core::builds::service::BuildService;
 use launcher_core::feedback::{EventSink, FeedbackService, OperationSpec};
 use launcher_core::java::gpu::GpuPreferenceStore;
+use launcher_core::java::memory::{GIB, MemoryLimits};
 use launcher_core::java::runtime::JavaRuntimes;
 use launcher_core::launch::hooks::{
     GameWatch, GameWatcher, HookFuture, LaunchContext, LaunchHook, PrepareContext, WatchedGame,
@@ -181,6 +182,7 @@ async fn world_with(
             poll: Duration::from_millis(10),
         },
         ledger: Some(ledger.clone()),
+        memory: Arc::new(|| MemoryLimits::from_bytes(Some(32 * GIB), Some(32 * GIB))),
     };
     let launcher = LaunchService::new(deps.clone());
     World {
@@ -370,6 +372,29 @@ async fn a_running_build_is_not_started_twice() {
     assert!(matches!(games.last(), Some(GameState::Exited { .. })), "{games:?}");
     assert!(!w.launcher.is_running(&key));
     assert!(w.recorder.alerts.lock().unwrap().is_empty(), "stopping is not a crash");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_game_that_may_not_fit_in_memory_asks_first() {
+    // Two games of 16 GB at once on a 32 GB computer ran out of memory (crash reports of 03.10):
+    // with a game running and less memory free than the next one asks, Play asks first.
+    let w = world().await;
+    w.auth.create_offline("Steve").unwrap();
+    let first = w.build("First", &["-Xmx16G", "-Dfake.after=30000"]).await;
+    let second = w.build("Second", &["-Xmx16G", "-Dfake.after=30000"]).await;
+    let tight = LaunchService::new(LaunchDeps {
+        memory: Arc::new(|| MemoryLimits::from_bytes(Some(32 * GIB), Some(10 * GIB))),
+        ..w.deps.clone()
+    });
+    tight.launch(request(&first)).await.unwrap();
+    let err = tight.launch(request(&second)).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::LowMemory);
+    assert_eq!(
+        (err.params["version"].as_str(), err.params["heap"].as_str(), err.params["available"].as_str()),
+        ("Second", "16", "10")
+    );
+    tight.launch(LaunchRequest { allow_low_memory: true, ..request(&second) }).await.unwrap();
+    assert_eq!(tight.terminate(&first) + tight.terminate(&second), 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]

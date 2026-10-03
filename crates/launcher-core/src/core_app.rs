@@ -227,6 +227,7 @@ impl CoreApp {
             watchers: modules.game_watchers(),
             timings: LaunchTimings::default(),
             ledger: Some(paths.app_state_dir.join(LEDGER_FILE)),
+            memory: Arc::new(crate::java::memory::MemoryLimits::detect),
         }));
         // Games a launcher before this one started (it updated, restarted, crashed) are its own.
         let adopted = launcher.adopt();
