@@ -242,8 +242,9 @@ jobs:
               exit 1
             fi
           else
+            # Here only, for the notes: GitHub makes the tag itself as the release is published (a
+            # tag pushed with this run's token is refused once a commit changes a workflow).
             git tag -a "$TAG" -m "Release $TAG"
-            git push origin "$TAG"
           fi
       - name: Release notes
         run: cargo xtask release-notes --tag ${{ needs.meta.outputs.tag }} --output RELEASE_NOTES.md && cat RELEASE_NOTES.md
@@ -251,6 +252,7 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: ${{ needs.meta.outputs.title }}
           draft: true
           prerelease: ${{ needs.meta.outputs.prerelease == 'true' || inputs.prerelease }}
