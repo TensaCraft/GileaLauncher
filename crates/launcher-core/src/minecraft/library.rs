@@ -177,7 +177,7 @@ pub fn plan_libraries(
 }
 
 /// Unpacks a natives jar into `dir`. Entries under an `exclude` prefix, directories and anything
-/// that would land outside `dir` are skipped; a file already there with the same size is kept (a
+/// that would land outside `dir` are skipped; a file already there with the same bytes is kept (a
 /// running game may hold it open). Returns how many files were written.
 pub fn extract_natives(jar: &Path, dir: &Path, exclude: &[String]) -> AppResult<usize> {
     let zip_error =
@@ -197,14 +197,18 @@ pub fn extract_natives(jar: &Path, dir: &Path, exclude: &[String]) -> AppResult<
             continue;
         };
         let target = dir.join(relative);
-        if fs::metadata(&target).is_ok_and(|m| m.is_file() && m.len() == entry.size()) {
+        let mut bytes = Vec::with_capacity(entry.size() as usize);
+        io::copy(&mut entry, &mut bytes).map_err(io_error)?;
+        // The size alone kept a native damaged in place for good.
+        if fs::metadata(&target).is_ok_and(|m| m.is_file() && m.len() == bytes.len() as u64)
+            && fs::read(&target).is_ok_and(|there| there == bytes)
+        {
             continue;
         }
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(io_error)?;
         }
-        let mut out = File::create(&target).map_err(io_error)?;
-        io::copy(&mut entry, &mut out).map_err(io_error)?;
+        fs::write(&target, &bytes).map_err(io_error)?;
         written += 1;
     }
     Ok(written)
@@ -355,5 +359,19 @@ mod tests {
         assert!(!out.join("META-INF").exists());
         assert!(!dir.path().join("out").join("evil.txt").exists());
         assert_eq!(extract_natives(&jar, &out, &exclude).unwrap(), 0, "present files are kept");
+    }
+
+    #[test]
+    fn a_damaged_native_of_the_same_size_is_unpacked_again() {
+        // Only the size was compared: a native damaged in place was kept for good, and the game
+        // failed on it at every start.
+        let dir = tempfile::tempdir().unwrap();
+        let jar = dir.path().join("natives.jar");
+        write_zip(&jar, &[("lwjgl64.dll", "dll-bytes")]);
+        let out = dir.path().join("natives");
+        extract_natives(&jar, &out, &[]).unwrap();
+        fs::write(out.join("lwjgl64.dll"), "XXXXXXXXX").unwrap();
+        assert_eq!(extract_natives(&jar, &out, &[]).unwrap(), 1);
+        assert_eq!(fs::read(out.join("lwjgl64.dll")).unwrap(), b"dll-bytes");
     }
 }
