@@ -8,6 +8,7 @@ use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 
+use futures_util::stream::{self, StreamExt};
 use launcher_shared::provider::{
     ModpackBuild, PackInstallArgs, PackInstalled, PackUpdateArgs, PackUpdated, PackVersion,
     newer_pack_version,
@@ -117,6 +118,35 @@ async fn fill_new(
     result
 }
 
+/// How many packs' versions are asked at once.
+const ASKED_AT_ONCE: usize = 4;
+
+/// The versions of every pack of `projects`, asked a few at a time (one list a pack, never one
+/// after another); the last failure, when some pack got no answer.
+async fn versions_of(
+    source: &dyn PackSource,
+    projects: BTreeSet<String>,
+) -> (HashMap<String, Vec<PackVersion>>, Option<AppError>) {
+    let answers: Vec<(String, AppResult<Vec<PackVersion>>)> = stream::iter(projects)
+        .map(|project| async move {
+            let answer = source.versions(&project).await;
+            (project, answer)
+        })
+        .buffer_unordered(ASKED_AT_ONCE)
+        .collect()
+        .await;
+    let (mut lists, mut last_error) = (HashMap::new(), None);
+    for (project, answer) in answers {
+        match answer {
+            Ok(list) => {
+                lists.insert(project, list);
+            }
+            Err(e) => last_error = Some(e),
+        }
+    }
+    (lists, last_error)
+}
+
 /// The builds installed from this kind of pack, each with its pack's newest version when that is
 /// another: one versions list per pack; a pack the provider does not answer for is left out.
 pub async fn pack_builds(
@@ -126,16 +156,7 @@ pub async fn pack_builds(
 ) -> AppResult<Vec<ModpackBuild>> {
     let owned = engine::owned(deps, kind).await?;
     let projects: BTreeSet<String> = owned.iter().map(|(_, r)| r.project_id.clone()).collect();
-    let mut lists: HashMap<String, Vec<PackVersion>> = HashMap::new();
-    let mut last_error = None;
-    for project in projects {
-        match source.versions(&project).await {
-            Ok(list) => {
-                lists.insert(project, list);
-            }
-            Err(e) => last_error = Some(e),
-        }
-    }
+    let (lists, last_error) = versions_of(source, projects).await;
     if lists.is_empty()
         && let Some(e) = last_error
     {
@@ -251,4 +272,67 @@ async fn refill(
     .await;
     let _ = fs::remove_file(&archive);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use super::*;
+
+    /// Answers versions after a pause, counting how many are asked at once; `bad` gets no answer.
+    #[derive(Default)]
+    struct Slow {
+        now: AtomicUsize,
+        most: AtomicUsize,
+    }
+
+    impl PackSource for Slow {
+        fn fetch<'a>(
+            &'a self,
+            _: &'a str,
+            _: &'a str,
+            _: &'a Path,
+            _: &'a Path,
+            _: &'a OperationHandle,
+        ) -> PackFuture<'a, Fetched> {
+            unimplemented!()
+        }
+
+        fn versions<'a>(&'a self, project: &'a str) -> PackFuture<'a, Vec<PackVersion>> {
+            Box::pin(async move {
+                let now = self.now.fetch_add(1, Ordering::SeqCst) + 1;
+                self.most.fetch_max(now, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                self.now.fetch_sub(1, Ordering::SeqCst);
+                if project == "bad" {
+                    return Err(AppError::new(ErrorCode::Network, "no answer"));
+                }
+                Ok(vec![PackVersion {
+                    id: format!("{project}-2"),
+                    version_number: "2".into(),
+                    game_versions: Vec::new(),
+                    loaders: Vec::new(),
+                }])
+            })
+        }
+
+        fn players<'a>(&'a self, _: &'a Path, _: &'a [String]) -> PackFuture<'a, HashSet<String>> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn the_packs_versions_are_asked_side_by_side() {
+        // The Builds page waited for one pack's versions after another.
+        let source = Slow::default();
+        let projects: BTreeSet<String> = ["a", "b", "bad", "c", "d", "e"].map(String::from).into();
+        let (lists, failure) = versions_of(&source, projects).await;
+        assert_eq!(lists.len(), 5);
+        assert_eq!(lists["c"][0].id, "c-2");
+        assert_eq!(failure.map(|e| e.code), Some(ErrorCode::Network));
+        let most = source.most.load(Ordering::SeqCst);
+        assert!((2..=ASKED_AT_ONCE).contains(&most), "{most} at once");
+    }
 }
