@@ -262,6 +262,13 @@ pub async fn module_invoke(
     result
 }
 
+/// Quits although work is under way: the player confirmed it.
+#[tauri::command]
+pub fn app_quit(app: AppHandle) {
+    tracing::info!("Quit confirmed while work was under way");
+    crate::quit_anyway(&app);
+}
+
 #[tauri::command]
 pub fn app_restart(app: AppHandle) {
     tracing::info!("Restart requested by the UI");

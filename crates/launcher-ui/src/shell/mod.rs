@@ -4,6 +4,7 @@ mod clipboard;
 mod footer;
 mod header;
 mod ops;
+mod quit;
 pub mod sidebar;
 mod support;
 mod window_bar;
@@ -18,6 +19,7 @@ use ui_kit::{Toasts, ipc, use_toasts};
 pub use alert::AlertHost;
 pub use clipboard::copy_text;
 pub use header::{PageHeader, provide_header, use_header};
+pub use quit::QuitConfirm;
 pub use support::{SupportDialog, has_contacts, provide_support, use_support};
 
 use crate::builds::launch::use_launch_flow;

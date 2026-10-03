@@ -15,6 +15,8 @@ pub mod names {
     pub const AUTH: &str = "app://auth";
     pub const GAME: &str = "app://game";
     pub const BUILDS: &str = "app://builds";
+    /// A close or a quit waits: work is under way (the payload: its titles). The window asks.
+    pub const QUIT_HELD: &str = "app://quit-held";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

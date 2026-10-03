@@ -25,7 +25,9 @@ use crate::pages::profiles::ProfilesPage;
 use crate::pages::settings::SettingsPage;
 use crate::pages::setup::SetupPage;
 use crate::profiles::auth::{BrowserWaitDialog, DeviceCodeDialog};
-use crate::shell::{AlertHost, PageHeader, Shell, SupportDialog, provide_header, provide_support};
+use crate::shell::{
+    AlertHost, PageHeader, QuitConfirm, Shell, SupportDialog, provide_header, provide_support,
+};
 use crate::store::{provide_store, use_store};
 use crate::update::UpdateDialogs;
 
@@ -218,6 +220,7 @@ pub fn App() -> impl IntoView {
             <TipLayer />
             <AlertHost />
             <SupportDialog />
+            <QuitConfirm />
             <crate::modules::ModuleOverlays />
             <UpdateDialogs />
             <DeviceCodeDialog />

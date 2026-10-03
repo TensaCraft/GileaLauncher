@@ -380,6 +380,7 @@ pub fn install() {
         }
         "open_path" | "open_url" => Ok(Value::Null),
         "window_control" => Ok(Value::Bool(false)),
+        "app_quit" => Ok(Value::Null),
         #[cfg(feature = "mod-modrinth")]
         "held_files_found" => {
             to_value(modrinth.borrow_mut().held_found(args["files"].as_array().map_or(0, Vec::len)))

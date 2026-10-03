@@ -28,6 +28,43 @@ use crate::commands::AppState;
 
 const AUTO_UPDATE_CHECK_DELAY: Duration = Duration::from_secs(2);
 
+/// The player chose to quit although work was under way: no close is held any more.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// What a close would cut short: the work the player sees (installs, backups, restores), by title.
+/// A step of it, or work in the background (an update check), holds nothing.
+fn under_way(snapshot: &launcher_shared::OpsSnapshot) -> Vec<launcher_shared::Text> {
+    snapshot
+        .operations
+        .iter()
+        .filter(|op| op.visible && op.parent_id.is_none())
+        .map(|op| op.title.clone())
+        .collect()
+}
+
+/// A close of the window (its button, Alt+F4, the taskbar) or Quit in the tray: held while work is
+/// under way, the window back in front to ask. Whether it was held.
+pub fn hold_quit(app: &AppHandle) -> bool {
+    use std::sync::atomic::Ordering;
+    if QUITTING.load(Ordering::SeqCst) {
+        return false;
+    }
+    let Some(state) = app.try_state::<AppState>() else { return false };
+    let work = under_way(&state.core.feedback.snapshot());
+    if work.is_empty() {
+        return false;
+    }
+    tray::restore(app);
+    let _ = app.emit(names::QUIT_HELD, work);
+    true
+}
+
+/// Quits now, whatever is under way (the player said so).
+pub fn quit_anyway(app: &AppHandle) {
+    QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
+    app.exit(0);
+}
+
 /// The window back in front — out of the tray too, when it was hidden there.
 fn focus_main_window(app: &AppHandle) {
     tray::restore(app);
@@ -108,6 +145,13 @@ pub fn run() -> i32 {
             tracing::info!("Second instance forwarded launch request: {:?}", parsed.launch_version);
             let _ = app.emit(names::EXTERNAL_LAUNCH, ExternalLaunch { version_id: parsed.launch_version });
         }))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && hold_quit(window.app_handle())
+            {
+                api.prevent_close();
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .register_asynchronous_uri_scheme_protocol(screenshot_protocol::SCHEME, |ctx, request, responder| {
@@ -198,6 +242,7 @@ pub fn run() -> i32 {
             provider_commands::provider_update_modpack,
             provider_commands::held_files_found,
             commands::app_restart,
+            commands::app_quit,
             commands::window_control,
             commands::update_status,
             commands::update_check,
@@ -283,6 +328,31 @@ mod tests {
         let csp = conf["app"]["security"]["csp"].as_str().unwrap();
         let connect = csp.split(';').map(str::trim).find(|d| d.starts_with("connect-src")).unwrap();
         assert!(connect.split_whitespace().any(|s| s == "'self'"), "{connect}");
+    }
+
+    #[test]
+    fn only_work_the_player_sees_holds_a_close() {
+        use launcher_shared::{OperationDto, OpsSnapshot, Text};
+        let op = |id, parent_id, visible, title: &str| OperationDto {
+            id,
+            parent_id,
+            title: Text::key(title),
+            kind: "install".into(),
+            status: None,
+            progress: None,
+            total: None,
+            visible,
+        };
+        let snapshot = OpsSnapshot {
+            busy: true,
+            operations: vec![
+                op(1, None, true, "installing"),
+                op(2, Some(1), true, "a_step"),
+                op(3, None, false, "update_check"),
+            ],
+        };
+        assert_eq!(super::under_way(&snapshot), [Text::key("installing")]);
+        assert!(super::under_way(&OpsSnapshot { busy: false, operations: vec![] }).is_empty());
     }
 
     #[test]
