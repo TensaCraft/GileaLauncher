@@ -135,11 +135,14 @@ pub struct Lease {
     pub path: PathBuf,
     key: String,
     active: Active,
-    _lock: OsFileLock,
+    /// Taken (released) first when the lease ends: until then the slot stays taken, so another
+    /// try in this process sees it busy here rather than another program holding the file.
+    lock: Option<OsFileLock>,
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
+        drop(self.lock.take());
         self.active.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.key);
     }
 }
@@ -198,7 +201,13 @@ impl Coordinator {
             Err(LockError::Io(e)) => return Err(AppError::new(ErrorCode::Io, e.to_string())),
         };
         active.insert(key.clone(), kind.to_string());
-        Ok(Lease { kind: kind.to_string(), path: resolved, key, active: self.active.clone(), _lock: lock })
+        Ok(Lease {
+            kind: kind.to_string(),
+            path: resolved,
+            key,
+            active: self.active.clone(),
+            lock: Some(lock),
+        })
     }
 
     pub fn active_kind(&self, path: &Path) -> Option<String> {
