@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -64,6 +65,25 @@ fn the_game_runs_in_its_folder_with_output_in_the_launch_log() {
         "{text}"
     );
     assert!(text.contains("\nstarted_at=") && text.contains("\n\nfake game started"), "{text}");
+}
+
+#[test]
+fn a_second_copy_keeps_the_running_game_s_launch_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let game = dir.path().join("game");
+    let log = prepare_launch_log(&game, "1.21.1", "1.21.1").unwrap();
+    fs::OpenOptions::new().append(true).open(&log).unwrap().write_all(b"first game output\n").unwrap();
+    // The first game plays world W: it holds the world's session.lock.
+    fs::create_dir_all(game.join("saves/W")).unwrap();
+    let lock = fs::File::create(game.join("saves/W/session.lock")).unwrap();
+    lock.lock().unwrap();
+    prepare_launch_log(&game, "1.21.1", "1.21.1").unwrap();
+    let text = fs::read_to_string(&log).unwrap();
+    assert!(text.contains("first game output"), "{text}");
+    assert_eq!(text.matches("Minecraft process diagnostics").count(), 2, "{text}");
+    drop(lock);
+    prepare_launch_log(&game, "1.21.1", "1.21.1").unwrap();
+    assert!(!fs::read_to_string(&log).unwrap().contains("first game output"), "no game runs: a new log");
 }
 
 #[test]

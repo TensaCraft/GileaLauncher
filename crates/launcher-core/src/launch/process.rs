@@ -3,7 +3,7 @@
 //! console window on Windows. It outlives the launcher.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -106,7 +106,8 @@ impl Spawner for SystemSpawner {
     }
 }
 
-/// Starts `logs/launch.log` with the original's header.
+/// Starts `logs/launch.log` with the original's header. When another copy of the build still plays
+/// (`game_open`), its log is kept and the new header goes after it.
 pub fn prepare_launch_log(game_dir: &Path, component: &str, minecraft: &str) -> io::Result<PathBuf> {
     let logs = game_dir.join("logs");
     fs::create_dir_all(&logs)?;
@@ -116,7 +117,12 @@ pub fn prepare_launch_log(game_dir: &Path, component: &str, minecraft: &str) -> 
         "Minecraft process diagnostics\nloader={component}\nminecraft={minecraft}\ngame_dir={}\nstarted_at={started}\n\n",
         game_dir.display()
     );
-    fs::write(&path, header)?;
+    if super::alive::game_open(game_dir) {
+        let mut log = OpenOptions::new().create(true).append(true).open(&path)?;
+        log.write_all(format!("\n\n{header}").as_bytes())?;
+    } else {
+        fs::write(&path, header)?;
+    }
     Ok(path)
 }
 
