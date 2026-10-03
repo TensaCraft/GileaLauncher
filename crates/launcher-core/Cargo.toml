@@ -38,6 +38,9 @@ sha1.workspace = true
 zip.workspace = true
 toml.workspace = true
 lzma-rs.workspace = true
+fastnbt.workspace = true
+flate2.workspace = true
+hickory-resolver.workspace = true
 futures-util.workspace = true
 
 [dev-dependencies]

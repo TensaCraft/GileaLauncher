@@ -18,6 +18,7 @@ pub mod packs;
 pub mod paths;
 pub mod platform;
 pub mod providers;
+pub mod recent;
 pub mod safe_path;
 pub mod settings;
 pub mod setup;

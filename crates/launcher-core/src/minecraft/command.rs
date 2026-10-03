@@ -131,7 +131,7 @@ fn arguments(
 }
 
 /// `x.y[.z]` as numbers; snapshots and pre-releases are `None`.
-fn release_number(version: &str) -> Option<(u32, u32, u32)> {
+pub(crate) fn release_number(version: &str) -> Option<(u32, u32, u32)> {
     let parts: Vec<&str> = version.split('.').collect();
     if !(2..=3).contains(&parts.len())
         || !parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
