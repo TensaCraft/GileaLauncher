@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use launcher_shared::recent::{Activity, RecentBuild, ServerStatus};
+use launcher_shared::recent::{Activity, MotdSpan, RecentBuild, ServerStatus};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::ipc;
@@ -57,6 +57,62 @@ pub fn ping_bars(ms: u32) -> u8 {
 /// `host`, with `:port` when it is not the default one.
 pub fn address_label(host: &str, port: u16) -> String {
     if port == DEFAULT_PORT { host.to_string() } else { format!("{host}:{port}") }
+}
+
+/// A line of a MOTD as the server list shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MotdLine {
+    /// The server padded it with spaces to stand in the middle (the game shows it there).
+    pub centered: bool,
+    pub spans: Vec<MotdSpan>,
+}
+
+/// How many lines of a MOTD the server list shows.
+const MOTD_LINES: usize = 2;
+
+/// Drops the spaces at the start (`front`) or the end of `spans`, and spans left empty.
+fn trim_spans(spans: &mut Vec<MotdSpan>, front: bool) {
+    loop {
+        let at = if front { 0 } else { spans.len().saturating_sub(1) };
+        let Some(span) = spans.get_mut(at) else { return };
+        span.text = if front { span.text.trim_start().to_string() } else { span.text.trim_end().to_string() };
+        if !span.text.is_empty() {
+            return;
+        }
+        spans.remove(at);
+    }
+}
+
+/// The lines of a MOTD (its spans split at line breaks), at most two and none blank at the end;
+/// a line the server starts with two spaces or more is one it centred.
+pub fn motd_lines(spans: &[MotdSpan]) -> Vec<MotdLine> {
+    let mut lines: Vec<Vec<MotdSpan>> = vec![Vec::new()];
+    for span in spans {
+        for (i, piece) in span.text.split('\n').enumerate() {
+            if i > 0 {
+                lines.push(Vec::new());
+            }
+            if !piece.is_empty()
+                && let Some(line) = lines.last_mut()
+            {
+                line.push(MotdSpan { text: piece.to_string(), ..span.clone() });
+            }
+        }
+    }
+    let mut shown: Vec<MotdLine> = lines
+        .into_iter()
+        .take(MOTD_LINES)
+        .map(|mut spans| {
+            let leading = spans.iter().flat_map(|s| s.text.chars()).take_while(|c| *c == ' ').count();
+            trim_spans(&mut spans, true);
+            trim_spans(&mut spans, false);
+            MotdLine { centered: leading >= 2, spans }
+        })
+        .collect();
+    while shown.last().is_some_and(|l| l.spans.is_empty()) {
+        shown.pop();
+    }
+    shown
 }
 
 /// The key of a server in `RecentState::pings`.
@@ -194,6 +250,34 @@ mod tests {
         assert_eq!(address_label("play.example.net", 25565), "play.example.net");
         assert_eq!(address_label("play.example.net", 25570), "play.example.net:25570");
         assert_eq!(server_key("Play.Example.NET", 25565), server_key("play.example.net", 25565));
+    }
+
+    fn text(line: &MotdLine) -> String {
+        line.spans.iter().map(|s| s.text.as_str()).collect()
+    }
+
+    #[test]
+    fn a_motd_line_the_server_pads_is_centred_as_in_the_game() {
+        let spans = launcher_shared::recent::parse_motd(&serde_json::json!(
+            "        §b✦ Aeronautics ✦     \n§fMinecraft 1.21.1 | NeoForge | play.example.net"
+        ));
+        let lines = motd_lines(&spans);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].centered && !lines[1].centered);
+        assert_eq!(text(&lines[0]), "✦ Aeronautics ✦", "the padding goes, the words stay");
+        assert_eq!(text(&lines[1]), "Minecraft 1.21.1 | NeoForge | play.example.net");
+        assert_eq!(lines[0].spans[0].color.as_deref(), Some("#55ffff"));
+    }
+
+    #[test]
+    fn a_motd_shows_two_lines_at_most_with_none_empty_at_the_end() {
+        let spans = launcher_shared::recent::parse_motd(&serde_json::json!("a\nb\nc"));
+        assert_eq!(motd_lines(&spans).iter().map(text).collect::<Vec<_>>(), ["a", "b"]);
+        let one = launcher_shared::recent::parse_motd(&serde_json::json!(" one space\n   "));
+        let lines = motd_lines(&one);
+        assert_eq!(lines.len(), 1, "a blank second line is left out");
+        assert!(!lines[0].centered, "one space is no centring");
+        assert!(motd_lines(&[]).is_empty());
     }
 
     #[test]

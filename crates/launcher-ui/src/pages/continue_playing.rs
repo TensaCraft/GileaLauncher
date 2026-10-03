@@ -3,20 +3,26 @@
 //! for the build alone.
 
 use launcher_shared::BuildDto;
+use launcher_shared::SettingUpdate;
+use launcher_shared::recent::RECENT_MOST;
 use launcher_shared::recent::{Activity, MotdSpan, RecentBuild};
 use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use ui_kit::i18n::{I18nCtx, use_i18n};
-use ui_kit::{Button, Icon, Size, Tag, TagTone, Variant};
+use ui_kit::{
+    Button, Dialog, DialogFooter, Icon, IconAction, Select, SelectOption, SettingRow, Size, Tag, TagTone,
+    Variant,
+};
 
 use crate::builds::dialogs::use_build_menu;
 use crate::builds::launch::use_launch_flow;
 use crate::builds::{build_subtitle, loader_icon};
 use crate::fold::{FoldHead, fold_state};
 use crate::recent::{
-    Ago, Ping, address_label, ago, difficulty_key, mode_key, ping_bars, server_key, use_recent,
+    Ago, Ping, address_label, ago, difficulty_key, mode_key, motd_lines, ping_bars, server_key, use_recent,
 };
-use crate::store::use_store;
+use crate::shots::viewer::date_time;
+use crate::store::{use_settings_writer, use_store};
 
 /// Local "dd.mm.yyyy" of Unix milliseconds.
 fn date_of(ms: u64) -> String {
@@ -37,25 +43,35 @@ fn played(i18n: I18nCtx, played_ms: u64) -> String {
 }
 
 /// A MOTD in its colours; the colours are the parser's `#rrggbb`.
+fn span_view(span: &MotdSpan) -> impl IntoView + use<> {
+    let mut style = span.color.as_ref().map(|c| format!("color:{c};")).unwrap_or_default();
+    if span.bold {
+        style.push_str("font-weight:700;");
+    }
+    if span.italic {
+        style.push_str("font-style:italic;");
+    }
+    let lines: Vec<&str> = [(span.underlined, "underline"), (span.strikethrough, "line-through")]
+        .into_iter()
+        .filter_map(|(on, line)| on.then_some(line))
+        .collect();
+    if !lines.is_empty() {
+        style.push_str(&format!("text-decoration:{};", lines.join(" ")));
+    }
+    view! { <span style=style>{span.text.clone()}</span> }
+}
+
+/// A MOTD as the server list shows it: two lines at most, a line the server padded to the middle
+/// centred over the widest one.
 fn motd_view(spans: &[MotdSpan]) -> impl IntoView + use<> {
-    spans
-        .iter()
-        .map(|span| {
-            let mut style = span.color.as_ref().map(|c| format!("color:{c};")).unwrap_or_default();
-            if span.bold {
-                style.push_str("font-weight:700;");
+    motd_lines(spans)
+        .into_iter()
+        .map(|line| {
+            view! {
+                <div class="motd-line" class:is-centered=line.centered>
+                    {line.spans.iter().map(span_view).collect_view()}
+                </div>
             }
-            if span.italic {
-                style.push_str("font-style:italic;");
-            }
-            let lines: Vec<&str> = [(span.underlined, "underline"), (span.strikethrough, "line-through")]
-                .into_iter()
-                .filter_map(|(on, line)| on.then_some(line))
-                .collect();
-            if !lines.is_empty() {
-                style.push_str(&format!("text-decoration:{};", lines.join(" ")));
-            }
-            view! { <span style=style>{span.text.clone()}</span> }
         })
         .collect_view()
 }
@@ -276,21 +292,86 @@ fn RecentRow(dto: BuildDto, recent: RecentBuild) -> impl IntoView {
     }
 }
 
-/// «Продовжити гру» with its title, then the title of all builds (whose fold is Home's); `shown`
-/// says whether the section is there.
+/// What «Продовжити гру» shows: how many builds, and its history cleared or given back.
 #[component]
-pub fn ContinuePlaying(builds_folded: RwSignal<bool>, shown: RwSignal<bool>) -> impl IntoView {
+fn RecentSettings(open: RwSignal<bool>) -> impl IntoView {
+    let i18n = use_i18n();
+    let store = use_store();
+    let writer = use_settings_writer();
+    let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
+    let count = RwSignal::new(store.settings.get_untracked().home_recent_builds.to_string());
+    Effect::new(move |_| count.set(store.settings.get().home_recent_builds.to_string()));
+    let counts = Signal::derive(move || {
+        (0..=RECENT_MOST)
+            .map(|n| {
+                let label = if n == 0 { i18n.t("home_recent_builds_none") } else { n.to_string() };
+                SelectOption::new(n.to_string(), label)
+            })
+            .collect::<Vec<_>>()
+    });
+    let cleared = Memo::new(move |_| store.settings.with(|s| s.home_recent_cleared_ms));
+    let history_desc = Signal::derive(move || match cleared.get() {
+        Some(at) => i18n.tp("recent_history_cleared", &[("date", date_time(at))]),
+        None => i18n.t("recent_history_desc"),
+    });
+    view! {
+        <Dialog open=open icon="history" title=t("continue_playing") subtitle=t("recent_settings_desc")>
+            <DialogFooter slot>
+                <Button variant=Variant::Ghost on_click=move |_| open.set(false)>{move || i18n.t("close")}</Button>
+            </DialogFooter>
+            <SettingRow title=t("home_recent_builds") desc=t("home_recent_builds_desc")>
+                <div style="width:200px">
+                    <Select
+                        options=counts
+                        value=count
+                        icon="history"
+                        on_change=Callback::new(move |v: String| {
+                            if let Ok(n) = v.parse() {
+                                writer.apply(SettingUpdate::HomeRecentBuilds(n));
+                            }
+                        })
+                    />
+                </div>
+            </SettingRow>
+            <SettingRow title=t("recent_history") desc=history_desc>
+                {move || match cleared.get() {
+                    Some(_) => view! {
+                        <Button icon="restore" on_click=move |_| writer.apply(SettingUpdate::HomeRecentClear(false))>
+                            {move || i18n.t("recent_restore")}
+                        </Button>
+                    }
+                    .into_any(),
+                    None => view! {
+                        <Button variant=Variant::Danger icon="delete_sweep" on_click=move |_| writer.apply(SettingUpdate::HomeRecentClear(true))>
+                            {move || i18n.t("recent_clear")}
+                        </Button>
+                    }
+                    .into_any(),
+                }}
+            </SettingRow>
+        </Dialog>
+    }
+}
+
+/// «Продовжити гру»: its bar (fold, settings) and the builds played last. Shown while it may show
+/// some (a count above 0) and has some, or was cleared (it says so, and how to get them back).
+#[component]
+pub fn ContinuePlaying() -> impl IntoView {
+    let i18n = use_i18n();
     let folded = fold_state("home.fold.recent");
     let store = use_store();
     let recent = use_recent();
-    // Asked on each visit; again when a game starts or ends or the count changes (servers already
-    // asked this visit are not asked again).
+    let settings_open = RwSignal::new(false);
+    // Asked on each visit; again when a game starts or ends, the count changes or the history is
+    // cleared (servers already asked this visit are not asked again).
     let count = Memo::new(move |_| store.settings.with(|s| s.home_recent_builds));
+    let cleared = Memo::new(move |_| store.settings.with(|s| s.home_recent_cleared_ms));
     let running = Memo::new(move |_| {
         store.builds.with(|b| b.iter().filter(|b| b.running).map(|b| b.key.clone()).collect::<Vec<_>>())
     });
     Effect::new(move |visit: Option<()>| {
         count.track();
+        cleared.track();
         running.track();
         if count.get_untracked() > 0 {
             recent.refresh(visit.is_none());
@@ -306,16 +387,29 @@ pub fn ContinuePlaying(builds_folded: RwSignal<bool>, shown: RwSignal<bool>) -> 
                 .collect::<Vec<_>>()
         })
     };
-    Effect::new(move |_| shown.set(count.get() > 0 && !rows().is_empty()));
+    let shown = move || count.get() > 0 && (!rows().is_empty() || cleared.get().is_some());
     view! {
-        <Show when=move || shown.get()>
+        <Show when=shown>
             <section class="recent">
-                <FoldHead icon="history" title_key="continue_playing" folded=folded />
+                <FoldHead icon="history" title_key="continue_playing" folded=folded>
+                    <IconAction
+                        icon="tune"
+                        title=Signal::derive(move || i18n.t("recent_settings"))
+                        on_click=Callback::new(move |()| settings_open.set(true))
+                    />
+                </FoldHead>
                 <div class="recent__rows" class:is-hidden=folded>
-                    {move || rows().into_iter().map(|(build, recent)| view! { <RecentRow dto=build recent=recent /> }).collect_view()}
+                    {move || {
+                        let rows = rows();
+                        if rows.is_empty() {
+                            view! { <div class="recent__cleared">{i18n.t("recent_cleared_empty")}</div> }.into_any()
+                        } else {
+                            rows.into_iter().map(|(build, recent)| view! { <RecentRow dto=build recent=recent /> }).collect_view().into_any()
+                        }
+                    }}
                 </div>
             </section>
-            <FoldHead icon="layers" title_key="all_builds" folded=builds_folded />
         </Show>
+        <RecentSettings open=settings_open />
     }
 }

@@ -24,24 +24,33 @@ pub fn fold_state(key: impl Into<String>) -> RwSignal<bool> {
     folded
 }
 
-/// A section's title (Home); a click folds or unfolds the section.
+/// A section's title on a bar the section's width (Home): a click on the title folds or unfolds
+/// the section; `children` are the section's own buttons, at the right.
 #[component]
-pub fn FoldHead(icon: &'static str, title_key: &'static str, folded: RwSignal<bool>) -> impl IntoView {
+pub fn FoldHead(
+    icon: &'static str,
+    title_key: &'static str,
+    folded: RwSignal<bool>,
+    #[prop(optional)] children: Option<Children>,
+) -> impl IntoView {
     let i18n = use_i18n();
     view! {
-        <button
-            type="button"
-            class="fold-head"
-            class:is-folded=folded
-            aria-expanded=move || (!folded.get()).to_string()
-            on:click=move |_| {
-                sound::play_click();
-                folded.update(|f| *f = !*f);
-            }
-        >
-            <Icon name=icon />
-            <span>{move || i18n.t(title_key)}</span>
-            <Icon name="expand_more" class="fold-head__chevron" />
-        </button>
+        <div class="fold-bar">
+            <button
+                type="button"
+                class="fold-head"
+                class:is-folded=folded
+                aria-expanded=move || (!folded.get()).to_string()
+                on:click=move |_| {
+                    sound::play_click();
+                    folded.update(|f| *f = !*f);
+                }
+            >
+                <Icon name=icon />
+                <span>{move || i18n.t(title_key)}</span>
+                <Icon name="expand_more" class="fold-head__chevron" />
+            </button>
+            {children.map(|c| view! { <div class="fold-bar__actions">{c()}</div> })}
+        </div>
     }
 }

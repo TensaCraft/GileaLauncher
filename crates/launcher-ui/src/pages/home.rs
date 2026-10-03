@@ -6,13 +6,13 @@ use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
 use ui_kit::module::provide_home_cards;
 use ui_kit::reorder::{Reorder, Reorderable};
-use ui_kit::{BuildCard, Button, EmptyState, MenuEntry, Variant, use_context_menu};
+use ui_kit::{BuildCard, Button, EmptyState, MenuEntry, Size, Variant, use_context_menu};
 
 use crate::builds::actions::use_build_actions;
 use crate::builds::build_subtitle;
 use crate::builds::dialogs::use_build_menu;
 use crate::builds::launch::use_launch_flow;
-use crate::fold::fold_state;
+use crate::fold::{FoldHead, fold_state};
 use crate::modules::use_module_parts;
 use crate::pages::continue_playing::ContinuePlaying;
 use crate::shell::PageHeader;
@@ -54,10 +54,9 @@ pub fn HomePage() -> impl IntoView {
     // "No builds yet" only when Home has no card at all: modules' cards (a server's builds to
     // install) count too.
     let module_cards = provide_home_cards();
-    // «Усі збірки» folds only under its title, which «Продовжити гру» brings.
     let builds_folded = fold_state("home.fold.builds");
-    let recent_shown = RwSignal::new(false);
     let empty = move || store.builds_loaded.get() && store.builds.with(Vec::is_empty) && !module_cards.any();
+    let has_cards = move || store.builds_loaded.get() && !empty();
     view! {
         <PageHeader title_key="home_title" />
         <div class="home" on:contextmenu=page_menu>
@@ -72,9 +71,16 @@ pub fn HomePage() -> impl IntoView {
                     </Button>
                 </EmptyState>
             </Show>
-            <ContinuePlaying builds_folded=builds_folded shown=recent_shown />
+            <ContinuePlaying />
+            <Show when=has_cards>
+                <FoldHead icon="layers" title_key="all_builds" folded=builds_folded>
+                    <Button variant=Variant::Ghost size=Size::Sm icon="arrow_forward" on_click=move |_| store.go("/builds")>
+                        {move || i18n.t("to_builds")}
+                    </Button>
+                </FoldHead>
+            </Show>
             // Folded with CSS, not unmounted: modules' cards stay (Home's emptiness counts them).
-            <div class="home__grid" class:is-hidden=move || recent_shown.get() && builds_folded.get()>
+            <div class="home__grid" class:is-hidden=move || builds_folded.get()>
                     <For
                         each=move || store.builds.get()
                         key=|b| (b.key.clone(), b.name.clone(), b.running, b.image.clone(), b.version.clone())

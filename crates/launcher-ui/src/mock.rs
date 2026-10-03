@@ -27,6 +27,9 @@ pub fn apply_update(s: &mut SettingsSnapshot, update: &SettingUpdate) {
         SettingUpdate::GpuModeDefault(v) => s.gpu_mode_default = v,
         SettingUpdate::WindowSize(v) => s.window_size = v,
         SettingUpdate::HomeRecentBuilds(v) => s.home_recent_builds = v,
+        SettingUpdate::HomeRecentClear(clear) => {
+            s.home_recent_cleared_ms = clear.then(|| js_sys::Date::now() as u64);
+        }
     }
 }
 
@@ -204,6 +207,7 @@ pub fn install() {
         gpu_mode_default: "dgpu".into(),
         window_size: "1366x800".into(),
         home_recent_builds: 5,
+        home_recent_cleared_ms: None,
         revision: 0,
     }));
     let info = AppInfo {
@@ -318,6 +322,8 @@ pub fn install() {
         "setup_apply" => to_value(false),
         "startup_warnings" => to_value(Vec::<Text>::new()),
         "take_pending_launch" => Ok(Value::Null),
+        // Cleared: every mock build was played before.
+        "recent_builds" if settings.borrow().home_recent_cleared_ms.is_some() => Ok(Value::Array(Vec::new())),
         "recent_builds" => {
             let now = js_sys::Date::now() as u64;
             to_value(vec![
@@ -342,7 +348,10 @@ pub fn install() {
             ])
         }
         "server_status" if args["host"] == "play.example.net" => to_value(Some(ServerStatus {
-            motd: parse_motd(&serde_json::json!("§bBlockCraft §f— §eсезон 3\n§aласкаво просимо")),
+            // The first line padded to the middle, as servers do.
+            motd: parse_motd(&serde_json::json!(
+                "          §b✦ BlockCraft ✦\n§fMinecraft 1.21.1 | §eсезон 3 §f| §aласкаво просимо"
+            )),
             online: 42,
             max: 200,
             version: "Velocity 1.7.2-1.21.4".into(),
