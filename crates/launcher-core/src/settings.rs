@@ -36,6 +36,12 @@ pub const MINECRAFT_DIR_KEY: &str = "minecraft_game_dir";
 pub const WINDOW_SIZE_KEY: &str = "window_size";
 /// How many builds Home's «Продовжити гру» shows.
 pub const HOME_RECENT_KEY: &str = "home_recent_builds";
+/// When the user cleared «Продовжити гру» (ms since the epoch): builds played before stay out.
+pub const HOME_RECENT_CLEARED_KEY: &str = "home_recent_cleared_ms";
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
 
 pub fn detect_system_lang(locale: Option<&str>) -> String {
     match locale {
@@ -102,6 +108,7 @@ impl SettingsService {
             home_recent_builds: c
                 .get_u64(HOME_RECENT_KEY)
                 .map_or(RECENT_DEFAULT, |n| n.min(u64::from(RECENT_MOST)) as u8),
+            home_recent_cleared_ms: c.get_u64(HOME_RECENT_CLEARED_KEY),
         }
     }
 
@@ -139,6 +146,9 @@ impl SettingsService {
                 return Err(invalid("too many recent builds").with_param("count", count.to_string()));
             }
             SettingUpdate::HomeRecentBuilds(count) => (HOME_RECENT_KEY, Some(json!(count))),
+            SettingUpdate::HomeRecentClear(clear) => {
+                (HOME_RECENT_CLEARED_KEY, clear.then(|| json!(now_ms())))
+            }
         };
         let mut revision = self.revision.lock().unwrap_or_else(|e| e.into_inner());
         match value {
@@ -234,6 +244,19 @@ mod tests {
         assert_eq!(svc.apply(SettingUpdate::HomeRecentBuilds(11)).unwrap_err().code, ErrorCode::InvalidInput);
         svc.config.set("home_recent_builds", json!(400)).unwrap();
         assert_eq!(svc.snapshot().home_recent_builds, 10, "a hand-edited count is held to the most");
+    }
+
+    #[test]
+    fn home_s_recent_history_is_cleared_and_given_back() {
+        let home = tempfile::tempdir().unwrap();
+        let svc = service(home.path());
+        assert_eq!(svc.snapshot().home_recent_cleared_ms, None);
+        let before = now_ms();
+        let cleared =
+            svc.apply(SettingUpdate::HomeRecentClear(true)).unwrap().home_recent_cleared_ms.unwrap();
+        assert!(cleared >= before && cleared <= now_ms());
+        assert_eq!(svc.apply(SettingUpdate::HomeRecentClear(false)).unwrap().home_recent_cleared_ms, None);
+        assert_eq!(svc.config.get(HOME_RECENT_CLEARED_KEY), None);
     }
 
     #[test]

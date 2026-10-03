@@ -77,16 +77,25 @@ fn recent_of(markers: &LogMarkers, key: &str, minecraft: Option<&str>, game: &Pa
     Some(RecentBuild { key: key.to_string(), played_ms, activity })
 }
 
+/// The `count` newest of `found` (at most `RECENT_MOST`), none played before `cleared_ms`.
+fn newest(mut found: Vec<RecentBuild>, count: usize, cleared_ms: Option<u64>) -> Vec<RecentBuild> {
+    found.retain(|r| cleared_ms.is_none_or(|cleared| r.played_ms > cleared));
+    found.sort_by_key(|r| std::cmp::Reverse(r.played_ms));
+    found.truncate(count.min(usize::from(RECENT_MOST)));
+    found
+}
+
 impl RecentService {
     pub fn new(versions: Arc<VersionStore>) -> RecentService {
         RecentService { versions, markers: LogMarkers::default() }
     }
 
-    /// The `count` builds played last (at most `RECENT_MOST`), newest first. Blocking: reads logs and
-    /// worlds (each log once while it stays as it is).
-    pub fn recent(&self, count: usize) -> Vec<RecentBuild> {
+    /// The `count` builds played last (at most `RECENT_MOST`), newest first, none played before
+    /// `cleared_ms` (the user cleared the history then). Blocking: reads logs and worlds (each log
+    /// once while it stays as it is).
+    pub fn recent(&self, count: usize, cleared_ms: Option<u64>) -> Vec<RecentBuild> {
         let mc_dir = self.versions.minecraft_dir();
-        let mut found: Vec<RecentBuild> = self
+        let found: Vec<RecentBuild> = self
             .versions
             .list()
             .iter()
@@ -94,9 +103,7 @@ impl RecentService {
                 recent_of(&self.markers, &build.key, build.version.as_deref(), &game_dir(build, mc_dir))
             })
             .collect();
-        found.sort_by_key(|r| std::cmp::Reverse(r.played_ms));
-        found.truncate(count.min(usize::from(RECENT_MOST)));
-        found
+        newest(found, count, cleared_ms)
     }
 }
 
@@ -117,6 +124,20 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, text).unwrap();
         File::options().write(true).open(&path).unwrap().set_modified(SystemTime::now() - ago).unwrap();
+    }
+
+    fn played(key: &str, played_ms: u64) -> RecentBuild {
+        RecentBuild { key: key.into(), played_ms, activity: None }
+    }
+
+    #[test]
+    fn the_newest_are_kept_and_what_was_played_before_a_clearing_is_not() {
+        let found = vec![played("a", 300), played("b", 100), played("c", 200), played("d", 400)];
+        let keys = |list: Vec<RecentBuild>| list.into_iter().map(|r| r.key).collect::<Vec<_>>();
+        assert_eq!(keys(newest(found.clone(), 3, None)), ["d", "a", "c"]);
+        assert_eq!(keys(newest(found.clone(), 10, Some(200))), ["d", "a"], "played after the clearing only");
+        assert!(newest(found.clone(), 10, Some(400)).is_empty());
+        assert_eq!(newest(found, 99, None).len(), 4);
     }
 
     #[test]

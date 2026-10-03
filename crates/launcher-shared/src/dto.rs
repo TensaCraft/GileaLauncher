@@ -230,6 +230,9 @@ pub struct SettingsSnapshot {
     /// How many builds Home's «Продовжити гру» shows (0 hides it; at most `recent::RECENT_MOST`).
     #[serde(default = "crate::recent::recent_default")]
     pub home_recent_builds: u8,
+    /// When «Продовжити гру» was cleared (ms since the epoch): builds played before stay out.
+    #[serde(default)]
+    pub home_recent_cleared_ms: Option<u64>,
     /// How many changes were saved before this snapshot (this run): a later answer has a higher
     /// one.
     #[serde(default)]
@@ -260,6 +263,8 @@ pub enum SettingUpdate {
     GpuModeDefault(String),
     WindowSize(String),
     HomeRecentBuilds(u8),
+    /// `true` clears «Продовжити гру» now; `false` gives its history back.
+    HomeRecentClear(bool),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

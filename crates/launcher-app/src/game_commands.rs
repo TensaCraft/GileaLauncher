@@ -162,11 +162,12 @@ pub async fn build_launch(
 #[tauri::command]
 pub async fn recent_builds(state: State<'_, AppState>) -> AppResult<Vec<RecentBuild>> {
     let core = state.core.clone();
-    let count = usize::from(core.settings.snapshot().home_recent_builds);
+    let settings = core.settings.snapshot();
+    let (count, cleared) = (usize::from(settings.home_recent_builds), settings.home_recent_cleared_ms);
     if count == 0 {
         return Ok(Vec::new());
     }
-    tauri::async_runtime::spawn_blocking(move || core.recent.recent(count))
+    tauri::async_runtime::spawn_blocking(move || core.recent.recent(count, cleared))
         .await
         .map_err(|e| AppError::internal(e.to_string()))
 }
