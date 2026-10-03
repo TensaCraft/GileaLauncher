@@ -235,7 +235,7 @@
 .chip--info { --chip: 45, 184, 218; }
 
 /* ---------- lists, tags, progress, empty ---------- */
-.list-row { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: var(--r-md); background: var(--s-row); border: 1px solid var(--line); backdrop-filter: blur(8px); transition: border-color var(--dur-fast); }
+.list-row { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: var(--r-md); background: var(--s-row); border: 1px solid var(--line); transition: border-color var(--dur-fast); }
 .list-row:hover { border-color: var(--line-3); }
 .tag { height: 20px; display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: var(--r-xs); font: 700 10.5px var(--f-ui); letter-spacing: 0.04em; text-transform: uppercase; border: 1px solid; white-space: nowrap; }
 .tag--neoforge { color: #f7b27a; background: rgba(245, 145, 66, 0.1); border-color: rgba(245, 145, 66, 0.35); }
