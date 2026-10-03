@@ -56,17 +56,31 @@ fn activate(staged: &Path, target: &Path) -> io::Result<()> {
     rename_retrying(staged, target)
 }
 
-/// Finishes or undoes every restore of `saves` a crash cut short.
+/// Finishes or undoes every restore of `saves` a crash cut short, then removes the copies a crash
+/// left half unpacked with no journal (as launchers before this one could): no restore is under
+/// way when this runs (the build's folder is held).
 pub fn recover_all(saves: &Path) -> Vec<AppError> {
     let Ok(entries) = fs::read_dir(saves) else { return Vec::new() };
-    let worlds: Vec<String> = entries
-        .flatten()
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            name.strip_prefix('.')?.strip_suffix("-world-restore.json").map(str::to_string)
-        })
+    let names: Vec<String> =
+        entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    let worlds: Vec<String> = names
+        .iter()
+        .filter_map(|name| name.strip_prefix('.')?.strip_suffix("-world-restore.json").map(str::to_string))
         .collect();
-    worlds.into_iter().filter_map(|world| recover(saves, &world).err()).collect()
+    let problems: Vec<AppError> = worlds.iter().filter_map(|world| recover(saves, world).err()).collect();
+    for name in &names {
+        // `.W.restore-<hex>`: a staged copy. Never a `.previous`, which may hold the original.
+        let Some((world, suffix)) = name.strip_prefix('.').and_then(|n| n.rsplit_once(".restore-")) else {
+            continue;
+        };
+        let orphan = !suffix.is_empty()
+            && suffix.chars().all(|c| c.is_ascii_hexdigit())
+            && !journal_path(saves, world).exists();
+        if orphan && let Err(e) = fs::remove_dir_all(saves.join(name)) {
+            tracing::warn!("A half-restored copy {name} stays: {e}");
+        }
+    }
+    problems
 }
 
 fn journal_path(saves: &Path, world: &str) -> PathBuf {
@@ -158,8 +172,12 @@ pub fn restore(archive: &Path, saves: &Path, world: &str) -> AppResult<()> {
         had_original: target.exists(),
     };
     let staged_dir = saves.join(&journal.staged);
+    // Before the first file: a crash while unpacking leaves a copy the journal names, so the next
+    // operation removes it.
+    journal.write("unpacking")?;
     if let Err(e) = unpack(&mut zip, &entries, &staged_dir) {
         let _ = fs::remove_dir_all(&staged_dir);
+        let _ = fs::remove_file(&journal.path);
         return Err(e);
     }
     if let Err(e) = journal.write("prepared") {
@@ -380,6 +398,20 @@ mod tests {
         assert!(failed.is_err());
         assert_eq!(fs::read(saves.join("W/level.dat")).unwrap(), b"old", "the world is back in place");
         assert_eq!(leftovers(&saves), Vec::<String>::new(), "no staged or previous folder, no journal");
+    }
+
+    #[test]
+    fn a_copy_a_crash_left_half_unpacked_goes() {
+        // Left by a crash while unpacking (before the journal came first): a world-sized folder no
+        // one lists. The world beside it, and an original moved aside, are never touched.
+        let (_tmp, saves) = saves_with("W", b"old");
+        fs::create_dir_all(saves.join(".W.restore-0000abcd/region")).unwrap();
+        fs::write(saves.join(".W.restore-0000abcd/region/r.0.0.mca"), b"half").unwrap();
+        fs::create_dir_all(saves.join(".W.restore-1.previous")).unwrap();
+        assert!(recover_all(&saves).is_empty());
+        assert!(!saves.join(".W.restore-0000abcd").exists());
+        assert!(saves.join(".W.restore-1.previous").exists(), "an original is never removed blindly");
+        assert_eq!(fs::read(saves.join("W/level.dat")).unwrap(), b"old");
     }
 
     #[test]

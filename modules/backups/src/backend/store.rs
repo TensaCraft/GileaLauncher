@@ -162,6 +162,15 @@ impl Store {
             )
             .with_param("path", dir.to_string_lossy()));
         }
+        // Half-written archives an interrupted backup left (the build's folder is held: none is
+        // being written now).
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().ends_with(".zip.tmp") {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
         let files = files_of(&source).map_err(|e| io_err(&source, e))?;
         let bytes: u64 = files.iter().map(|(_, size)| size).sum();
         preflight(&[SpaceRequest {
@@ -422,6 +431,20 @@ mod tests {
         world(tmp.path(), ".W.restore-1234");
         let found = worlds(tmp.path()).unwrap();
         assert_eq!(found.iter().map(|w| w.0.as_str()).collect::<Vec<_>>(), vec!["W"]);
+    }
+
+    #[test]
+    fn a_half_written_archive_an_interrupted_backup_left_goes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        world(&game, "World");
+        let store = Store::new(tmp.path().join("backups"));
+        let dir = store.world_dir("my_build", "World");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("2026-01-01_00-00-00.zip.tmp"), b"half").unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 9, 29, 10, 20, 30).unwrap();
+        store.create(&build("my_build"), &game, "World", Kind::Manual, now).unwrap();
+        assert!(!dir.join("2026-01-01_00-00-00.zip.tmp").exists());
     }
 
     #[test]
