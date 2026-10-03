@@ -126,7 +126,26 @@ pub fn retry<T>(attempts: u32, pause: Duration, mut op: impl FnMut() -> io::Resu
     Err(last.unwrap_or_else(|| io::Error::other("no attempts")))
 }
 
-/// `target` → `bak`, `new` → `target`; if the second move fails the original is put back.
+/// A file's update (the Windows exe, the Linux AppImage or executable): the old one is copied aside
+/// (`bak`) and stays in place until the new one replaces it in a single move. While an antivirus
+/// holds the new file and the moves are tried again, the launcher is never missing, whatever stops
+/// the helper meanwhile.
+pub fn replace_file(
+    target: &Path,
+    new: &Path,
+    bak: &Path,
+    rename: &mut dyn FnMut(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
+    fs::copy(target, bak)?;
+    if let Err(e) = rename(new, target) {
+        let _ = fs::remove_file(bak);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// A bundle's update (the macOS `.app`, a folder no move can put over another): `target` → `bak`,
+/// `new` → `target`; if the second move fails the original is put back.
 pub fn swap_in(
     target: &Path,
     new: &Path,
@@ -200,7 +219,12 @@ fn install(marker: &Marker) -> io::Result<()> {
     remove_any(&bak);
     stage_new_copy(&marker.source, &new)?;
     let mut rename = |from: &Path, to: &Path| retry(RENAME_ATTEMPTS, RENAME_PAUSE, || fs::rename(from, to));
-    swap_in(target, &new, &bak, &mut rename).inspect_err(|_| remove_any(&new))
+    let swapped = if fs::symlink_metadata(target)?.is_dir() {
+        swap_in(target, &new, &bak, &mut rename)
+    } else {
+        replace_file(target, &new, &bak, &mut rename)
+    };
+    swapped.inspect_err(|_| remove_any(&new))
 }
 
 /// Entry point of `launcher-app --apply-update <marker> --wait-pid <pid>`.
@@ -299,6 +323,42 @@ mod tests {
         assert!(err.is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "v1");
         assert!(!bak.exists());
+    }
+
+    #[test]
+    fn while_the_new_file_waits_the_launcher_stays_in_place() {
+        // An antivirus holds the new file for a while: whatever stops the helper meanwhile, the
+        // launcher must still be there to start.
+        let dir = tempfile::tempdir().unwrap();
+        let (target, new, bak) = trio(dir.path());
+        fs::write(&target, "v1").unwrap();
+        fs::write(&new, "v2").unwrap();
+        let refusals = Cell::new(0);
+        replace_file(&target, &new, &bak, &mut |a, b| {
+            retry(5, Duration::ZERO, || {
+                assert_eq!(
+                    fs::read_to_string(&target).unwrap(),
+                    "v1",
+                    "the launcher is there while it waits"
+                );
+                if refusals.get() < 2 {
+                    refusals.set(refusals.get() + 1);
+                    return Err(io::Error::other("locked by antivirus"));
+                }
+                fs::rename(a, b)
+            })
+        })
+        .unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "v2");
+        assert!(!new.exists());
+        fs::write(&new, "v3").unwrap();
+        let failed = replace_file(&target, &new, &bak, &mut |_, _| Err(io::Error::other("locked")));
+        assert!(failed.is_err());
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "v2",
+            "a failed update keeps the launcher as it was"
+        );
     }
 
     #[test]
