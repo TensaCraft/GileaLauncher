@@ -1,8 +1,9 @@
 //! The launcher in the system tray: hidden there once the game it started runs, when the user chose
 //! that (`GameStartAction::Tray`); back on the icon's click, its menu, a second start or (macOS) the
 //! Dock.
-//! The icon is there only while the window is hidden. Where no tray can be made (Linux without
-//! libayatana-appindicator) the window is minimized instead.
+//! The icon is there only while the window is hidden. Where no tray can be made or shown (Linux
+//! without libayatana-appindicator, or without a StatusNotifier host as on stock GNOME) the window
+//! is minimized instead.
 
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,8 +36,17 @@ pub fn hidden() -> bool {
 /// Hides the window into a tray icon.
 pub fn hide(app: &AppHandle) {
     let handle = app.clone();
+    // Asked here, not on the main thread (a D-Bus call on Linux).
+    let shown = launcher_core::platform::tray::tray_shown();
     let done = app.run_on_main_thread(move || {
         let window = handle.get_webview_window(MAIN_WINDOW);
+        if !shown {
+            tracing::warn!("The desktop shows no tray icons; the launcher is minimized instead");
+            if let Some(window) = &window {
+                let _ = window.minimize();
+            }
+            return;
+        }
         if handle.tray_by_id(TRAY_ID).is_none() {
             // A tray library that is missing panics inside it: the window is minimized instead.
             let built = std::panic::catch_unwind(AssertUnwindSafe(|| build(&handle)));
