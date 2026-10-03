@@ -200,7 +200,12 @@ fn PackInstallDialog(
             if !latest.try_with_value(|l| l.is_current(request)).unwrap_or(false) {
                 return;
             }
-            let _ = name.try_set(default_build_name(&h.title, &list));
+            if let Some(free) = name
+                .try_with_untracked(|typed| free_name(typed, &h.title, default_build_name(&h.title, &list)))
+                .flatten()
+            {
+                let _ = name.try_set(free);
+            }
             let _ = builds.try_set(list);
             if let Ok(found) = &answer {
                 let _ = picked.try_set(found[0].id.clone());
@@ -305,5 +310,25 @@ fn PackInstallDialog(
             on_continue=go_on
             on_open=open_held
         />
+    }
+}
+
+/// The free name for the field (`free`) while it still shows the pack's title; a name the user
+/// typed stays.
+fn free_name(typed: &str, title: &str, free: String) -> Option<String> {
+    (typed == title).then_some(free)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_typed_name_outlives_the_list_of_builds() {
+        // The field shows the pack's title at once and takes focus; the free name comes with the
+        // list of builds a moment later, and must not replace what the user typed meanwhile.
+        assert_eq!(free_name("Pack", "Pack", "Pack (2)".into()), Some("Pack (2)".to_string()));
+        assert_eq!(free_name("My pack", "Pack", "Pack (2)".into()), None);
+        assert_eq!(free_name("", "Pack", "Pack (2)".into()), None);
     }
 }
