@@ -137,6 +137,12 @@ pub fn with_default_collector(arguments: Vec<String>) -> Vec<String> {
     all
 }
 
+/// The memory arguments a launch settled on, for the log.
+fn memory_note(max_gb: Option<u64>, removed_initial_heap: bool) -> String {
+    let max = max_gb.map_or_else(|| "no -Xmx".to_string(), |gb| format!("-Xmx{gb}G"));
+    if removed_initial_heap { format!("{max}, removed -Xms") } else { max }
+}
+
 /// The launch options and GPU mode (the build's, else `gpu_mode_default`).
 pub fn launch_options(input: OptionsInput<'_>) -> (LaunchOptions, GpuMode) {
     let OptionsInput { build, identity, mc_dir, component, java, config, limits } = input;
@@ -149,10 +155,9 @@ pub fn launch_options(input: OptionsInput<'_>) -> (LaunchOptions, GpuMode) {
     let memory = sanitize_jvm_arguments(&jvm_arguments(options), Some(fallback), &limits);
     if memory.changed {
         tracing::info!(
-            "Normalized JVM memory arguments of {}: -Xmx{:?}G{}",
+            "Normalized JVM memory arguments of {}: {}",
             build.name,
-            memory.max_gb,
-            if memory.removed_initial_heap { ", removed -Xms" } else { "" }
+            memory_note(memory.max_gb, memory.removed_initial_heap)
         );
     }
     let config_gpu = config.get_str(GPU_MODE_DEFAULT_KEY);
@@ -201,6 +206,14 @@ pub fn resolve_java(build: &Build, managed: Option<PathBuf>, mc_dir: &Path) -> P
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_memory_note_names_the_heap_in_gigabytes() {
+        // The log said "-XmxSome(16)G".
+        assert_eq!(memory_note(Some(16), false), "-Xmx16G");
+        assert_eq!(memory_note(Some(4), true), "-Xmx4G, removed -Xms");
+        assert_eq!(memory_note(None, false), "no -Xmx");
+    }
     use launcher_shared::AccountKind;
     use serde_json::json;
 
