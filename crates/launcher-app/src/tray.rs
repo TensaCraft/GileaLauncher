@@ -128,14 +128,27 @@ pub struct AppTexts {
     pub quit: String,
 }
 
-/// The system's words for the launcher in its language.
-pub fn texts(lang: &str) -> AppTexts {
+/// The launcher's texts in `lang` (English for any other language).
+fn words(lang: &str) -> serde_json::Value {
     let raw = if lang == "uk_UA" {
         include_str!("../../../assets/langs/uk_UA.json")
     } else {
         include_str!("../../../assets/langs/en_US.json")
     };
-    let words: serde_json::Value = serde_json::from_str(raw).unwrap_or_default();
+    serde_json::from_str(raw).unwrap_or_default()
+}
+
+/// The title and the text of the message a start that failed shows, with why (`detail`).
+pub fn startup_failure(lang: &str, detail: &str) -> (String, String) {
+    let words = words(lang);
+    let get = |key: &str, fallback: &str| words[key].as_str().unwrap_or(fallback).to_string();
+    let text = get("startup_failed", "Why: {error}").replace("{error}", detail);
+    (get("startup_failed_title", "The launcher could not start"), text)
+}
+
+/// The system's words for the launcher in its language.
+pub fn texts(lang: &str) -> AppTexts {
+    let words = words(lang);
     let get = |key: &str, fallback: &str| words[key].as_str().unwrap_or(fallback).to_string();
     AppTexts {
         title: get("app_title", "Minecraft launcher"),
@@ -147,6 +160,16 @@ pub fn texts(lang: &str) -> AppTexts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_start_says_why_in_the_system_s_language() {
+        let (title, text) = startup_failure("uk_UA", "disk is full");
+        assert_eq!(title, "Лаунчер не запустився");
+        assert!(text.contains("disk is full"), "{text}");
+        let (title, text) = startup_failure("de_DE", "disk is full");
+        assert_eq!(title, "The launcher could not start");
+        assert!(text.contains("disk is full"), "{text}");
+    }
 
     #[test]
     fn the_tray_speaks_the_launcher_s_language_and_names_no_brand() {

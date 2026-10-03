@@ -323,6 +323,8 @@
   "on_game_start_close": "Close the launcher",
   "on_game_start_tray": "Minimize to the tray",
   "auth_session_not_renewed": "Couldn’t renew the Microsoft sign-in for {profile}: the game will start, but servers may not let you in. Check your internet connection.",
+  "startup_failed_title": "The launcher could not start",
+  "startup_failed": "Why: {error}\n\nIf it happens again, ask for help in support.",
   "tray_open": "Open the launcher",
   "tray_quit": "Quit",
   "window_tray": "Minimize to tray",

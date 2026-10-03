@@ -323,6 +323,8 @@
   "on_game_start_close": "Закрити лаунчер",
   "on_game_start_tray": "Згорнути в трей",
   "auth_session_not_renewed": "Не вдалося оновити вхід Microsoft для {profile}: гра запуститься, але сервери можуть не пустити. Перевірте з’єднання з інтернетом.",
+  "startup_failed_title": "Лаунчер не запустився",
+  "startup_failed": "Причина: {error}\n\nЯкщо це повториться, напишіть у підтримку.",
   "tray_open": "Відкрити лаунчер",
   "tray_quit": "Вийти",
   "window_tray": "Згорнути в трей",

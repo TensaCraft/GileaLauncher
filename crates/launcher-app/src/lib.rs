@@ -33,6 +33,17 @@ fn focus_main_window(app: &AppHandle) {
     tray::restore(app);
 }
 
+/// The core could not start (its folders, its settings): the window never shows, so a message of
+/// the system says why, and the launcher quits once it is read.
+fn startup_failed(app: &AppHandle, lang: &str, detail: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    tracing::error!("The launcher could not start: {detail}");
+    eprintln!("The launcher could not start: {detail}");
+    let (title, text) = tray::startup_failure(lang, detail);
+    let handle = app.clone();
+    app.dialog().message(text).title(title).kind(MessageDialogKind::Error).show(move |_| handle.exit(1));
+}
+
 /// A deferred update is installed by the primary instance only (this runs after single-instance).
 fn resume_pending_update(env: &PathEnv) -> ResumeOutcome {
     if env.dev_root.is_some() {
@@ -108,16 +119,23 @@ pub fn run() -> i32 {
             }
             let sink = Arc::new(bridge::TauriSink::new(app.handle().clone()));
             let system_lang = detect_system_lang(sys_locale::get_locale().as_deref());
-            let core = Arc::new(CoreApp::bootstrap(
+            let started = CoreApp::bootstrap(
                 env,
                 sink,
                 modules::backend_modules(),
                 BootstrapOptions {
                     init_logging: true,
-                    system_lang,
+                    system_lang: system_lang.clone(),
                     opener: Arc::new(bridge::TauriOpener::new(app.handle().clone())),
                 },
-            )?);
+            );
+            let core = match started {
+                Ok(core) => Arc::new(core),
+                Err(e) => {
+                    startup_failed(app.handle(), &system_lang, &e.detail);
+                    return Ok(());
+                }
+            };
             if let ResumeOutcome::Discarded(reason) = &resumed {
                 tracing::warn!("Discarded a pending launcher update: {reason}");
             }
