@@ -2,7 +2,7 @@
 //! resource and shader packs (`.zip`, `.zip.disabled` or folders). Links are never listed, so
 //! nothing outside the build's content folders is shown or changed.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -15,8 +15,10 @@ use super::packs::{RESOURCE_PACKS, read_options_list, read_properties, resourcep
 use crate::builds::components::dir_size;
 
 const DISABLED: &str = ".disabled";
-const CACHE_SIZE: usize = 512;
-const CACHE_MAX_CHARS: usize = 4096;
+/// Jars whose metadata is kept: more than the biggest builds have.
+const CACHE_SIZE: usize = 8192;
+/// A descriptor longer than this (its texts) is read again each time rather than kept.
+const CACHE_MAX_CHARS: usize = 16 * 1024;
 
 /// An installed item and where it lies.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,32 +38,28 @@ pub fn iris_properties(game_dir: &Path) -> PathBuf {
 }
 
 type Stamp = (u64, Option<SystemTime>);
-type Cached = (PathBuf, Option<LoaderKind>, Stamp, Option<ModDescriptor>);
+type CacheKey = (PathBuf, Option<LoaderKind>);
 
 fn stamp(path: &Path) -> Option<Stamp> {
     let meta = fs::metadata(path).ok()?;
     Some((meta.len(), meta.modified().ok()))
 }
 
-/// Mod metadata by file and loader, kept while the file's size and time stay (512 files).
+/// Mod metadata by file and loader, kept while the file's size and time stay. Full, it first lets
+/// go of the files no longer there.
 #[derive(Default)]
 pub struct MetadataCache {
-    entries: Mutex<VecDeque<Cached>>,
+    entries: Mutex<HashMap<CacheKey, (Stamp, Option<ModDescriptor>)>>,
 }
 
 impl MetadataCache {
     pub fn descriptor(&self, path: &Path, loader: Option<LoaderKind>) -> Option<ModDescriptor> {
         let before = stamp(path)?;
+        let key = (path.to_path_buf(), loader);
+        if let Some((known, descriptor)) = self.entries.lock().unwrap_or_else(|e| e.into_inner()).get(&key)
+            && *known == before
         {
-            let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(at) =
-                entries.iter().position(|(p, l, s, _)| p == path && *l == loader && *s == before)
-            {
-                let hit = entries.remove(at)?;
-                let descriptor = hit.3.clone();
-                entries.push_back(hit);
-                return descriptor;
-            }
+            return descriptor.clone();
         }
         let descriptor = inspect_mod_jar(path, loader).ok();
         let chars = descriptor.as_ref().map_or(0, |d| {
@@ -73,11 +71,13 @@ impl MetadataCache {
         });
         if chars <= CACHE_MAX_CHARS && stamp(path) == Some(before) {
             let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-            entries.retain(|(p, l, ..)| !(p == path && *l == loader));
-            entries.push_back((path.to_path_buf(), loader, before, descriptor.clone()));
-            while entries.len() > CACHE_SIZE {
-                entries.pop_front();
+            if entries.len() >= CACHE_SIZE && !entries.contains_key(&key) {
+                entries.retain(|(known, _), _| known.exists());
+                if entries.len() >= CACHE_SIZE {
+                    entries.clear();
+                }
             }
+            entries.insert(key, (before, descriptor.clone()));
         }
         descriptor
     }
@@ -240,6 +240,34 @@ mod tests {
         zip.start_file("fabric.mod.json", options).unwrap();
         zip.write_all(descriptor.as_bytes()).unwrap();
         zip.finish().unwrap();
+    }
+
+    #[test]
+    fn a_build_of_many_mods_reads_each_jar_once() {
+        // 600 mods, listed in the same order each time, outgrew the old cache: every listing read
+        // every jar again. A jar read once is known while its size and time stay.
+        let dir = tempfile::tempdir().unwrap();
+        let cache = MetadataCache::default();
+        let long = "x".repeat(6000);
+        let paths: Vec<PathBuf> = (0..600)
+            .map(|i| {
+                let path = dir.path().join(format!("m{i}.jar"));
+                jar(&path, &format!(r#"{{"id":"m{i}","name":"M{i}","description":"{long}"}}"#));
+                path
+            })
+            .collect();
+        for path in &paths {
+            assert!(cache.descriptor(path, None).is_some());
+        }
+        // Each jar turns to garbage of the same size and time: only a read would notice.
+        for path in &paths {
+            let modified = fs::metadata(path).unwrap().modified().unwrap();
+            let len = fs::metadata(path).unwrap().len() as usize;
+            fs::write(path, vec![0u8; len]).unwrap();
+            fs::File::options().write(true).open(path).unwrap().set_modified(modified).unwrap();
+        }
+        let known = paths.iter().filter(|p| cache.descriptor(p, None).is_some()).count();
+        assert_eq!(known, 600, "every jar was known without reading it again");
     }
 
     #[test]
