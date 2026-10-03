@@ -112,9 +112,13 @@ async fn all_files_of_a_mod_come_page_by_page() {
     let api = api(&server, TEST_KEY);
     let all = api.files(7, Some("1.21.1"), Some(4)).await.unwrap();
     assert_eq!(all.len(), 120);
-    let indexes: Vec<String> =
+    let mut indexes: Vec<String> =
         server.seen().iter().map(|s| s.query.iter().find(|(k, _)| k == "index").unwrap().1.clone()).collect();
+    // The pages after the first are asked side by side, in any order.
+    indexes.sort_by_key(|i| i.parse::<u32>().unwrap());
     assert_eq!(indexes, ["0", "50", "100"]);
+    let ids: Vec<u64> = all.iter().map(|f| f["id"].as_u64().unwrap()).collect();
+    assert_eq!(ids, (1000..1120).collect::<Vec<_>>(), "the files in CurseForge's order");
 }
 
 #[tokio::test(flavor = "multi_thread")]

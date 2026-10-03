@@ -3232,6 +3232,7 @@ name = "module-curseforge"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "futures-util",
  "hex",
  "launcher-core",
  "launcher-shared",

@@ -73,6 +73,22 @@ async fn required_dependencies_come_along_however_deep() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_dependencies_of_a_dependency_are_asked_about_together() {
+    // One request for the projects a dependency's file needs, not one for each of them.
+    let server = FakeCurseForge::start().await;
+    publish(&server, 1, "Create", &[(2, 3)]);
+    publish(&server, 2, "Flywheel", &[(3, 3), (4, 3), (5, 3)]);
+    publish(&server, 3, "Architectury", &[]);
+    publish(&server, 4, "Ponder", &[]);
+    publish(&server, 5, "Catnip", &[]);
+    let installed = Installed::default();
+    let dto = plan(&server, &mods_target(&installed), 1, &[]).await;
+    assert_eq!(titles(&dto.install), ["Flywheel", "Architectury", "Ponder", "Catnip"]);
+    let asked = server.seen().into_iter().filter(|s| s.path == "/v1/mods").count();
+    assert_eq!(asked, 2, "Create's dependency, then Flywheel's three at once");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn installed_projects_are_kept_or_replaced() {
     let server = FakeCurseForge::start().await;
     publish(&server, 1, "Create", &[(2, 3)]);

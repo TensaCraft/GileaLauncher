@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-backend = ["dep:launcher-core", "dep:reqwest", "dep:secrecy", "dep:serde", "dep:tokio", "dep:tracing", "dep:zip"]
+backend = ["dep:futures-util", "dep:launcher-core", "dep:reqwest", "dep:secrecy", "dep:serde", "dep:tokio", "dep:tracing", "dep:zip"]
 ui = ["dep:ui-kit"]
 # Plain HTTP files from this machine: the tests' fake CurseForge only (never an app build).
 test-servers = []
@@ -13,6 +13,7 @@ test-servers = []
 [dependencies]
 launcher-shared.workspace = true
 serde_json.workspace = true
+futures-util = { workspace = true, optional = true }
 launcher-core = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 secrecy = { workspace = true, optional = true }

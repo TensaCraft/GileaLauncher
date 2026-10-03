@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use futures_util::stream::{self, StreamExt, TryStreamExt};
 use launcher_core::net::{api_client_within, send_patiently};
 use launcher_shared::branding::{APP_NAME, SUPPORT_URL, VERSION};
 use launcher_shared::{AppError, AppResult, ErrorCode};
@@ -19,6 +20,8 @@ pub const BASE: &str = "https://api.curseforge.com";
 pub const GAME_ID: u32 = 432;
 /// The largest page the API gives.
 pub const PAGE: u32 = 50;
+/// Pages of a mod's files asked at once.
+const PAGES_AT_ONCE: usize = 4;
 const CONNECT: Duration = Duration::from_secs(5);
 const READ: Duration = Duration::from_secs(20);
 const PROVIDER: &str = "CurseForge";
@@ -109,32 +112,56 @@ impl CurseForgeApi {
         Ok(data_list(answer))
     }
 
-    /// `GET /v1/mods/{id}/files`: every file that fits, page by page.
+    /// `GET /v1/mods/{id}/files`: every file that fits. The first page says how many there are;
+    /// the others are asked a few at a time (a pack lists hundreds of files).
     pub async fn files(
         &self,
         mod_id: u64,
         game_version: Option<&str>,
         loader: Option<u32>,
     ) -> AppResult<Vec<Value>> {
-        let mut files = Vec::new();
-        loop {
-            let mut pairs = vec![("index", files.len().to_string()), ("pageSize", PAGE.to_string())];
-            if let Some(version) = game_version {
-                pairs.push(("gameVersion", version.to_string()));
-            }
-            if let Some(loader) = loader {
-                pairs.push(("modLoaderType", loader.to_string()));
-            }
-            let mut answer = self.get(&format!("/v1/mods/{mod_id}/files"), &pairs).await?;
-            let total = answer["pagination"]["totalCount"].as_u64().unwrap_or(0) as usize;
-            let page = data_list(answer["data"].take());
-            let got = page.len();
-            files.extend(page);
-            // The API pages no further than its 10 000th result.
-            if got == 0 || files.len() >= total || files.len() + PAGE as usize > 10_000 {
-                return Ok(files);
-            }
+        let page = PAGE as usize;
+        let (total, mut files) = self.files_page(mod_id, game_version, loader, 0).await?;
+        if files.is_empty() || files.len() >= total {
+            return Ok(files);
         }
+        // The API pages no further than its 10 000th result.
+        let starts: Vec<usize> = (page..total.min(10_000 - page + 1)).step_by(page).collect();
+        let pages: Vec<Vec<Value>> =
+            stream::iter(starts)
+                .map(|index| async move {
+                    self.files_page(mod_id, game_version, loader, index).await.map(|(_, p)| p)
+                })
+                .buffered(PAGES_AT_ONCE)
+                .try_collect()
+                .await?;
+        for page in pages {
+            if page.is_empty() {
+                break;
+            }
+            files.extend(page);
+        }
+        Ok(files)
+    }
+
+    /// One page of `files`, from `index`, and how many files there are in all.
+    async fn files_page(
+        &self,
+        mod_id: u64,
+        game_version: Option<&str>,
+        loader: Option<u32>,
+        index: usize,
+    ) -> AppResult<(usize, Vec<Value>)> {
+        let mut pairs = vec![("index", index.to_string()), ("pageSize", PAGE.to_string())];
+        if let Some(version) = game_version {
+            pairs.push(("gameVersion", version.to_string()));
+        }
+        if let Some(loader) = loader {
+            pairs.push(("modLoaderType", loader.to_string()));
+        }
+        let mut answer = self.get(&format!("/v1/mods/{mod_id}/files"), &pairs).await?;
+        let total = answer["pagination"]["totalCount"].as_u64().unwrap_or(0) as usize;
+        Ok((total, data_list(answer["data"].take())))
     }
 
     /// `POST /v1/mods/files`: the files of `ids` that exist.

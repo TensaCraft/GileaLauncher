@@ -375,7 +375,10 @@ pub async fn plan(
             plan.blocking.push(blocked_issue(&dependency, &file, true));
             continue;
         }
-        for (next, relation) in dependencies(&file) {
+        // Its dependencies are asked about together, as the project's own are (not one by one).
+        let needs = dependencies(&file);
+        resolver.know(&needs.iter().map(|(id, _)| *id).collect::<Vec<_>>()).await?;
+        for (next, relation) in needs {
             match relation {
                 REQUIRED if !seen.contains(&next) => queue.push_back((next, None)),
                 INCOMPATIBLE => {
