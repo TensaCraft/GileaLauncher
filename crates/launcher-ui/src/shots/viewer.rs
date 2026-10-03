@@ -50,22 +50,39 @@ pub fn ScreenshotViewer(
     list: Signal<Vec<(String, ScreenshotDto)>>,
     /// A build's name by its key.
     build_name: Callback<String, String>,
-    /// After a rename (the build key and the new name, to stay on it) or a delete (`None`).
-    on_changed: Callback<Option<(String, String)>>,
+    /// After a rename or a delete: the page loads its list again.
+    on_changed: Callback<()>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let actions = use_shot_actions();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
     let current = Memo::new(move |_| list.with(|l| l.get(state.at.get()).cloned()));
     let count = Memo::new(move |_| list.with(Vec::len));
-    // A shorter list (a delete) keeps the viewer on the last one.
+    // The viewer follows the screenshot it shows (its build and name), not its place: a list
+    // loaded again with others before it keeps it on screen. One that is gone gives its place to
+    // the next (the last, at the end).
+    let pinned = StoredValue::new(None::<(String, String)>);
+    let pin = move |list: &[(String, ScreenshotDto)], at: usize| {
+        pinned.set_value(list.get(at).map(|(key, shot)| (key.clone(), shot.name.clone())));
+    };
     Effect::new(move |_| {
-        let len = count.get();
-        if len == 0 {
-            state.open.set(false);
-        } else if state.at.get_untracked() >= len {
-            state.at.set(len - 1);
+        let placed = list.with(|l| {
+            let found = pinned.with_value(|p| {
+                p.as_ref().and_then(|(key, name)| l.iter().position(|(k, s)| k == key && s.name == *name))
+            });
+            let at = found.unwrap_or_else(|| state.at.get_untracked().min(l.len().saturating_sub(1)));
+            pin(l, at);
+            (!l.is_empty()).then_some(at)
+        });
+        match placed {
+            None => state.open.set(false),
+            Some(at) if at != state.at.get_untracked() => state.at.set(at),
+            Some(_) => {}
         }
+    });
+    Effect::new(move |_| {
+        let at = state.at.get();
+        list.with_untracked(|l| pin(l, at));
     });
     // A comparison inside `view!` would end the tag: these are worked out here.
     let at_end = Signal::derive(move || state.at.get() + 1 >= count.get());
@@ -75,13 +92,15 @@ pub fn ScreenshotViewer(
             state.at.set(next);
         }
     };
+    let delete_open = RwSignal::new(false);
     let keys = window_event_listener(leptos::ev::keydown, move |ev| {
         let typing = ev
             .target()
             .and_then(|t| js_sys::Reflect::get(&t, &"tagName".into()).ok())
             .and_then(|tag| tag.as_string())
             .is_some_and(|tag| tag == "INPUT" || tag == "TEXTAREA");
-        if !state.open.get_untracked() || typing {
+        // Not under the delete question: the arrows move between its buttons there.
+        if !state.open.get_untracked() || typing || delete_open.get_untracked() {
             return;
         }
         match ev.key().as_str() {
@@ -130,7 +149,8 @@ pub fn ScreenshotViewer(
     let renamed = Callback::new(move |(key, result): (String, Result<ScreenshotDto, String>)| match result {
         Ok(renamed) => {
             state.renaming.set(false);
-            on_changed.run(Some((key, renamed.name)));
+            pinned.set_value(Some((key, renamed.name)));
+            on_changed.run(());
         }
         Err(message) => rename_error.set(Some(message)),
     });
@@ -139,7 +159,6 @@ pub fn ScreenshotViewer(
         actions.rename(key, shot.name, wanted.get_untracked(), renamed);
     };
 
-    let delete_open = RwSignal::new(false);
     let delete_text = Signal::derive(move || {
         current
             .with(|c| {
@@ -147,7 +166,7 @@ pub fn ScreenshotViewer(
             })
             .unwrap_or_default()
     });
-    let deleted = Callback::new(move |_: usize| on_changed.run(None));
+    let deleted = Callback::new(move |_: usize| on_changed.run(()));
     let confirm_delete = Callback::new(move |()| {
         delete_open.set(false);
         let Some((key, shot)) = current.get_untracked() else { return };
@@ -219,7 +238,17 @@ pub fn ScreenshotViewer(
                                     </div>
                                 }
                             >
-                                <div class="viewer__rename" node_ref=rename_box>
+                                <div
+                                    class="viewer__rename"
+                                    node_ref=rename_box
+                                    on:keydown=move |ev| {
+                                        // Escape leaves the name as it was; the viewer stays.
+                                        if ev.key() == "Escape" {
+                                            ev.prevent_default();
+                                            state.renaming.set(false);
+                                        }
+                                    }
+                                >
                                     <TextInput
                                         value=wanted
                                         autofocus=true

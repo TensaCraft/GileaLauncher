@@ -42,12 +42,17 @@ pub fn ScreenshotsPage() -> impl IntoView {
     let menu = use_context_menu();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
 
-    // `None` while the first answer is on its way.
+    // `None` while the first answer is on its way; an answer to an older request is dropped.
     let all = RwSignal::new(None::<Result<Vec<BuildShots>, String>>);
+    let asked = StoredValue::new(0u64);
     let load = move || {
+        let turn = asked.get_value() + 1;
+        asked.set_value(turn);
         spawn_local(async move {
             let answer = ipc::call::<Vec<BuildShots>>("screenshots_all").await;
-            all.set(Some(answer.map_err(|e| i18n.error(&e))));
+            if asked.get_value() == turn {
+                all.set(Some(answer.map_err(|e| i18n.error(&e))));
+            }
         });
     };
     // Again when a game stops: it may have left new screenshots.
@@ -81,7 +86,7 @@ pub fn ScreenshotsPage() -> impl IntoView {
             _ => Vec::new(),
         })
     });
-    let shown = Signal::derive(move || groups.with(|g| flat(g)));
+    let shown = Memo::new(move |_| groups.with(|g| flat(g)));
     let build_options = Signal::derive(move || {
         let mut options = vec![SelectOption::new("", i18n.t("shots_all_builds"))];
         all.with(|a| {
@@ -108,19 +113,19 @@ pub fn ScreenshotsPage() -> impl IntoView {
             selected.set(BTreeSet::new());
         }
     });
-    // After a rename the viewer stays on the renamed screenshot.
-    let stay_on = RwSignal::new(None::<(String, String)>);
+    let changed = Callback::new(move |()| load());
+    // Another search or build starts the selection over: what is selected is always shown.
     Effect::new(move |_| {
-        let Some((key, name)) = stay_on.get() else { return };
-        if let Some(at) = shown.with(|list| list.iter().position(|(k, s)| *k == key && s.name == name)) {
-            viewer.at.set(at);
-            stay_on.set(None);
+        query.track();
+        only.track();
+        selected.set(BTreeSet::new());
+    });
+    // The viewer opens on a screenshot by what it is, so a list loaded meanwhile cannot shift it.
+    let show = move |key: &str, name: &str, rename: bool| {
+        if let Some(at) = shown.with_untracked(|l| l.iter().position(|(k, s)| k == key && s.name == name)) {
+            viewer.show(at, rename);
         }
-    });
-    let changed = Callback::new(move |renamed: Option<(String, String)>| {
-        stay_on.set(renamed);
-        load();
-    });
+    };
 
     // Deleting from a thumbnail's menu, or the selected ones.
     let delete_items = RwSignal::new(Vec::<ShotRef>::new());
@@ -146,10 +151,10 @@ pub fn ScreenshotsPage() -> impl IntoView {
         }
     };
 
-    let tile_menu = move |key: String, name: String, at: usize, (x, y): (i32, i32)| {
+    let tile_menu = move |key: String, name: String, (x, y): (i32, i32)| {
         menu.open_with(x, y, menu_entries(i18n), move |id| match id.as_str() {
-            MENU_VIEW => viewer.show(at, false),
-            MENU_RENAME => viewer.show(at, true),
+            MENU_VIEW => show(&key, &name, false),
+            MENU_RENAME => show(&key, &name, true),
             MENU_COPY => actions.copy(key.clone(), name.clone()),
             MENU_OPEN => actions.open(key.clone(), name.clone()),
             MENU_REVEAL => actions.reveal(key.clone(), name.clone()),
@@ -158,7 +163,7 @@ pub fn ScreenshotsPage() -> impl IntoView {
         });
     };
 
-    let group_view = move |group: BuildShots, first: usize| {
+    let group_view = move |group: BuildShots| {
         let key = group.key.clone();
         let folded = fold_state(format!("shots.fold.{key}"));
         let build = store.builds.with_untracked(|b| b.iter().find(|b| b.key == key).cloned());
@@ -169,9 +174,7 @@ pub fn ScreenshotsPage() -> impl IntoView {
         let tiles = group
             .shots
             .into_iter()
-            .enumerate()
-            .map(|(i, shot)| {
-                let at = first + i;
+            .map(|shot| {
                 let id = (key.clone(), shot.name.clone());
                 let (for_click, for_check, for_menu) = (id.clone(), id.clone(), id);
                 view! {
@@ -188,10 +191,10 @@ pub fn ScreenshotsPage() -> impl IntoView {
                                     }
                                 });
                             } else {
-                                viewer.show(at, false);
+                                show(&for_click.0, &for_click.1, false);
                             }
                         })
-                        on_menu=Callback::new(move |pos| tile_menu(for_menu.0.clone(), for_menu.1.clone(), at, pos))
+                        on_menu=Callback::new(move |pos| tile_menu(for_menu.0.clone(), for_menu.1.clone(), pos))
                     />
                 }
             })
@@ -243,19 +246,7 @@ pub fn ScreenshotsPage() -> impl IntoView {
         Some(Ok(_)) if groups.with(Vec::is_empty) => {
             view! { <EmptyState icon="search_off" title=t("shots_nothing_found") /> }.into_any()
         }
-        Some(Ok(_)) => {
-            let mut first = 0;
-            groups
-                .get()
-                .into_iter()
-                .map(|group| {
-                    let at = first;
-                    first += group.shots.len();
-                    group_view(group, at)
-                })
-                .collect_view()
-                .into_any()
-        }
+        Some(Ok(_)) => groups.get().into_iter().map(group_view).collect_view().into_any(),
     }
     };
 
@@ -264,9 +255,15 @@ pub fn ScreenshotsPage() -> impl IntoView {
             shown.with(|list| list.iter().map(|(k, s)| (k.clone(), s.name.clone())).collect());
         selected.set(every);
     };
+    // Only what is shown goes, whatever was selected before.
     let delete_selected = move || {
-        let items = selected.with_untracked(|s| {
-            s.iter().map(|(key, name)| ShotRef { key: key.clone(), name: name.clone() }).collect()
+        let items = shown.with_untracked(|list| {
+            selected.with_untracked(|s| {
+                list.iter()
+                    .filter(|(key, shot)| s.contains(&(key.clone(), shot.name.clone())))
+                    .map(|(key, shot)| ShotRef { key: key.clone(), name: shot.name.clone() })
+                    .collect()
+            })
         });
         ask_delete(items);
     };

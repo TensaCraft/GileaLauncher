@@ -43,25 +43,19 @@ pub fn ScreenshotsPanel(key: String) -> impl IntoView {
     };
     load();
 
-    let shown = Signal::derive(move || {
+    let shown = Memo::new(move |_| {
         list.shown().with(|s| match s {
             Some(Ok(shots)) => shots.iter().map(|s| (key.get_value(), s.clone())).collect(),
             _ => Vec::new(),
         })
     });
     let viewer = ViewerState::new();
-    let stay_on = RwSignal::new(None::<String>);
-    Effect::new(move |_| {
-        let Some(name) = stay_on.get() else { return };
-        if let Some(at) = shown.with(|list| list.iter().position(|(_, s)| s.name == name)) {
-            viewer.at.set(at);
-            stay_on.set(None);
+    let changed = Callback::new(move |()| load());
+    let show = move |name: &str, rename: bool| {
+        if let Some(at) = shown.with_untracked(|l| l.iter().position(|(_, s)| s.name == name)) {
+            viewer.show(at, rename);
         }
-    });
-    let changed = Callback::new(move |renamed: Option<(String, String)>| {
-        stay_on.set(renamed.map(|(_, name)| name));
-        load();
-    });
+    };
 
     let delete_of = RwSignal::new(None::<String>);
     let delete_open = RwSignal::new(false);
@@ -77,10 +71,10 @@ pub fn ScreenshotsPanel(key: String) -> impl IntoView {
         actions.delete(vec![ShotRef { key: key.get_value(), name }], deleted);
     });
 
-    let tile_menu = move |name: String, at: usize, (x, y): (i32, i32)| {
+    let tile_menu = move |name: String, (x, y): (i32, i32)| {
         menu.open_with(x, y, menu_entries(i18n), move |id| match id.as_str() {
-            MENU_VIEW => viewer.show(at, false),
-            MENU_RENAME => viewer.show(at, true),
+            MENU_VIEW => show(&name, false),
+            MENU_RENAME => show(&name, true),
             MENU_COPY => actions.copy(key.get_value(), name.clone()),
             MENU_OPEN => actions.open(key.get_value(), name.clone()),
             MENU_REVEAL => actions.reveal(key.get_value(), name.clone()),
@@ -111,16 +105,16 @@ pub fn ScreenshotsPanel(key: String) -> impl IntoView {
             <div class="shot-grid">
                 {shots
                     .into_iter()
-                    .enumerate()
-                    .map(|(at, shot)| {
+                    .map(|shot| {
                         let name = shot.name.clone();
+                        let for_click = shot.name.clone();
                         view! {
                             <ShotTile
                                 shot=shot
                                 selecting=false
                                 selected=false
-                                on_click=Callback::new(move |()| viewer.show(at, false))
-                                on_menu=Callback::new(move |pos| tile_menu(name.clone(), at, pos))
+                                on_click=Callback::new(move |()| show(&for_click, false))
+                                on_menu=Callback::new(move |pos| tile_menu(name.clone(), pos))
                             />
                         }
                     })
