@@ -54,12 +54,17 @@ pub fn image_type(name: &str) -> &'static str {
     if ends_with_ci(name, ".png") { "image/png" } else { "image/jpeg" }
 }
 
+/// Whether `a` and `b` name one file (its real path, case included, as the system gives it).
+fn same_file(a: &Path, b: &Path) -> bool {
+    matches!((fs::canonicalize(a), fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
+}
+
 /// The longest name (without its extension) a screenshot may be given.
 pub const NAME_MOST: usize = 120;
 /// Names Windows keeps for devices, with any extension.
-const DEVICES: [&str; 22] = [
-    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
-    "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+const DEVICES: [&str; 26] = [
+    "con", "prn", "aux", "nul", "conin$", "conout$", "com0", "com1", "com2", "com3", "com4", "com5", "com6",
+    "com7", "com8", "com9", "lpt0", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
 /// The file name a screenshot `old` gets when the user asks for `wanted`: trimmed, its own
@@ -78,7 +83,9 @@ pub fn new_name(old: &str, wanted: &str) -> AppResult<String> {
     let bad_char = stem
         .chars()
         .any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'));
-    let device = DEVICES.contains(&stem.to_ascii_lowercase().as_str());
+    // `con.txt` is the device as much as `con`.
+    let base = stem.split('.').next().unwrap_or(stem).trim_end().to_ascii_lowercase();
+    let device = DEVICES.contains(&base.as_str());
     if stem.is_empty()
         || stem.chars().all(|c| c == '.')
         || stem.ends_with(['.', ' '])
@@ -99,9 +106,9 @@ pub fn rename_screenshot(shot: &ScreenshotFile, wanted: &str) -> AppResult<Scree
         return Ok(shot.clone());
     }
     let to = shot.path.with_file_name(&name);
-    // A name that differs only in case is the same file on Windows and macOS: no collision then.
-    let same_file = name.eq_ignore_ascii_case(&shot.name) || name.to_lowercase() == shot.name.to_lowercase();
-    if !same_file && fs::symlink_metadata(&to).is_ok() {
+    // A name that differs only in case is this very file where names ignore case (Windows,
+    // macOS); elsewhere it may be another one, never replaced.
+    if fs::symlink_metadata(&to).is_ok() && !same_file(&shot.path, &to) {
         return Err(AppError::new(ErrorCode::FileNameTaken, format!("{} exists", to.display()))
             .with_param("name", &name));
     }
@@ -229,11 +236,42 @@ mod tests {
             assert_eq!(renamed("a.png", wanted), Err(()), "{wanted:?}");
         }
         assert!(renamed("a.png", &"я".repeat(120)).is_ok());
+        // Windows takes a device name with any extension, and these too.
+        for device in ["con.txt", "Aux.log", "COM0", "lpt0", "CONIN$", "conout$.x"] {
+            assert_eq!(renamed("a.png", device), Err(()), "{device:?}");
+        }
+        assert!(renamed("a.png", "console").is_ok() && renamed("a.png", "con-tour").is_ok());
         assert_eq!(renamed("a.png", &"я".repeat(121)), Err(()));
     }
 
     fn renamed(old: &str, wanted: &str) -> Result<String, ()> {
         new_name(old, wanted).map_err(|_| ())
+    }
+
+    #[test]
+    fn a_name_that_differs_only_in_case_renames_the_same_file() {
+        let game = tempfile::tempdir().unwrap();
+        let dir = game.path().join(SCREENSHOTS);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("base.png"), b"b").unwrap();
+        let shot = find_screenshot(game.path(), "base.png").unwrap();
+        let moved = rename_screenshot(&shot, "BASE").unwrap();
+        assert_eq!(moved.name, "BASE.png");
+        assert_eq!(fs::read(&moved.path).unwrap(), b"b");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_name_that_differs_only_in_case_never_replaces_another_file() {
+        // Files whose names differ only in case are two files on Linux.
+        let game = tempfile::tempdir().unwrap();
+        let dir = game.path().join(SCREENSHOTS);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("base.png"), b"lower").unwrap();
+        fs::write(dir.join("Base.png"), b"upper").unwrap();
+        let shot = find_screenshot(game.path(), "base.png").unwrap();
+        assert_eq!(rename_screenshot(&shot, "Base").unwrap_err().code, ErrorCode::FileNameTaken);
+        assert_eq!(fs::read(dir.join("Base.png")).unwrap(), b"upper");
     }
 
     #[test]
