@@ -128,6 +128,25 @@ async fn ensure_installed_repairs_missing_files() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_launch_repair_reads_only_what_is_missing() {
+    // One missing library before a launch: the files of the right size are trusted, not hashed
+    // again one by one (thousands of assets); the Components page's Verify hashes them.
+    let fake = FakeMojang::start().await;
+    let v = fake.add_vanilla("1.21.1");
+    let s = setup(&fake);
+    s.installer.install("1.21.1", false, &|_| {}).await.unwrap();
+    let kept = object(&s.mc, &v.objects[0].0);
+    let len = fs::metadata(&kept).unwrap().len() as usize;
+    fs::write(&kept, vec![b'#'; len]).unwrap();
+    fs::remove_file(s.mc.join("libraries").join(v.library_path)).unwrap();
+    s.installer.ensure_installed("1.21.1", false, &|_| {}).await.unwrap();
+    assert_eq!(fs::read(s.mc.join("libraries").join(v.library_path)).unwrap(), v.library);
+    assert_eq!(fs::read(&kept).unwrap(), vec![b'#'; len], "a file of the right size was not hashed");
+    s.installer.ensure_installed("1.21.1", true, &|_| {}).await.unwrap();
+    assert_ne!(fs::read(&kept).unwrap(), vec![b'#'; len], "a forced check hashes every file");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_interrupted_install_is_repaired() {
     let fake = FakeMojang::start().await;
     let v = fake.add_vanilla("1.21.1");

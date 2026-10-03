@@ -183,8 +183,9 @@ impl MinecraftInstaller {
         }
     }
 
-    /// Before a launch: nothing to do when the version checks out, otherwise a repairing install
-    /// (a folder that merely exists is not enough). `force_check` repairs anyway.
+    /// Before a launch: nothing to do when the version checks out, otherwise an install that
+    /// fetches what is missing (a folder that merely exists is not enough; files of the right size
+    /// are trusted, as the check did). `force_check` hashes every file and repairs anyway.
     pub async fn ensure_installed(
         &self,
         id: &str,
@@ -200,7 +201,7 @@ impl MinecraftInstaller {
         if !check.valid {
             tracing::warn!("Minecraft {id} needs repair: {}", check.issues.join("; "));
         }
-        self.install(id, force_check || check.components.manifest, progress).await
+        self.install(id, force_check, progress).await
     }
 
     /// One attempt under `lease`; the parent version is installed first (recursion needs the
