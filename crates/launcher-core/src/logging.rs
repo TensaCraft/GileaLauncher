@@ -192,7 +192,8 @@ struct Redactor {
 impl Redactor {
     fn new(home: Option<&str>) -> Redactor {
         let home = home.map(str::trim).filter(|h| h.len() > 2).map_or_else(Vec::new, |home| {
-            [home.to_string(), home.replace('\\', "/"), home.replace('/', "\\")]
+            // Native, `/` and `\` forms, and as a debug string writes it (every `\` doubled).
+            [home.to_string(), home.replace('\\', "/"), home.replace('/', "\\"), home.replace('\\', "\\\\")]
                 .iter()
                 .map(|variant| {
                     regex::Regex::new(&format!("(?i){}", regex::escape(variant))).expect("escaped regex")
@@ -207,7 +208,10 @@ impl Redactor {
         static PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
             [
                 r"(?i)(authorization\s*:\s*bearer\s+)([^\s]+)",
-                r"(?i)(--accessToken\s+)([^\s]+)",
+                // The launch command's token; very old versions pass `--session token:<token>:<uuid>`.
+                r"(?i)(--(?:accessToken|session)\s+)([^\s]+)",
+                // Minecraft 1.7–1.8 log "(Session ID is token:<token>:<uuid>)".
+                r"(?i)(session id is token:)([^:\s)]+)",
                 r#"(?ix)(["']?(?:access[_-]?token|refresh[_-]?token|client[_-]?secret)["']?\s*[:=]\s*["']?)([^"',\s}]+)"#,
             ]
             .iter()
@@ -335,5 +339,15 @@ mod tests {
         assert!(out.contains("<USER_HOME>\\AppData"));
         assert!(out.contains("<USER_HOME>/x"));
         assert!(!out.contains("abc.def") && !out.contains("eyJ123") && !out.contains("zzz"));
+    }
+
+    #[test]
+    fn old_session_tokens_and_escaped_home_paths_are_hidden_too() {
+        // Minecraft 1.7–1.8 print the session; a crash's tail lands in the launcher's log.
+        let input = "(Session ID is token:abc123:0f9e) --session token:abc123:0f9e \
+                     Crashed { log: Some(\"C:\\\\Users\\\\Ivan\\\\crash.txt\") }";
+        let out = redact(input, Some("C:\\Users\\Ivan"));
+        assert!(!out.contains("abc123"), "{out}");
+        assert!(!out.contains("Ivan"), "{out}");
     }
 }

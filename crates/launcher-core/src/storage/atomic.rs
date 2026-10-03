@@ -5,6 +5,16 @@ use std::io::{self, Write};
 use std::path::Path;
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_through_temp(path, bytes, false)
+}
+
+/// `atomic_write` for a secret (a key): on Unix the file is its owner's alone (`0600`) from the
+/// moment it exists, never readable by others for an instant.
+pub fn atomic_write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_through_temp(path, bytes, true)
+}
+
+fn write_through_temp(path: &Path, bytes: &[u8], private: bool) -> io::Result<()> {
     let parent = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
         _ => Path::new("."),
@@ -17,13 +27,23 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = parent.join(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
 
     let result = (|| {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if private {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        #[cfg(not(unix))]
+        let _ = private;
+        let mut file = options.open(&tmp)?;
         file.write_all(bytes)?;
         file.flush()?;
         file.sync_all()?;
         drop(file);
         if let Ok(meta) = fs::metadata(path)
             && meta.is_file()
+            && !private
         {
             let _ = fs::set_permissions(&tmp, meta.permissions());
         }
@@ -102,6 +122,16 @@ mod tests {
         atomic_write_text(&target, "second").unwrap();
         assert_eq!(fs::read_to_string(&target).unwrap(), "second");
         assert!(tmp_files(dir.path()).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_private_file_is_its_owner_s_alone_from_the_start() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("profile-token.key");
+        atomic_write_private(&target, b"key").unwrap();
+        assert_eq!(fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]

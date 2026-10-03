@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use fernet::Fernet;
 use launcher_shared::{AppError, AppResult, ErrorCode};
 
-use crate::storage::atomic::atomic_write;
+use crate::storage::atomic::atomic_write_private;
 
 pub const KEY_FILE: &str = "profile-token.key";
 pub const ENC_PREFIX: &str = "enc::";
@@ -58,6 +58,10 @@ fn load_or_create_key(path: &Path) -> io::Result<Fernet> {
     match fs::read(path) {
         Ok(bytes) => {
             if let Some(fernet) = std::str::from_utf8(&bytes).ok().and_then(|text| Fernet::new(text.trim())) {
+                // A key an earlier launcher left readable to others is made private now.
+                if let Err(e) = restrict(path) {
+                    tracing::warn!("Unable to restrict access to {}: {e}", path.display());
+                }
                 return Ok(fernet);
             }
             tracing::warn!("Replacing an invalid token key at {}", path.display());
@@ -66,10 +70,7 @@ fn load_or_create_key(path: &Path) -> io::Result<Fernet> {
         Err(e) => return Err(e),
     }
     let key = Fernet::generate_key();
-    atomic_write(path, key.as_bytes())?;
-    if let Err(e) = restrict(path) {
-        tracing::warn!("Unable to restrict access to {}: {e}", path.display());
-    }
+    atomic_write_private(path, key.as_bytes())?;
     Fernet::new(&key).ok_or_else(|| io::Error::other("the generated key is invalid"))
 }
 
