@@ -9,9 +9,9 @@ use ui_kit::reorder::{Reorder, Reorderable};
 use ui_kit::{BuildCard, Button, EmptyState, MenuEntry, Size, Variant, use_context_menu};
 
 use crate::builds::actions::use_build_actions;
-use crate::builds::build_subtitle;
 use crate::builds::dialogs::use_build_menu;
 use crate::builds::launch::use_launch_flow;
+use crate::builds::{card_subtitle, loader_tag};
 use crate::fold::{FoldHead, fold_state};
 use crate::modules::use_module_parts;
 use crate::pages::continue_playing::ContinuePlaying;
@@ -56,7 +56,9 @@ pub fn HomePage() -> impl IntoView {
     let module_cards = provide_home_cards();
     let builds_folded = fold_state("home.fold.builds");
     let empty = move || store.builds_loaded.get() && store.builds.with(Vec::is_empty) && !module_cards.any();
-    let has_cards = move || store.builds_loaded.get() && !empty();
+    // The «Усі збірки» bar comes with «Продовжити гру»: without it Home is the builds alone.
+    let recent_shown = RwSignal::new(false);
+    let builds_bar = move || recent_shown.get() && store.builds_loaded.get() && !empty();
     view! {
         <PageHeader title_key="home_title" />
         <div class="home" on:contextmenu=page_menu>
@@ -71,8 +73,8 @@ pub fn HomePage() -> impl IntoView {
                     </Button>
                 </EmptyState>
             </Show>
-            <ContinuePlaying />
-            <Show when=has_cards>
+            <ContinuePlaying shown=recent_shown />
+            <Show when=builds_bar>
                 <FoldHead icon="layers" title_key="all_builds" folded=builds_folded>
                     <Button variant=Variant::Ghost size=Size::Sm icon="arrow_forward" on_click=move |_| store.go("/builds")>
                         {move || i18n.t("to_builds")}
@@ -80,7 +82,7 @@ pub fn HomePage() -> impl IntoView {
                 </FoldHead>
             </Show>
             // Folded with CSS, not unmounted: modules' cards stay (Home's emptiness counts them).
-            <div class="home__grid" class:is-hidden=move || builds_folded.get()>
+            <div class="home__grid" class:is-hidden=move || builds_bar() && builds_folded.get()>
                     <For
                         each=move || store.builds.get()
                         key=|b| (b.key.clone(), b.name.clone(), b.running, b.image.clone(), b.version.clone())
@@ -88,17 +90,22 @@ pub fn HomePage() -> impl IntoView {
                             let key = build.key.clone();
                             let for_play = build.clone();
                             let for_menu = build.clone();
+                            let for_stop = build.key.clone();
                             view! {
                                 <Reorderable reorder=drag key=build.key.clone() horizontal=true on_drop=dropped>
                                 <BuildCard
                                     title=build.name.clone()
-                                    subtitle=build_subtitle(&build)
+                                    subtitle=card_subtitle(&build)
+                                    tag=loader_tag(&build)
                                     image=build.image.clone()
                                     play_label=Signal::derive(move || i18n.t("play"))
                                     running_label=Signal::derive(move || i18n.t("version_running_badge"))
                                     running=build.running
                                     busy=Signal::derive(move || store.launching.with(|s| s.contains(&key)))
                                     on_play=Callback::new(move |()| flow.start(for_play.clone()))
+                                    busy_label=Signal::derive(move || i18n.t("card_starting"))
+                                    on_stop=Callback::new(move |()| actions.stop(for_stop.clone()))
+                                    stop_label=Signal::derive(move || i18n.t("version_stop"))
                                     on_menu=Callback::new(move |(x, y)| build_menu.open(for_menu.clone(), x, y))
                                 />
                                 </Reorderable>

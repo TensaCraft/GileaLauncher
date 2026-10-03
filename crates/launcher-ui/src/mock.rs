@@ -27,6 +27,7 @@ pub fn apply_update(s: &mut SettingsSnapshot, update: &SettingUpdate) {
         SettingUpdate::GpuModeDefault(v) => s.gpu_mode_default = v,
         SettingUpdate::WindowSize(v) => s.window_size = v,
         SettingUpdate::HomeRecentBuilds(v) => s.home_recent_builds = v,
+        SettingUpdate::CardPlay(play) => s.card_play = play,
         SettingUpdate::HomeRecentClear(clear) => {
             s.home_recent_cleared_ms = clear.then(|| js_sys::Date::now() as u64);
         }
@@ -208,6 +209,7 @@ pub fn install() {
         window_size: "1366x800".into(),
         home_recent_builds: 5,
         home_recent_cleared_ms: None,
+        card_play: launcher_shared::CardPlay::Center,
         revision: 0,
     }));
     let info = AppInfo {

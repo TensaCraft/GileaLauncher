@@ -8,7 +8,8 @@ pub mod launch;
 pub mod ram;
 
 pub use launcher_shared::naming::{NameProblem, check_new_name, default_build_name, unique_name};
-use launcher_shared::{BuildDto, MemoryInfo};
+use launcher_shared::{BuildDto, LoaderKind, MemoryInfo};
+use ui_kit::TagTone;
 
 /// Catalog rows shown per "Load more".
 pub const CATALOG_PAGE: usize = 80;
@@ -21,6 +22,35 @@ pub fn build_subtitle(build: &BuildDto) -> String {
         .filter(|part| !part.trim().is_empty())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The loader a build runs (its component, else its client's name; plain Minecraft else), as a
+/// card's tag: its name and colour.
+pub fn loader_tag(build: &BuildDto) -> (String, TagTone) {
+    let kind = build
+        .loader
+        .as_deref()
+        .and_then(LoaderKind::of_component)
+        .or_else(|| build.client.as_deref().and_then(LoaderKind::from_client))
+        .unwrap_or(LoaderKind::Minecraft);
+    let tone = match kind {
+        LoaderKind::Minecraft => TagTone::Vanilla,
+        LoaderKind::Fabric => TagTone::Fabric,
+        LoaderKind::Quilt => TagTone::Quilt,
+        LoaderKind::Forge => TagTone::Forge,
+        LoaderKind::NeoForge => TagTone::NeoForge,
+    };
+    (kind.display_name().to_string(), tone)
+}
+
+/// A card's line under the name: the version, after the client when the client is not just the
+/// loader its tag names.
+pub fn card_subtitle(build: &BuildDto) -> String {
+    let tagged = loader_tag(build).0;
+    match build.client.as_deref().map(str::trim) {
+        Some(client) if !client.is_empty() && !client.eq_ignore_ascii_case(&tagged) => build_subtitle(build),
+        _ => build.version.clone().unwrap_or_default(),
+    }
 }
 
 /// The placeholder icon of a build without a picture.
@@ -167,6 +197,27 @@ mod tests {
         assert_eq!(loader_icon(Some("fabric-loader")), "extension");
         assert_eq!(loader_icon(Some("quilt")), "grid_view");
         assert_eq!(loader_icon(None), "videogame_asset");
+    }
+
+    #[test]
+    fn a_card_tags_its_loader_and_does_not_name_it_twice() {
+        let mut neo = build("a", "a", "A");
+        neo.loader = Some("neoforge-21.1.252".into());
+        neo.client = Some("TensaCraft".into());
+        assert_eq!(loader_tag(&neo), ("NeoForge".to_string(), TagTone::NeoForge));
+        assert_eq!(card_subtitle(&neo), "TensaCraft 1.21.1", "a client of its own stays");
+        let mut fabric = build("b", "b", "B");
+        fabric.loader = Some("fabric-loader-0.16.9-1.21.1".into());
+        fabric.client = Some("Fabric".into());
+        assert_eq!(loader_tag(&fabric).1, TagTone::Fabric);
+        assert_eq!(card_subtitle(&fabric), "1.21.1", "the tag already says Fabric");
+        let vanilla = build("c", "c", "C");
+        assert_eq!(loader_tag(&vanilla), ("Minecraft".to_string(), TagTone::Vanilla));
+        assert_eq!(card_subtitle(&vanilla), "1.21.1");
+        let mut forge = build("d", "d", "D");
+        forge.loader = None;
+        forge.client = Some("forge".into());
+        assert_eq!(loader_tag(&forge).1, TagTone::Forge, "the client names it when the loader does not");
     }
 
     #[test]

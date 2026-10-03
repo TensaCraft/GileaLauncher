@@ -17,7 +17,7 @@ pub mod toggle;
 pub mod tooltip;
 
 pub use button::{ActionGap, ActionGroup, ActionTone, Button, IconAction, Size, Variant};
-pub use card::{BuildCard, FALLBACK_IMAGE, card_image};
+pub use card::{BuildCard, CardPlayStyle, FALLBACK_IMAGE, card_image};
 pub use code::CodeEditor;
 pub use dialog::{ConfirmDialog, Dialog, DialogFooter, DialogTone};
 pub use feedback::{EmptyState, ProgressBar, Skeleton, progress_percent};

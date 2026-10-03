@@ -1,5 +1,7 @@
 use launcher_shared::recent::RECENT_MOST;
-use launcher_shared::{ClickSound, SettingUpdate, WINDOW_MAX, WINDOW_MIN, WINDOW_PRESETS, WindowSize};
+use launcher_shared::{
+    CardPlay, ClickSound, SettingUpdate, WINDOW_MAX, WINDOW_MIN, WINDOW_PRESETS, WindowSize,
+};
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{Button, Field, Section, Select, SelectOption, SettingRow, Switch, TextInput, Variant, sound};
@@ -24,6 +26,14 @@ pub fn InterfaceSection() -> impl IntoView {
     let writer = use_settings_writer();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
     let compact = mirror_bool(|s| s.compact_sidebar);
+    let card_play = RwSignal::new(store.settings.get_untracked().card_play.as_config_str().to_string());
+    Effect::new(move |_| card_play.set(store.settings.get().card_play.as_config_str().to_string()));
+    let card_plays = Signal::derive(move || {
+        CardPlay::ALL
+            .iter()
+            .map(|p| SelectOption::new(p.as_config_str(), i18n.t(p.label_key())))
+            .collect::<Vec<_>>()
+    });
     let recent = RwSignal::new(store.settings.get_untracked().home_recent_builds.to_string());
     Effect::new(move |_| recent.set(store.settings.get().home_recent_builds.to_string()));
     let recent_options = Signal::derive(move || {
@@ -102,6 +112,16 @@ pub fn InterfaceSection() -> impl IntoView {
                                 writer.apply(SettingUpdate::HomeRecentBuilds(count));
                             }
                         })
+                    />
+                </div>
+            </SettingRow>
+            <SettingRow title=t("card_play") desc=t("card_play_desc")>
+                <div style="width:220px">
+                    <Select
+                        options=card_plays
+                        value=card_play
+                        icon="play_circle"
+                        on_change=Callback::new(move |v: String| writer.apply(SettingUpdate::CardPlay(CardPlay::from_config_str(&v))))
                     />
                 </div>
             </SettingRow>

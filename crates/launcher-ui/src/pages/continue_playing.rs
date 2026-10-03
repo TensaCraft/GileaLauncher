@@ -356,7 +356,10 @@ fn RecentSettings(open: RwSignal<bool>) -> impl IntoView {
 /// «Продовжити гру»: its bar (fold, settings) and the builds played last. Shown while it may show
 /// some (a count above 0) and has some, or was cleared (it says so, and how to get them back).
 #[component]
-pub fn ContinuePlaying() -> impl IntoView {
+pub fn ContinuePlaying(
+    /// Whether the section is there (Home's «Усі збірки» bar comes with it).
+    shown: RwSignal<bool>,
+) -> impl IntoView {
     let i18n = use_i18n();
     let folded = fold_state("home.fold.recent");
     let store = use_store();
@@ -387,9 +390,9 @@ pub fn ContinuePlaying() -> impl IntoView {
                 .collect::<Vec<_>>()
         })
     };
-    let shown = move || count.get() > 0 && (!rows().is_empty() || cleared.get().is_some());
+    Effect::new(move |_| shown.set(count.get() > 0 && (!rows().is_empty() || cleared.get().is_some())));
     view! {
-        <Show when=shown>
+        <Show when=move || shown.get()>
             <section class="recent">
                 <FoldHead icon="history" title_key="continue_playing" folded=folded>
                     <IconAction

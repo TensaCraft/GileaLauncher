@@ -72,6 +72,8 @@ pub fn App() -> impl IntoView {
     let i18n = provide_i18n(modules.with_value(|m| build_i18n(&browser_lang(), core_locale, m)));
     Effect::new(move |_| set_document_title(&i18n.t("app_title")));
     let store = provide_store();
+    // Where every build card puts its Play button (Settings → Interface).
+    provide_context(ui_kit::CardPlayStyle(Signal::derive(move || store.settings.with(|s| s.card_play))));
     let toasts = provide_toasts();
     provide_context_menu();
     provide_header();
