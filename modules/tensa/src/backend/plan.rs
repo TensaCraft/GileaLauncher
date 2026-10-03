@@ -1,15 +1,18 @@
 //! The plan that brings a server build's folder in line with the server: which
 //! files the server manages, which of them to download, and which files of its managed folders
-//! are stale. Nothing is changed here; applying the plan is a file transaction.
+//! are stale. No file of the build is changed here (only the launcher's note of the hashes it
+//! read); applying the plan is a file transaction.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
-use launcher_core::net::downloader::{DownloadTask, ExpectedHash, hash_file};
+use launcher_core::net::downloader::{DownloadTask, ExpectedHash, HashKind, hash_file};
+use launcher_core::storage::atomic::atomic_write;
 use launcher_core::storage::journal::{contained, normalized_path};
 use launcher_shared::{AppError, AppResult, ErrorCode};
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 
 use super::api::TensaApi;
 use super::manifest::{
@@ -148,13 +151,77 @@ fn inferred_scopes(entries: &[Entry<'_>]) -> BTreeSet<String> {
         .collect()
 }
 
+/// The launcher's note, in the build, of the hashes it read of the managed files: a file whose
+/// size and time stay is not hashed again (each launch would read gigabytes).
+pub const CHECKED: &str = ".launcher-tensa-checked.json";
+
+/// The hashes noted before (`known`) and those of this plan (`seen`), by path.
+struct Checked {
+    path: PathBuf,
+    known: Map<String, Value>,
+    seen: Map<String, Value>,
+}
+
+impl Checked {
+    fn open(root: &Path) -> Checked {
+        let path = root.join(CHECKED);
+        let known = fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .and_then(|note| note.get("files").and_then(Value::as_object).cloned())
+            .unwrap_or_default();
+        Checked { path, known, seen: Map::new() }
+    }
+
+    /// The hash of `kind` of the file at `dest`: the noted one while its size and time stay, else
+    /// read now.
+    fn hash(&mut self, relative: &str, dest: &Path, meta: &fs::Metadata, kind: HashKind) -> Option<String> {
+        let name = match kind {
+            HashKind::Sha1 => "sha1",
+            HashKind::Sha256 => "sha256",
+            HashKind::Sha512 => "sha512",
+        };
+        let modified = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok());
+        let Some(modified_ms) = modified.map(|d| d.as_millis() as u64) else {
+            return hash_file(dest, kind).ok();
+        };
+        let mut note = json!({"size": meta.len(), "modified_ms": modified_ms});
+        let noted = self
+            .known
+            .get(relative)
+            .filter(|n| n["size"] == note["size"] && n["modified_ms"] == note["modified_ms"])
+            .and_then(|n| n[name].as_str())
+            .map(str::to_string);
+        let hex = match noted {
+            Some(hex) => hex,
+            None => hash_file(dest, kind).ok()?,
+        };
+        note[name] = json!(hex);
+        self.seen.insert(relative.to_string(), note);
+        Some(hex)
+    }
+
+    /// Keeps the hashes of this plan (the files no longer listed go), when they changed.
+    fn save(self) {
+        if self.seen == self.known {
+            return;
+        }
+        let note = json!({"files": self.seen});
+        if let Err(e) = atomic_write(&self.path, note.to_string().as_bytes()) {
+            tracing::debug!("No note of the hashes read in {}: {e}", self.path.display());
+        }
+    }
+}
+
 /// The file is on disk as the server lists it: its size (when known) and hash (when known).
-fn unchanged(dest: &Path, file: &PlannedFile) -> bool {
+fn unchanged(dest: &Path, file: &PlannedFile, checked: &mut Checked) -> bool {
     let Ok(meta) = fs::metadata(dest) else { return false };
     if !meta.is_file() || file.size.is_some_and(|size| size != meta.len()) {
         return false;
     }
-    file.hash.as_ref().is_none_or(|hash| hash_file(dest, hash.kind).is_ok_and(|hex| hex == hash.hex))
+    file.hash.as_ref().is_none_or(|hash| {
+        checked.hash(&file.relative, dest, &meta, hash.kind).is_some_and(|hex| hex == hash.hex)
+    })
 }
 
 /// A listed path, compared as the file system compares names (case-blind on Windows and macOS).
@@ -265,6 +332,7 @@ pub fn plan(root: &Path, source: &Source, preserve: &[PreserveRule], force: bool
     managed.retain(|dir| reachable(root, dir));
     let mut expected = HashSet::new();
     let mut downloads = Vec::new();
+    let mut checked = Checked::open(root);
     for entry in &entries {
         let (Some(relative), true) = (&entry.relative, entry.downloadable) else { continue };
         let is_managed = if manifest_mode {
@@ -284,10 +352,11 @@ pub fn plan(root: &Path, source: &Source, preserve: &[PreserveRule], force: bool
             size: size(entry.file),
             hash: expected_hash(entry.file),
         };
-        if force || !unchanged(&root.join(relative), &planned) {
+        if force || !unchanged(&root.join(relative), &planned, &mut checked) {
             downloads.push(planned);
         }
     }
+    checked.save();
     let stale = stale_files(root, &managed, &expected, preserve);
     SyncPlan { managed_dirs: managed.into_iter().collect(), downloads, stale, force }
 }

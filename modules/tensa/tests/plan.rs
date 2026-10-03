@@ -57,6 +57,37 @@ fn a_manifest_manages_its_folders_and_files() {
 }
 
 #[test]
+fn a_file_checked_once_is_not_hashed_again_while_its_size_and_time_stay() {
+    // Every launch planned the sync by hashing each managed file (gigabytes for a big server
+    // build): what was checked is remembered in the build, by size and time.
+    let dir = tempfile::tempdir().unwrap();
+    put(dir.path(), "mods/a.jar", "aaa");
+    let jar = dir.path().join("mods/a.jar");
+    let manifest = json!({
+        "files": [{
+            "relative_path": "mods/a.jar",
+            "download_url": "http://files/mods/a.jar",
+            "sha256": sha256(dir.path(), "mods/a.jar"),
+            "size": 3
+        }],
+        "directories": [{"path": "mods"}]
+    });
+    let source = Source::Manifest(manifest);
+    assert!(downloads(&plan(dir.path(), &source, &[], false)).is_empty());
+    // The same size and time, other bytes: only a new hash would notice.
+    let modified = fs::metadata(&jar).unwrap().modified().unwrap();
+    fs::write(&jar, "bbb").unwrap();
+    fs::File::options().write(true).open(&jar).unwrap().set_modified(modified).unwrap();
+    assert!(downloads(&plan(dir.path(), &source, &[], false)).is_empty(), "known, not hashed again");
+    assert!(stale(&plan(dir.path(), &source, &[], false)).is_empty(), "the launcher's note is its own");
+    // A new time is hashed again, and the damage is found.
+    let later = modified + Duration::from_secs(5);
+    fs::File::options().write(true).open(&jar).unwrap().set_modified(later).unwrap();
+    assert_eq!(downloads(&plan(dir.path(), &source, &[], false)), ["mods/a.jar"]);
+    assert_eq!(downloads(&plan(dir.path(), &source, &[], true)), ["mods/a.jar"]);
+}
+
+#[test]
 fn the_launchers_backups_are_never_stale() {
     let dir = tempfile::tempdir().unwrap();
     put(dir.path(), "mods/old.jar", "old");
