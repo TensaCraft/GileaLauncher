@@ -2,7 +2,8 @@
 
 ```bash
 cargo xtask test     # the workspace and every module outside the default features (with its features)
-cargo xtask check    # fmt + clippy (native, wasm, modules) + the same tests; this is what CI runs
+cargo xtask lint     # fmt + clippy (native, wasm, modules), no tests
+cargo xtask check    # lint + test: run it before pushing; CI runs the same, split into jobs
 ```
 
 A single crate or test runs with plain `cargo test -p <crate> <filter>`. For the interface's tests, `test` and `check` build the frontend first (`trunk build`).

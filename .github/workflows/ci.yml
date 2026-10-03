@@ -3,6 +3,11 @@ name: CI
 # The long checks run only when what is built changes: a change of the docs alone (README, docs/,
 # the licence) leaves them out. The guards (no key, no brand where they must not be) run on every
 # change in guards.yml.
+#
+# Three jobs side by side instead of one long one per system: the lint (fmt, clippy, the wasm UI)
+# once, on Linux; the tests on every system (each finds its own faults: paths, case, line ends);
+# the profiles' builds and the app's start once, on Linux. A release waits for this run of its
+# commit instead of checking the same code again (release.yml).
 on:
   push:
     # main only: another branch is checked by its pull request (not twice), a tag (a release's) is
@@ -29,18 +34,24 @@ on:
 permissions:
   contents: read
 
+# A pull request's newer push cancels its older run. On main every commit keeps its run: a release
+# of that commit reads its verdict.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
+  # Checks and tests need no debug info: less to compile and to cache.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
   commits:
     name: Commit messages
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -64,13 +75,38 @@ jobs:
             cargo xtask commit-msg "$RUNNER_TEMP/message"
           done
 
-  check:
-    name: Check (${{ matrix.os }})
+  lint:
+    name: Lint (fmt, clippy, wasm)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libasound2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: lint
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.21.14
+      - name: fmt + clippy
+        run: cargo xtask lint
+
+  test:
+    name: Test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-22.04, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - name: Linux dependencies
@@ -81,40 +117,44 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-          components: rustfmt, clippy
+      # One cache a system (the key holds it); the release's checks read Linux's.
       - uses: Swatinem/rust-cache@v2
         with:
-          # The release's checks read this cache too.
-          shared-key: checks
+          shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # Compiled crates are kept by their content between runs: the crates a change leaves alone
-      # are not compiled again. Not on Windows: there sccache cannot start rustc for a crate with a
-      # command line as long as web-sys's. On main only, as the caches are.
-      - uses: mozilla-actions/sccache-action@v0.0.9
-        if: runner.os != 'Windows' && github.ref == 'refs/heads/main'
-        with:
-          disable_annotations: true
-      - name: Compiler cache on
-        if: runner.os != 'Windows' && github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
       - uses: taiki-e/install-action@v2
         with:
           tool: trunk@0.21.14
-      - name: fmt + clippy + tests
-        run: cargo xtask check
-      # The profiles and the app's start are the same Rust on every system: checked once, on Linux
-      # (the release still builds and starts every package on every system).
+      - name: Tests
+        run: cargo xtask test
+
+  # The profiles and the app's start are the same Rust on every system: checked once, on Linux (the
+  # release still builds and starts every package on every system).
+  build:
+    name: Build and start (Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libasound2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.21.14
       - name: Build core-only profile
-        if: runner.os == 'Linux'
         run: cargo xtask build --profile core
       - name: Build full profile
-        if: runner.os == 'Linux'
         run: cargo xtask build --profile full
       - name: Smoke test
-        if: runner.os == 'Linux'
         shell: bash
         env:
           LAUNCHER_DEV: "0"

@@ -67,10 +67,11 @@ The notes are made from the commit subjects since the previous tag. For a stable
 3. Start the **Release** workflow (`.github/workflows/release.yml`) by hand on `main` (**Run workflow**, or `gh workflow run release.yml --ref main`), with the `prerelease` and `draft` switches if needed. Never create the tag or the release yourself. The workflow:
    1. checks that the run is on `main` and that the tag `v<version>` does not name another commit: a published release is never rebuilt from other code;
    2. checks that the CurseForge key (the `CURSE_FORGE_KEY` secret) is there for every edition with CurseForge;
-   3. builds every edition on Windows, Linux and macOS and smoke-tests every package;
-   4. tags the commit, writes the notes and uploads the files to a draft release;
-   5. publishes the release once every file is in (unless `draft` is on);
-   6. deletes the temporary artifacts. When a step fails they stay, so **Re-run failed jobs** can finish the release.
+   3. takes CI's verdict on the commit instead of checking the code again: a CI run still going is awaited, one that failed stops the release. Only when CI has no verdict (a docs-only commit, a cancelled run) do the checks run in the release;
+   4. builds every edition on Windows, Linux and macOS and smoke-tests every package (alongside the wait for CI);
+   5. tags the commit, writes the notes and uploads the files to a draft release;
+   6. publishes the release once every file is in (unless `draft` is on);
+   7. deletes the temporary artifacts. When a step fails they stay, so **Re-run failed jobs** can finish the release.
 
 Only one release runs at a time.
 

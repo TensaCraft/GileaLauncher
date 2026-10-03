@@ -152,7 +152,9 @@ jobs:
           retention-days: 1
           compression-level: 0
 
-  # The code released passes the checks (a release may start before CI has finished).
+  # The code released passes the checks. They are CI's for this commit: a run still going is waited
+  # for, not repeated beside it; one that passed stands; one that failed stops the release. Only
+  # when CI has no verdict (no run: a docs-only change, or cancelled) are they run here.
   test:
     name: Checks
     needs: meta
@@ -161,22 +163,44 @@ jobs:
     permissions:
       contents: read
       actions: read
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      # A commit CI has already passed is not checked twice: seconds instead of half an hour.
-      - name: Did CI pass this commit?
+      - name: CI's verdict on this commit
         id: ci
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          passed="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --status success --json databaseId --jq length)"
-          if [ "$passed" -gt 0 ]; then
-            echo "CI passed $GITHUB_SHA: its checks stand."
-            echo "passed=true" >> "$GITHUB_OUTPUT"
-          else
+          run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --limit 1 \
+            --json databaseId,status,conclusion --jq '.[0] // empty | "\(.databaseId) \(.status) \(.conclusion)"')"
+          if [ -z "$run" ]; then
+            echo "No CI run checked $GITHUB_SHA: the checks run here."
             echo "passed=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          read -r id status conclusion <<< "$run"
+          if [ "$status" != "completed" ]; then
+            echo "CI run $id is checking $GITHUB_SHA: its verdict is awaited."
+            gh run watch "$id" --repo "$GITHUB_REPOSITORY" --interval 30 > /dev/null || true
+            conclusion="$(gh run view "$id" --repo "$GITHUB_REPOSITORY" --json conclusion --jq .conclusion)"
+          fi
+          case "$conclusion" in
+            success)
+              echo "CI run $id passed $GITHUB_SHA: its checks stand."
+              echo "passed=true" >> "$GITHUB_OUTPUT"
+              ;;
+            failure|timed_out|startup_failure)
+              echo "::error::CI run $id failed on $GITHUB_SHA ($conclusion): fix it on main, then release."
+              exit 1
+              ;;
+            *)
+              echo "CI run $id ended $conclusion: the checks run here."
+              echo "passed=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
       - uses: actions/checkout@v7
         if: steps.ci.outputs.passed != 'true'
       - name: Linux dependencies
@@ -189,11 +213,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
-      # CI's cache of the same checks (saved from main).
+      # CI's Linux test cache (saved from main).
       - uses: Swatinem/rust-cache@v2
         if: steps.ci.outputs.passed != 'true'
         with:
-          shared-key: checks
+          shared-key: test
           save-if: false
       - uses: taiki-e/install-action@v2
         if: steps.ci.outputs.passed != 'true'

@@ -31,7 +31,8 @@ cargo xtask dev --modules all        # every module but the postponed diagnostic
 cargo xtask build --modules backups  # any set of modules
 cargo xtask build --release          # a release build without packaging
 cargo xtask test                     # tests of the workspace and of modules outside the default features
-cargo xtask check                    # fmt + clippy (native and wasm) + tests, as CI runs them
+cargo xtask lint                     # fmt + clippy (native and wasm), no tests
+cargo xtask check                    # lint + tests, as CI runs them: before every push
 cargo xtask profiles                 # list the profiles
 cargo xtask new-module <id>          # skeleton of a new module
 cargo xtask icons assets/icon/icon.png --macos assets/icon/icon-macos.png
@@ -119,4 +120,10 @@ The hooks live in `.githooks/` and are turned on with `cargo xtask hooks`.
 
 If you want extra checks that are not part of the repository, put them in `.git/hooks/pre-commit.local` and `.git/hooks/commit-msg.local`. The hooks run them after their own checks, and `LAUNCHER_SKIP_PRECOMMIT` does not skip them.
 
-CI repeats both checks: `cargo xtask check` on every push, and the message check for every commit of a pull request.
+CI repeats both checks, and runs the tests the hooks leave out:
+- `cargo xtask lint` once, on Linux;
+- `cargo xtask test` on Windows, Linux and macOS, side by side;
+- the profiles' builds and the app's start once, on Linux;
+- the message check for every commit of a pull request.
+
+On `main` every commit keeps its CI run (a newer push cancels only a pull request's older run): a release reads the verdict of its commit.
