@@ -1,5 +1,6 @@
 mod app;
 mod builds;
+mod fold;
 mod mock;
 #[cfg(feature = "mod-backups")]
 mod mock_backups;
@@ -20,6 +21,7 @@ mod profiles;
 mod providers;
 mod recent;
 mod shell;
+mod shots;
 mod store;
 mod update;
 

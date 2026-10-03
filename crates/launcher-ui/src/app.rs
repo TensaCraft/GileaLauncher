@@ -211,6 +211,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/builds/content") view=ContentRoute />
                     <Route path=path!("/modpacks") view=ModpacksPage />
                     <Route path=path!("/profiles") view=ProfilesPage />
+                    <Route path=path!("/screenshots") view=crate::pages::screenshots::ScreenshotsPage />
                     <Route path=path!("/settings") view=SettingsPage />
                     <Route path=path!("/setup") view=SetupPage />
                     <Route path=path!("/dev/kit") view=KitPage />

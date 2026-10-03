@@ -12,8 +12,9 @@ use crate::builds::actions::use_build_actions;
 use crate::builds::build_subtitle;
 use crate::builds::dialogs::use_build_menu;
 use crate::builds::launch::use_launch_flow;
+use crate::fold::fold_state;
 use crate::modules::use_module_parts;
-use crate::pages::continue_playing::{ContinuePlaying, fold_state};
+use crate::pages::continue_playing::ContinuePlaying;
 use crate::shell::PageHeader;
 use crate::store::use_store;
 

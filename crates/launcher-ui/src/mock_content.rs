@@ -4,7 +4,8 @@
 use std::collections::HashMap;
 
 use launcher_shared::{
-    AppError, ContentItem, ContentKind, ContentList, ErrorCode, Level, ScreenshotDto, Text,
+    AppError, BuildShots, ContentItem, ContentKind, ContentList, ErrorCode, Level, ScreenshotDto, ShotRef,
+    Text,
 };
 use serde_json::Value;
 
@@ -142,6 +143,28 @@ impl MockContent {
         Ok((self.screenshots(key), Text::key("screenshot_deleted").param("name", name)))
     }
 
+    /// Renames as the backend does: the extension kept, an empty name or a taken one refused.
+    pub fn rename_screenshot(
+        &mut self,
+        key: &str,
+        name: &str,
+        wanted: &str,
+    ) -> Result<ScreenshotDto, AppError> {
+        self.screenshots(key);
+        let shots = self.shots.get_mut(key).expect("listed above");
+        let ext = name.rfind('.').map_or("", |at| &name[at..]).to_string();
+        let new_name = format!("{}{ext}", wanted.trim());
+        if wanted.trim().is_empty() || wanted.contains(['/', '\\']) {
+            return Err(AppError::new(ErrorCode::FileNameInvalid, "mock"));
+        }
+        if new_name != name && shots.iter().any(|s| s.name == new_name) {
+            return Err(AppError::new(ErrorCode::FileNameTaken, "mock").with_param("name", &new_name));
+        }
+        let shot = shots.iter_mut().find(|s| s.name == name).ok_or_else(|| not_found(name))?;
+        shot.name = new_name;
+        Ok(shot.clone())
+    }
+
     pub fn new() -> MockContent {
         MockContent::default()
     }
@@ -236,7 +259,24 @@ impl MockContent {
                     to_value(shots)
                 })
             }
-            "screenshot_open" | "screenshots_open_dir" => Ok(Value::Null),
+            "screenshot_open" | "screenshots_open_dir" | "screenshot_copy" | "screenshot_reveal" => {
+                Ok(Value::Null)
+            }
+            "screenshots_all" => to_value(
+                ["aeronautics", "vanilna_1_20_1"]
+                    .iter()
+                    .map(|key| BuildShots { key: key.to_string(), shots: self.screenshots(key) })
+                    .collect::<Vec<_>>(),
+            ),
+            "screenshot_rename" => {
+                self.rename_screenshot(key, arg(args, "name"), arg(args, "newName")).and_then(to_value)
+            }
+            "screenshots_delete" => {
+                let items: Vec<ShotRef> = serde_json::from_value(args["items"].clone()).unwrap_or_default();
+                let deleted =
+                    items.iter().filter(|i| self.delete_screenshot(&i.key, &i.name).is_ok()).count();
+                to_value(deleted)
+            }
             _ => return None,
         };
         Some(result)

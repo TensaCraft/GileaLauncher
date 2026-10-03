@@ -7,11 +7,12 @@ use launcher_shared::recent::{Activity, MotdSpan, RecentBuild};
 use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use ui_kit::i18n::{I18nCtx, use_i18n};
-use ui_kit::{Button, Icon, Size, Tag, TagTone, Variant, sound};
+use ui_kit::{Button, Icon, Size, Tag, TagTone, Variant};
 
 use crate::builds::dialogs::use_build_menu;
 use crate::builds::launch::use_launch_flow;
 use crate::builds::{build_subtitle, loader_icon};
+use crate::fold::{FoldHead, fold_state};
 use crate::recent::{
     Ago, Ping, address_label, ago, difficulty_key, mode_key, ping_bars, server_key, use_recent,
 };
@@ -68,7 +69,7 @@ fn ping_view(ms: u32) -> impl IntoView {
     };
     view! {
         <span class=format!("ping-bars {tone}") aria-hidden="true">
-            {(1..=5u8).map(|bar| view! { <i class:on=move || bar <= bars></i> }).collect_view()}
+            {(1..=5u8).map(|bar| view! { <i class:on=move || { bar <= bars }></i> }).collect_view()}
         </span>
     }
 }
@@ -272,46 +273,6 @@ fn RecentRow(dto: BuildDto, recent: RecentBuild) -> impl IntoView {
                 })}
             </div>
         </div>
-    }
-}
-
-/// Whether Home's section `key` is folded, as the user left it (kept in this window's storage;
-/// unfolded when it cannot be read).
-pub fn fold_state(key: &'static str) -> RwSignal<bool> {
-    let storage = || web_sys::window().and_then(|w| w.local_storage().ok().flatten());
-    let folded =
-        RwSignal::new(storage().and_then(|s| s.get_item(key).ok().flatten()).as_deref() == Some("1"));
-    Effect::new(move |previous: Option<bool>| {
-        let now = folded.get();
-        if previous.is_some_and(|was| was != now)
-            && let Some(storage) = storage()
-        {
-            let _ = storage.set_item(key, if now { "1" } else { "0" });
-        }
-        now
-    });
-    folded
-}
-
-/// A section's title on Home; a click folds or unfolds the section.
-#[component]
-pub fn FoldHead(icon: &'static str, title_key: &'static str, folded: RwSignal<bool>) -> impl IntoView {
-    let i18n = use_i18n();
-    view! {
-        <button
-            type="button"
-            class="home__head"
-            class:is-folded=folded
-            aria-expanded=move || (!folded.get()).to_string()
-            on:click=move |_| {
-                sound::play_click();
-                folded.update(|f| *f = !*f);
-            }
-        >
-            <Icon name=icon />
-            <span>{move || i18n.t(title_key)}</span>
-            <Icon name="expand_more" class="home__fold" />
-        </button>
     }
 }
 

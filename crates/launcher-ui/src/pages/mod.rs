@@ -8,6 +8,7 @@ pub mod home;
 pub mod kit;
 pub mod modpacks;
 pub mod profiles;
+pub mod screenshots;
 pub mod settings;
 pub mod setup;
 

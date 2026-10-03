@@ -26,8 +26,11 @@ const fn item(path: &'static str, icon: &'static str, label: &'static str) -> Na
 #[derive(Clone, Default)]
 pub struct ModulePages(pub Vec<ModulePage>);
 
+/// Every build's screenshots.
+pub const SCREENSHOTS_PATH: &str = "/screenshots";
+
 /// The sidebar: Home, Builds, Modpacks (while a provider offers them), the pages of modules whose
-/// backend is here, Settings.
+/// backend is here, Screenshots, Settings.
 pub fn nav_items(pages: &[ModulePage], modpacks: bool, backend: &[String]) -> Vec<NavItem> {
     let mut items = vec![item("/", "home", "home_title"), item("/builds", "layers", "builds_title")];
     if modpacks {
@@ -36,6 +39,7 @@ pub fn nav_items(pages: &[ModulePage], modpacks: bool, backend: &[String]) -> Ve
     items.extend(
         pages.iter().filter(|p| backend.iter().any(|m| m == p.module)).map(|p| item(p.path, p.icon, p.label)),
     );
+    items.push(item(SCREENSHOTS_PATH, "photo_library", "screenshots_title"));
     items.push(item("/settings", "settings", "settings_title"));
     items
 }
@@ -145,12 +149,12 @@ mod tests {
         let pages = [page("reports", "/reports"), page("ghost", "/ghost")];
         let backend = vec!["reports".to_string()];
         let paths: Vec<&str> = nav_items(&pages, false, &backend).iter().map(|i| i.path).collect();
-        assert_eq!(paths, ["/", "/builds", "/reports", "/settings"]);
+        assert_eq!(paths, ["/", "/builds", "/reports", "/screenshots", "/settings"]);
         assert_eq!(page_for(&pages, &backend, "/reports").map(|p| p.path), Some("/reports"));
         assert_eq!(page_for(&pages, &backend, "/reports/x").map(|p| p.path), Some("/reports"));
         assert!(page_for(&pages, &backend, "/ghost").is_none(), "no backend, no page");
         assert!(page_for(&pages, &[], "/reports").is_none());
-        assert_eq!(nav_items(&pages, false, &[]).len(), 3, "without backends only the core's items");
+        assert_eq!(nav_items(&pages, false, &[]).len(), 4, "without backends only the core's items");
     }
 
     #[test]
@@ -159,11 +163,14 @@ mod tests {
             let backend: Vec<String> = backend.iter().map(|m| m.to_string()).collect();
             nav_items(&[page("reports", "/reports")], modpacks, &backend).iter().map(|i| i.path).collect()
         };
-        assert_eq!(paths(true, &["reports"]), ["/", "/builds", "/modpacks", "/reports", "/settings"]);
-        assert_eq!(paths(true, &[]), ["/", "/builds", "/modpacks", "/settings"]);
+        assert_eq!(
+            paths(true, &["reports"]),
+            ["/", "/builds", "/modpacks", "/reports", "/screenshots", "/settings"]
+        );
+        assert_eq!(paths(true, &[]), ["/", "/builds", "/modpacks", "/screenshots", "/settings"]);
         assert_eq!(
             paths(false, &["reports"]),
-            ["/", "/builds", "/reports", "/settings"],
+            ["/", "/builds", "/reports", "/screenshots", "/settings"],
             "no provider, no page"
         );
     }
