@@ -51,7 +51,11 @@ pub(crate) fn repo_files(root: &Path) -> Vec<String> {
         .current_dir(root)
         .output()
         .expect("git lists the repository's files");
-    String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
+    // A git that failed (an unsafe directory, say) would leave every guard checking nothing.
+    assert!(out.status.success(), "git ls-files failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+    let files: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect();
+    assert!(!files.is_empty(), "git listed no files of the repository");
+    files
 }
 
 /// The brand the profiles name (their `app_name`s, lower case): kept out of code as well.

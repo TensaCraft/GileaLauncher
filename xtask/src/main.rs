@@ -7,7 +7,6 @@ mod hooks;
 mod mock;
 mod profile;
 mod release;
-#[cfg(test)]
 mod secrets;
 mod sweep;
 mod templates;
@@ -75,6 +74,11 @@ enum Cmd {
     },
     /// Make git run the hooks in .githooks
     Hooks,
+    /// Fail when the commits of a range (`a..b`) add a key-shaped string
+    ScanKeys {
+        #[arg(long)]
+        range: String,
+    },
     /// The release's version, tag and title, or the editions it publishes
     ReleaseMeta {
         /// version, tag, title, prerelease or json (the default)
@@ -178,6 +182,7 @@ fn main() -> Result<()> {
         Cmd::CommitMsg { file } => hooks::commit_msg(&file),
         Cmd::Hook { hook: Hook::PreCommit } => hooks::pre_commit(),
         Cmd::Hooks => hooks::install(),
+        Cmd::ScanKeys { range } => secrets::no_key_in(&["log", "-p", "--no-color", "-U0", &range]),
         Cmd::ReleaseMeta { field, editions, check_tag, check_new_tag } => release::meta(release::MetaQuery {
             field: field.as_deref(),
             editions,
@@ -218,7 +223,7 @@ mod tests {
     fn workflows_call_existing_commands() {
         let dir = super::cmd::root().join(".github").join("workflows");
         let mut calls = 0;
-        for name in ["ci.yml", "release.yml"] {
+        for name in ["ci.yml", "release.yml", "guards.yml"] {
             let text = std::fs::read_to_string(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
             for call in text.lines().flat_map(xtask_calls) {
                 let argv = std::iter::once("xtask".to_string()).chain(call.iter().cloned());

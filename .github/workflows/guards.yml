@@ -23,7 +23,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The commits of the push are read too: a key added and taken out again stays in them.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: No API key, no brand out of place
         run: cargo test -p xtask -- secrets brand
+      - name: No API key in the pushed commits
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: cargo xtask scan-keys --range "${{ github.event.before }}..${{ github.sha }}"
+      - name: No API key in the pull request's commits
+        if: github.event_name == 'pull_request'
+        run: cargo xtask scan-keys --range "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"

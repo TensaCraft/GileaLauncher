@@ -1,7 +1,9 @@
 //! The CurseForge API key stays out of the repository and out of the interface: only the
 //! module's backend reads it, only the release workflow and `cargo xtask dev` pass it in.
 
-use crate::brand::repo_files;
+use std::process::Command;
+
+use anyhow::{Result, bail};
 
 /// A bcrypt-shaped string as CurseForge keys are (`$2a$10$` and 53 characters).
 fn key_shaped(text: &str) -> bool {
@@ -20,10 +22,33 @@ fn key_shaped(text: &str) -> bool {
     })
 }
 
+/// A key-shaped string among the lines a diff (`git diff`, `git log -p`) adds; file headers
+/// (`+++`) are not lines of a file.
+fn diff_adds_key(diff: &str) -> bool {
+    diff.lines().filter(|line| line.starts_with('+') && !line.starts_with("+++")).any(key_shaped)
+}
+
+/// No key-shaped string in the changes `git <args>` shows (the staged ones before a commit, a
+/// push's commits in CI: a key added and removed again still stays in the history).
+pub fn no_key_in(args: &[&str]) -> Result<()> {
+    let out = Command::new("git").args(args).current_dir(crate::cmd::root()).output()?;
+    if !out.status.success() {
+        bail!("git {} failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
+    }
+    if diff_adds_key(&String::from_utf8_lossy(&out.stdout)) {
+        bail!(
+            "a key-shaped string ($2a$...) is in the changes of `git {}`: keys belong in secrets only",
+            args.join(" ")
+        );
+    }
+    Ok(())
+}
+
 /// The files of the repository (tracked or new, not ignored) whose text has `needle`.
+#[cfg(test)]
 fn files_with(needle: &str) -> Vec<String> {
     let root = crate::cmd::root();
-    repo_files(&root)
+    crate::brand::repo_files(&root)
         .into_iter()
         .filter(|f| std::fs::read_to_string(root.join(f)).is_ok_and(|text| text.contains(needle)))
         .collect()
@@ -32,6 +57,7 @@ fn files_with(needle: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brand::repo_files;
 
     #[test]
     fn a_key_is_recognised_by_its_shape() {
@@ -39,6 +65,17 @@ mod tests {
         assert!(key_shaped(&format!("key = \"{fake}\"")));
         assert!(!key_shaped(&format!("${}${}${}", "2a", "10", "a".repeat(20))), "too short");
         assert!(!key_shaped("price: $2 and $10"));
+    }
+
+    #[test]
+    fn a_key_added_in_a_change_is_caught() {
+        let key = format!("${}${}${}", "2a", "10", "b".repeat(53));
+        let added = format!("diff --git a/x b/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+key = \"{key}\"\n");
+        assert!(diff_adds_key(&added));
+        let removed = format!("+++ b/x\n-key = \"{key}\"\n+nothing\n");
+        assert!(!diff_adds_key(&removed), "taking a key out is no leak");
+        assert!(no_key_in(&["log", "-1", "--format=%H"]).is_ok());
+        assert!(no_key_in(&["no-such-command"]).is_err(), "a failed git is no clean answer");
     }
 
     #[test]

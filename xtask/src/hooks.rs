@@ -126,6 +126,7 @@ pub fn pre_commit() -> Result<()> {
         println!("Skipping the pre-commit checks ({SKIP_PRECOMMIT}=1).");
         return Ok(());
     }
+    crate::secrets::no_key_in(&["diff", "--cached", "--no-color", "-U0"])?;
     if needs_frontend(&crate::cmd::root()) {
         crate::cmd::frontend_for_tests()?;
     }
