@@ -61,6 +61,12 @@ pub fn Dialog(
     locked: bool,
     #[prop(optional, into)] on_close: Option<Callback<()>>,
     #[prop(optional, into)] footer_hint: MaybeProp<String>,
+    /// In place of the title's text: a heading of the caller's own (a name edited in place).
+    #[prop(optional)]
+    heading: Option<ChildrenFn>,
+    /// A class of the caller's own beside `dialog` (a size of its own).
+    #[prop(optional)]
+    class: &'static str,
     children: ChildrenFn,
     #[prop(optional)] dialog_footer: Option<DialogFooter>,
 ) -> impl IntoView {
@@ -75,6 +81,7 @@ pub fn Dialog(
     let children = StoredValue::new(children);
     let footer = StoredValue::new(dialog_footer.map(|f| f.children));
     let icon = StoredValue::new(icon);
+    let heading = StoredValue::new(heading);
 
     view! {
         <Show when=move || open.get()>
@@ -111,13 +118,16 @@ pub fn Dialog(
                                 }
                             }
                         >
-                            <div class="dialog" class:dialog--wide=wide class:dialog--full=full role="dialog" aria-modal="true">
+                            <div class=format!("dialog {class}") class:dialog--wide=wide class:dialog--full=full role="dialog" aria-modal="true">
                                 <div class="dialog__head">
                                     {icon.get_value().map(|name| view! {
                                         <div class=tone.icon_class()><Icon name=name /></div>
                                     })}
-                                    <div>
-                                        <h3 class="dialog__title">{move || title.get()}</h3>
+                                    <div class="dialog__heading">
+                                        {heading.with_value(|h| match h {
+                                            Some(own) => own().into_any(),
+                                            None => view! { <h3 class="dialog__title">{move || title.get()}</h3> }.into_any(),
+                                        })}
                                         {move || subtitle.get().map(|s| view! { <p class="dialog__subtitle">{s}</p> })}
                                     </div>
                                     {(!locked).then(|| view! {

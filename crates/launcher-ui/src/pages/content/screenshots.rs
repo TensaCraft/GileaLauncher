@@ -26,7 +26,6 @@ pub fn ScreenshotsPanel(key: String) -> impl IntoView {
     let toasts = use_toasts();
     let actions = use_shot_actions();
     let menu = use_context_menu();
-    let store = crate::store::use_store();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
     let key = StoredValue::new(key);
     // Reloads in place; the error is already translated.
@@ -138,9 +137,6 @@ pub fn ScreenshotsPanel(key: String) -> impl IntoView {
         <ScreenshotViewer
             state=viewer
             list=shown
-            build_name=Callback::new(move |key: String| {
-                store.builds.with(|b| b.iter().find(|b| b.key == key).map(|b| b.name.clone())).unwrap_or(key)
-            })
             on_changed=changed
         />
         <ConfirmDialog

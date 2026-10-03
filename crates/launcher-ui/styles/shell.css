@@ -302,8 +302,15 @@
 .shot-tile.is-selected .shot-tile__check { background: var(--primary); border-color: var(--primary); color: #04342c; }
 /* At the page's foot: pushed down when the screenshots are few, kept in view over a long list. */
 .shots__selection { position: sticky; bottom: 12px; margin-top: auto; align-self: center; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border-radius: var(--r-lg); border: 1px solid var(--line-2); background: var(--s-pop); box-shadow: var(--shadow-pop); font-weight: 600; color: var(--text); z-index: 5; }
-.viewer { flex: 1; min-height: 0; display: flex; gap: 16px; }
-.viewer__stage { position: relative; flex: 1; min-width: 0; display: grid; place-items: center; border-radius: var(--r-md); background: rgba(0, 0, 0, 0.35); overflow: hidden; }
+/* The viewer: nearly the whole window, little around the picture. */
+.dialog.dialog--viewer { width: calc(100vw - 48px); max-width: none; height: calc(100vh - 88px); margin-top: 32px; }
+.dialog--viewer .dialog__head { align-items: center; padding: 10px 12px 8px 18px; }
+.dialog--viewer .dialog__heading { flex: 1; min-width: 0; }
+.dialog--viewer .dialog__body { flex: 1; min-height: 0; display: flex; padding: 0 12px; overflow: hidden; }
+.dialog--viewer .dialog__foot { padding: 10px 12px; }
+/* Left of the footer's stretching hint, the other actions right of it. */
+.viewer__delete { order: -1; }
+.viewer { position: relative; flex: 1; min-width: 0; min-height: 0; display: grid; place-items: center; border-radius: var(--r-md); background: rgba(0, 0, 0, 0.4); overflow: hidden; }
 .viewer__picture { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
 .viewer__nav { position: absolute; top: 50%; translate: 0 -50%; width: 40px; height: 64px; display: grid; place-items: center; border: 1px solid var(--line-2); border-radius: var(--r-md); background: rgba(3, 8, 7, 0.6); color: var(--text); cursor: pointer; opacity: 0.75; transition: opacity var(--dur-fast), background var(--dur-fast); }
 .viewer__nav:hover:not(:disabled) { opacity: 1; background: rgba(23, 195, 162, 0.25); }
@@ -311,14 +318,12 @@
 .viewer__nav .icon { font-size: 28px; }
 .viewer__nav.is-prev { left: 10px; }
 .viewer__nav.is-next { right: 10px; }
-.viewer__side { width: 250px; flex: none; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
-.viewer__name { display: flex; align-items: flex-start; gap: 6px; font-weight: 600; color: var(--text); word-break: break-all; }
-.viewer__name span { flex: 1; padding-top: 5px; }
-.viewer__rename { display: flex; align-items: center; gap: 6px; }
+.viewer__title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.viewer__title .dialog__title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.viewer__edit { flex: none; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--text-3); cursor: pointer; transition: color var(--dur-fast); }
+.viewer__edit:hover, .viewer__edit:focus-visible { color: var(--primary-light); }
+.viewer__edit:focus-visible { outline: none; box-shadow: var(--ring); }
+.viewer__edit .icon { font-size: 18px; }
+.viewer__rename { display: flex; align-items: center; gap: 6px; max-width: 560px; }
 .viewer__rename .control { flex: 1; min-width: 0; }
-.viewer__error { font-size: 12px; color: var(--danger-text); }
-.viewer__info { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: 12.5px; }
-.viewer__info dt { color: var(--text-3); }
-.viewer__info dd { margin: 0; color: var(--text); text-align: right; word-break: break-word; }
-.viewer__actions { display: flex; flex-direction: column; gap: 6px; margin-top: auto; }
-.viewer__actions .btn { justify-content: flex-start; }
+.viewer__error { margin-top: 4px; font-size: 12px; color: var(--danger-text); }

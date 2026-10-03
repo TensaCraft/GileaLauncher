@@ -316,7 +316,7 @@ pub fn ScreenshotsPage() -> impl IntoView {
                 </div>
             </Show>
         </div>
-        <ScreenshotViewer state=viewer list=shown build_name=build_name on_changed=changed />
+        <ScreenshotViewer state=viewer list=shown on_changed=changed />
         <ConfirmDialog
             open=delete_open
             danger=true

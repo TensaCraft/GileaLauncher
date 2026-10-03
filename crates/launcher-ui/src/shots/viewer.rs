@@ -1,10 +1,10 @@
 //! The screenshot viewer: the picture as large as the window allows, ← → through the shown list,
-//! and beside it the name (renamed in place), the build, the size and what can be done.
+//! its name above it (renamed in place) and what can be done below it.
 
 use launcher_shared::{ScreenshotDto, ShotRef};
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{Button, ConfirmDialog, Dialog, Icon, IconAction, Size, TextInput, Variant};
+use ui_kit::{Button, ConfirmDialog, Dialog, DialogFooter, Icon, IconAction, TextInput, Variant};
 
 use super::actions::use_shot_actions;
 use super::{split_name, step};
@@ -48,8 +48,6 @@ pub fn ScreenshotViewer(
     /// The shown screenshots with their build's key, in the page's order.
     #[prop(into)]
     list: Signal<Vec<(String, ScreenshotDto)>>,
-    /// A build's name by its key.
-    build_name: Callback<String, String>,
     /// After a rename or a delete: the page loads its list again.
     on_changed: Callback<()>,
 ) -> impl IntoView {
@@ -110,14 +108,6 @@ pub fn ScreenshotViewer(
         }
     });
     on_cleanup(move || keys.remove());
-
-    // The picture's own size, read once it has loaded.
-    let picture = NodeRef::<leptos::html::Img>::new();
-    let resolution = RwSignal::new(None::<(u32, u32)>);
-    Effect::new(move |_| {
-        current.track();
-        resolution.set(None);
-    });
 
     let wanted = RwSignal::new(String::new());
     let rename_error = RwSignal::new(None::<String>);
@@ -180,113 +170,100 @@ pub fn ScreenshotViewer(
     };
     let title =
         Signal::derive(move || current.with(|c| c.as_ref().map(|(_, s)| s.name.clone()).unwrap_or_default()));
-    let subtitle = Signal::derive(move || {
-        current.with(|c| {
-            c.as_ref().map(|(key, _)| {
-                format!("{} · {} / {}", build_name.run(key.clone()), state.at.get() + 1, count.get())
-            })
-        })
-    });
-
-    view! {
-        <Dialog open=state.open full=true icon="image" title=title subtitle=subtitle>
-            {move || current.get().map(|(key, shot)| {
-                let size = launcher_shared::units::size(shot.size, &i18n.lang());
-                let when = shot.modified_ms.map(date_time).unwrap_or_else(|| "-".into());
-                let build = build_name.run(key.clone());
-                view! {
-                    <div class="viewer">
-                        <div class="viewer__stage">
-                            <img
-                                class="viewer__picture"
-                                src=shot.src.clone()
-                                alt=""
-                                draggable="false"
-                                node_ref=picture
-                                on:load=move |_| {
-                                    if let Some(img) = picture.get_untracked() {
-                                        resolution.set(Some((img.natural_width(), img.natural_height())));
-                                    }
-                                }
-                            />
-                            <button
-                                type="button"
-                                class="viewer__nav is-prev"
-                                aria-label=move || i18n.t("shots_previous")
-                                disabled=move || state.at.get() == 0
-                                on:click=move |_| go(-1)
-                            >
-                                <Icon name="chevron_left" />
-                            </button>
-                            <button
-                                type="button"
-                                class="viewer__nav is-next"
-                                aria-label=move || i18n.t("shots_next")
-                                disabled=at_end
-                                on:click=move |_| go(1)
-                            >
-                                <Icon name="chevron_right" />
-                            </button>
-                        </div>
-                        <div class="viewer__side">
-                            <Show
-                                when=move || state.renaming.get()
-                                fallback=move || view! {
-                                    <div class="viewer__name">
-                                        <span>{move || title.get()}</span>
-                                        <IconAction icon="edit" title=t("rename") on_click=Callback::new(move |()| state.renaming.set(true)) />
-                                    </div>
-                                }
-                            >
-                                <div
-                                    class="viewer__rename"
-                                    node_ref=rename_box
-                                    on:keydown=move |ev| {
-                                        // Escape leaves the name as it was; the viewer stays.
-                                        if ev.key() == "Escape" {
-                                            ev.prevent_default();
-                                            state.renaming.set(false);
-                                        }
-                                    }
-                                >
-                                    <TextInput
-                                        value=wanted
-                                        autofocus=true
-                                        invalid=Signal::derive(move || rename_error.with(Option::is_some))
-                                        on_enter=Callback::new(move |()| save_name())
-                                    />
-                                    <IconAction icon="check" title=t("save") on_click=Callback::new(move |()| save_name()) />
-                                    <IconAction icon="close" title=t("cancel") on_click=Callback::new(move |()| state.renaming.set(false)) />
-                                </div>
-                                {move || rename_error.get().map(|e| view! { <div class="viewer__error">{e}</div> })}
-                            </Show>
-                            <dl class="viewer__info">
-                                <dt>{move || i18n.t("shots_build")}</dt>
-                                <dd>{build}</dd>
-                                <dt>{move || i18n.t("shots_resolution")}</dt>
-                                <dd>{move || resolution.get().map(|(w, h)| format!("{w} × {h}")).unwrap_or_else(|| "…".into())}</dd>
-                                <dt>{move || i18n.t("shots_size")}</dt>
-                                <dd>{size}</dd>
-                                <dt>{move || i18n.t("shots_taken")}</dt>
-                                <dd>{when}</dd>
-                            </dl>
-                            <div class="viewer__actions">
-                                <Button size=Size::Md icon="content_copy" on_click=move |_| with_current(|a, k, n| a.copy(k, n))>
-                                    {move || i18n.t("shots_copy")}
-                                </Button>
-                                <Button size=Size::Md icon="open_in_new" on_click=move |_| with_current(|a, k, n| a.open(k, n))>
-                                    {move || i18n.t("open_screenshot")}
-                                </Button>
-                                <Button size=Size::Md icon="folder_open" on_click=move |_| with_current(|a, k, n| a.reveal(k, n))>
-                                    {move || i18n.t("shots_reveal")}
-                                </Button>
-                                <Button size=Size::Md variant=Variant::Danger icon="delete_outline" on_click=move |_| delete_open.set(true)>
-                                    {move || i18n.t("delete")}
-                                </Button>
-                            </div>
-                        </div>
+    let position = Signal::derive(move || format!("{} / {}", state.at.get() + 1, count.get()));
+    let heading = move || {
+        view! {
+            <Show
+                when=move || state.renaming.get()
+                fallback=move || view! {
+                    <div class="viewer__title">
+                        <h3 class="dialog__title">{move || title.get()}</h3>
+                        // Just the icon beside the name: no frame, so it does not outweigh it.
+                        <button
+                            type="button"
+                            class="viewer__edit"
+                            data-tip=move || i18n.t("rename")
+                            data-tip-side="top"
+                            aria-label=move || i18n.t("rename")
+                            on:click=move |_| {
+                                ui_kit::sound::play_click();
+                                state.renaming.set(true);
+                            }
+                        >
+                            <Icon name="edit" />
+                        </button>
                     </div>
                 }
+            >
+                <div
+                    class="viewer__rename"
+                    node_ref=rename_box
+                    on:keydown=move |ev| {
+                        // Escape leaves the name as it was; the viewer stays.
+                        if ev.key() == "Escape" {
+                            ev.prevent_default();
+                            state.renaming.set(false);
+                        }
+                    }
+                >
+                    <TextInput
+                        value=wanted
+                        autofocus=true
+                        invalid=Signal::derive(move || rename_error.with(Option::is_some))
+                        on_enter=Callback::new(move |()| save_name())
+                    />
+                    <IconAction icon="check" title=t("save") on_click=Callback::new(move |()| save_name()) />
+                    <IconAction icon="close" title=t("cancel") on_click=Callback::new(move |()| state.renaming.set(false)) />
+                </div>
+                {move || rename_error.get().map(|e| view! { <div class="viewer__error">{e}</div> })}
+            </Show>
+        }
+    };
+
+    view! {
+        <Dialog
+            open=state.open
+            class="dialog--viewer"
+            title=title
+            subtitle=position
+            heading=std::sync::Arc::new(move || heading().into_any())
+        >
+            <DialogFooter slot>
+                <Button variant=Variant::Danger icon="delete_outline" class="viewer__delete" on_click=move |_| delete_open.set(true)>
+                    {move || i18n.t("delete")}
+                </Button>
+                <Button icon="content_copy" on_click=move |_| with_current(|a, k, n| a.copy(k, n))>
+                    {move || i18n.t("shots_copy")}
+                </Button>
+                <Button icon="open_in_new" on_click=move |_| with_current(|a, k, n| a.open(k, n))>
+                    {move || i18n.t("open_screenshot")}
+                </Button>
+                <Button icon="folder_open" on_click=move |_| with_current(|a, k, n| a.reveal(k, n))>
+                    {move || i18n.t("shots_reveal")}
+                </Button>
+            </DialogFooter>
+            {move || current.get().map(|(_, shot)| view! {
+                <div class="viewer">
+                    <img class="viewer__picture" src=shot.src.clone() alt="" draggable="false" />
+                    <button
+                        type="button"
+                        class="viewer__nav is-prev"
+                        aria-label=move || i18n.t("shots_previous")
+                        disabled=move || state.at.get() == 0
+                        on:click=move |_| go(-1)
+                    >
+                        <Icon name="chevron_left" />
+                    </button>
+                    <button
+                        type="button"
+                        class="viewer__nav is-next"
+                        aria-label=move || i18n.t("shots_next")
+                        disabled=at_end
+                        on:click=move |_| go(1)
+                    >
+                        <Icon name="chevron_right" />
+                    </button>
+                </div>
             })}
         </Dialog>
         <ConfirmDialog
