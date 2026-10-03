@@ -6,6 +6,8 @@ use launcher_shared::provider::{ProjectHit, SearchPage};
 use reqwest::Url;
 use serde_json::Value;
 
+use crate::types::loader_tags;
+
 /// The API pages no further than its 10 000th result.
 pub const SEARCH_CAP: u32 = 10_000;
 
@@ -59,26 +61,37 @@ fn hit(project: &Value) -> Option<ProjectHit> {
     })
 }
 
-/// A file made for `game_version` and, when given, the loader CurseForge tags `loader_tag`.
-pub fn file_fits(file: &Value, game_version: Option<&str>, loader_tag: Option<&str>) -> bool {
-    let lists = |wanted: &str| {
-        file.get("gameVersions")
-            .and_then(Value::as_array)
-            .is_some_and(|all| all.iter().any(|v| v.as_str() == Some(wanted)))
-    };
-    file.get("isAvailable").and_then(Value::as_bool) != Some(false)
-        && game_version.is_none_or(lists)
-        && loader_tag.is_none_or(lists)
+/// `file` lists `wanted` among its game versions (where CurseForge tags its loaders too).
+fn lists(file: &Value, wanted: &str) -> bool {
+    file.get("gameVersions")
+        .and_then(Value::as_array)
+        .is_some_and(|all| all.iter().any(|v| v.as_str() == Some(wanted)))
 }
 
-/// The file to install of those that fit: the newest release, else the newest of any.
+/// A file made for `game_version` and, when given, a loader a build of `loader` runs.
+pub fn file_fits(file: &Value, game_version: Option<&str>, loader: Option<&str>) -> bool {
+    file.get("isAvailable").and_then(Value::as_bool) != Some(false)
+        && game_version.is_none_or(|gv| lists(file, gv))
+        && loader.is_none_or(|l| loader_tags(l).iter().any(|tag| lists(file, tag)))
+}
+
+/// The file to install of those that fit: the newest release, else the newest of any; of a day's
+/// files, one for the build's own loader (a Quilt file over the Fabric one of the same release).
 pub fn pick_file<'a>(
     files: &'a [Value],
     game_version: Option<&str>,
-    loader_tag: Option<&str>,
+    loader: Option<&str>,
 ) -> Option<&'a Value> {
-    let fitting = || files.iter().filter(|f| file_fits(f, game_version, loader_tag));
-    let newest = |a: &&Value, b: &&Value| text(a, "fileDate").cmp(&text(b, "fileDate"));
+    let fitting = || files.iter().filter(|f| file_fits(f, game_version, loader));
+    let own =
+        |f: &Value| loader.and_then(|l| loader_tags(l).first().copied()).is_some_and(|tag| lists(f, tag));
+    let day = |f: &Value| text(f, "fileDate").get(..10).map(str::to_string);
+    let newest = |a: &&Value, b: &&Value| {
+        day(a)
+            .cmp(&day(b))
+            .then_with(|| own(a).cmp(&own(b)))
+            .then_with(|| text(a, "fileDate").cmp(&text(b, "fileDate")))
+    };
     fitting()
         .filter(|f| f["releaseType"].as_u64() == Some(1))
         .max_by(newest)
@@ -180,17 +193,34 @@ mod tests {
             file(5, &["1.20.1", "Fabric"], 1, "2026-09-09T00:00:00Z", json!("https://edge.forgecdn.net/5")),
         ];
         let pick = |v, l| pick_file(&files, v, l).map(|f| f["id"].as_u64().unwrap());
-        assert_eq!(pick(Some("1.21.1"), Some("Fabric")), Some(2), "a release before a newer alpha");
-        assert_eq!(pick(Some("1.21.1"), Some("Forge")), Some(4));
-        assert_eq!(pick(Some("1.21.1"), Some("Quilt")), None);
+        assert_eq!(pick(Some("1.21.1"), Some("fabric")), Some(2), "a release before a newer alpha");
+        assert_eq!(pick(Some("1.21.1"), Some("forge")), Some(4));
+        assert_eq!(pick(Some("1.21.1"), Some("neoforge")), None);
         assert_eq!(pick(Some("1.21.1"), None), Some(4), "no loader: any file of the version");
         let alphas = vec![files[0].clone()];
         assert_eq!(
-            pick_file(&alphas, Some("1.21.1"), Some("Fabric")).map(|f| f["id"].clone()),
+            pick_file(&alphas, Some("1.21.1"), Some("fabric")).map(|f| f["id"].clone()),
             Some(json!(1))
         );
-        assert!(file_fits(&files[0], Some("1.21.1"), Some("Fabric")));
-        assert!(!file_fits(&files[0], Some("1.21"), Some("Fabric")), "a version is matched whole");
+        assert!(file_fits(&files[0], Some("1.21.1"), Some("fabric")));
+        assert!(!file_fits(&files[0], Some("1.21"), Some("fabric")), "a version is matched whole");
+    }
+
+    #[test]
+    fn a_quilt_build_takes_fabric_files_too() {
+        // Quilt loads Fabric mods, most of them tagged Fabric only; of a day's files its own wins.
+        let files = vec![
+            file(1, &["1.21.1", "Fabric"], 1, "2026-09-02T10:00:00Z", json!("https://edge.forgecdn.net/1")),
+            file(2, &["1.21.1", "Quilt"], 1, "2026-09-02T09:00:00Z", json!("https://edge.forgecdn.net/2")),
+            file(3, &["1.21.1", "Forge"], 1, "2026-09-09T00:00:00Z", json!("https://edge.forgecdn.net/3")),
+        ];
+        let pick =
+            |files: &[Value], l| pick_file(files, Some("1.21.1"), l).map(|f| f["id"].as_u64().unwrap());
+        assert_eq!(pick(&files, Some("quilt")), Some(2));
+        assert_eq!(pick(&files[..1], Some("quilt")), Some(1), "a Fabric-only mod runs on Quilt");
+        assert_eq!(pick(&files[1..], Some("fabric")), None, "a Fabric build takes no Quilt file");
+        assert!(file_fits(&files[0], Some("1.21.1"), Some("quilt")));
+        assert!(!file_fits(&files[2], Some("1.21.1"), Some("quilt")));
     }
 
     #[test]

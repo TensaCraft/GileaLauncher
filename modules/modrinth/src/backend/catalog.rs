@@ -7,7 +7,7 @@ use reqwest::Url;
 use serde_json::{Value, json};
 
 use crate::types::{modrinth_url, project_type};
-use launcher_shared::provider::{ProjectHit, SearchPage};
+use launcher_shared::provider::{ProjectHit, SearchPage, loaders_run_by};
 
 /// A trimmed string field, or empty.
 pub(crate) fn text(value: &Value, key: &str) -> String {
@@ -19,7 +19,8 @@ pub(crate) fn text(value: &Value, key: &str) -> String {
 pub fn search_facets(kind: ContentKind, loader: Option<&str>, game_version: Option<&str>) -> String {
     let mut facets = vec![vec![format!("project_type:{}", project_type(kind))]];
     if let Some(loader) = loader {
-        facets.push(vec![format!("categories:{loader}")]);
+        // One group: any of the loaders the build runs (Quilt runs Fabric's mods too).
+        facets.push(run_by(loader).iter().map(|l| format!("categories:{l}")).collect());
     }
     if let Some(version) = game_version {
         facets.push(vec![format!("versions:{version}")]);
@@ -56,24 +57,48 @@ pub fn search_page(raw: &Value, offset: u32, limit: u32) -> SearchPage {
     SearchPage { hits, total, offset, limit }
 }
 
-/// A version made for `game_version` and, when given, `loader`.
-pub fn version_fits(version: &Value, loader: Option<&str>, game_version: Option<&str>) -> bool {
-    let lists = |key: &str, wanted: &str| {
-        version
-            .get(key)
-            .and_then(Value::as_array)
-            .is_some_and(|all| all.iter().any(|v| v.as_str() == Some(wanted)))
-    };
-    game_version.is_none_or(|gv| lists("game_versions", gv)) && loader.is_none_or(|l| lists("loaders", l))
+/// The loaders a build of `loader` runs, its own first; an unknown one runs only its own.
+pub(crate) fn run_by(loader: &str) -> Vec<&str> {
+    match loaders_run_by(loader) {
+        [] => vec![loader],
+        known => known.to_vec(),
+    }
 }
 
-/// The versions a build can use: made for its Minecraft version and, when given, its loader.
+/// `version` lists `wanted` under `key`.
+fn lists(version: &Value, key: &str, wanted: &str) -> bool {
+    version
+        .get(key)
+        .and_then(Value::as_array)
+        .is_some_and(|all| all.iter().any(|v| v.as_str() == Some(wanted)))
+}
+
+/// A version made for `game_version` and, when given, a loader the build of `loader` runs.
+pub fn version_fits(version: &Value, loader: Option<&str>, game_version: Option<&str>) -> bool {
+    game_version.is_none_or(|gv| lists(version, "game_versions", gv))
+        && loader.is_none_or(|l| run_by(l).iter().any(|run| lists(version, "loaders", run)))
+}
+
+/// The versions a build can use: made for its Minecraft version and, when given, a loader it runs.
+/// Newest first as Modrinth lists them; of a day's versions, those for the build's own loader come
+/// first (a Quilt build takes a Quilt file over the Fabric one of the same release).
 pub fn compatible<'a>(
     versions: &'a Value,
     loader: Option<&str>,
     game_version: Option<&str>,
 ) -> Vec<&'a Value> {
-    versions.as_array().into_iter().flatten().filter(|v| version_fits(v, loader, game_version)).collect()
+    let mut fit: Vec<&Value> =
+        versions.as_array().into_iter().flatten().filter(|v| version_fits(v, loader, game_version)).collect();
+    if let Some(own) = loader {
+        let day = |v: &Value| {
+            v.get("date_published").and_then(Value::as_str).and_then(|d| d.get(..10)).map(str::to_string)
+        };
+        // Stable: only versions of the same day change places.
+        fit.sort_by(|a, b| {
+            day(b).cmp(&day(a)).then_with(|| lists(b, "loaders", own).cmp(&lists(a, "loaders", own)))
+        });
+    }
+    fit
 }
 
 /// A file to download and check.
@@ -178,6 +203,35 @@ mod tests {
             r#"[["project_type:resourcepack"],["versions:1.21.1"]]"#
         );
         assert_eq!(search_facets(ContentKind::ShaderPacks, None, None), r#"[["project_type:shader"]]"#);
+    }
+
+    #[test]
+    fn a_quilt_build_searches_and_takes_fabric_mods_too() {
+        // Quilt loads Fabric mods; most of them are tagged Fabric only.
+        assert_eq!(
+            search_facets(ContentKind::Mods, Some("quilt"), Some("1.21.1")),
+            r#"[["project_type:mod"],["categories:quilt","categories:fabric"],["versions:1.21.1"]]"#
+        );
+        let versions = json!([
+            {"id": "fabric-new", "game_versions": ["1.21.1"], "loaders": ["fabric"], "date_published": "2026-09-02T10:00:00Z"},
+            {"id": "quilt-same-day", "game_versions": ["1.21.1"], "loaders": ["quilt"], "date_published": "2026-09-02T09:00:00Z"},
+            {"id": "quilt-old", "game_versions": ["1.21.1"], "loaders": ["quilt"], "date_published": "2026-05-01T09:00:00Z"},
+            {"id": "forge", "game_versions": ["1.21.1"], "loaders": ["forge"], "date_published": "2026-09-03T09:00:00Z"}
+        ]);
+        let ids: Vec<&str> = compatible(&versions, Some("quilt"), Some("1.21.1"))
+            .iter()
+            .map(|v| v["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            ids,
+            ["quilt-same-day", "fabric-new", "quilt-old"],
+            "its own loader first of a day's builds"
+        );
+        let fabric: Vec<&str> = compatible(&versions, Some("fabric"), Some("1.21.1"))
+            .iter()
+            .map(|v| v["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(fabric, ["fabric-new"], "a Fabric build takes no Quilt mod");
     }
 
     #[test]

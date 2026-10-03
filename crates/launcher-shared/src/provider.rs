@@ -649,6 +649,18 @@ pub fn loader_name(loader: Option<&str>, client: Option<&str>) -> Option<&'stati
     ["fabric", "neoforge", "forge", "quilt"].into_iter().find(|name| source.contains(name))
 }
 
+/// The loaders whose mods a build of `loader` runs (providers' names), its own first: Quilt runs
+/// Fabric's too.
+pub fn loaders_run_by(loader: &str) -> &'static [&'static str] {
+    match loader {
+        "quilt" => &["quilt", "fabric"],
+        "fabric" => &["fabric"],
+        "neoforge" => &["neoforge"],
+        "forge" => &["forge"],
+        _ => &[],
+    }
+}
+
 pub fn loader_label(name: &str) -> &'static str {
     match name {
         "fabric" => "Fabric",
@@ -767,6 +779,16 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_quilt_build_runs_fabric_mods_too() {
+        // Quilt loads Fabric mods: a Quilt build is offered both, its own first.
+        assert_eq!(loaders_run_by("quilt"), ["quilt", "fabric"]);
+        assert_eq!(loaders_run_by("fabric"), ["fabric"]);
+        assert_eq!(loaders_run_by("neoforge"), ["neoforge"]);
+        assert_eq!(loaders_run_by("forge"), ["forge"]);
+        assert!(loaders_run_by("minecraft").is_empty());
+    }
 
     fn info() -> ProviderInfo {
         ProviderInfo {

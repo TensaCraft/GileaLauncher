@@ -41,7 +41,7 @@ use super::key::{ApiKey, KEY_HEADER, keyed_host};
 use super::pack::PACK_RECORD;
 use super::provenance::{PROVENANCE, Record, document, installed, read};
 use super::resolver::{self, Candidate, Installed, InstalledFile, Plan, mod_key};
-use crate::types::{class_id, loader_type};
+use crate::types::{class_id, loader_types};
 use launcher_core::packs::PackRecord;
 
 /// The journal of CurseForge installs.
@@ -242,7 +242,11 @@ impl CurseForgeService {
             class_id: class_id(args.kind),
             text: &args.query,
             game_version: target.game_version.as_deref(),
-            loader: (args.kind == ContentKind::Mods).then_some(target.loader).flatten().and_then(loader_type),
+            loaders: (args.kind == ContentKind::Mods)
+                .then_some(target.loader)
+                .flatten()
+                .map(loader_types)
+                .unwrap_or_default(),
             index: args.offset,
             page_size: SEARCH_LIMIT.min(SEARCH_CAP - args.offset),
         };
@@ -618,7 +622,11 @@ impl CurseForgeService {
         let Ok(projects) = self.fresh_projects(&ids).await else {
             return summary(UpdatesStatus::Failed, 0, 0);
         };
-        let loader = (kind == ContentKind::Mods).then_some(target.loader).flatten().and_then(loader_type);
+        let loaders = (kind == ContentKind::Mods)
+            .then_some(target.loader)
+            .flatten()
+            .map(loader_types)
+            .unwrap_or_default();
         let (mut wanted, mut unchecked) = (Vec::new(), 0);
         for (id, file) in &eligible {
             let Some(project) = projects.get(id) else {
@@ -631,7 +639,10 @@ impl CurseForgeService {
                 .into_iter()
                 .flatten()
                 .filter(|i| i["gameVersion"].as_str() == Some(game))
-                .filter(|i| loader.is_none_or(|l| i["modLoader"].as_u64() == Some(u64::from(l))))
+                .filter(|i| {
+                    loaders.is_empty()
+                        || loaders.iter().any(|l| i["modLoader"].as_u64() == Some(u64::from(*l)))
+                })
                 .filter(|i| i["releaseType"].as_u64().is_some_and(|r| r <= allowed))
                 .filter_map(|i| i["fileId"].as_u64())
                 .max();

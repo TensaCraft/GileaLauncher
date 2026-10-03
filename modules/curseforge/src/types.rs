@@ -1,7 +1,7 @@
 //! CurseForge's own numbers and names; the provider contract's data is `launcher_shared::provider`.
 
 use launcher_shared::ContentKind;
-use launcher_shared::provider::ProviderInfo;
+use launcher_shared::provider::{ProviderInfo, loaders_run_by};
 
 pub const NAME: &str = "CurseForge";
 /// The class of modpacks.
@@ -36,6 +36,17 @@ pub fn loader_tag(loader: &str) -> Option<&'static str> {
         "neoforge" => Some("NeoForge"),
         _ => None,
     }
+}
+
+/// CurseForge's mod loader types of the loaders a build of `loader` runs (Quilt runs Fabric's
+/// mods too), its own first.
+pub fn loader_types(loader: &str) -> Vec<u32> {
+    loaders_run_by(loader).iter().filter_map(|l| loader_type(l)).collect()
+}
+
+/// The names CurseForge tags the files of those loaders with, the build's own first.
+pub fn loader_tags(loader: &str) -> Vec<&'static str> {
+    loaders_run_by(loader).iter().filter_map(|l| loader_tag(l)).collect()
 }
 
 /// What CurseForge offers the launcher: mods, resource packs and shader packs, and modpacks, all

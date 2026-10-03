@@ -138,7 +138,7 @@ impl CurseForgeService {
             class_id: MODPACKS_CLASS,
             text: &args.query,
             game_version: None,
-            loader: None,
+            loaders: Vec::new(),
             index: args.offset,
             page_size: PACKS_LIMIT.min(SEARCH_CAP - args.offset),
         };

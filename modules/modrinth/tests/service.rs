@@ -134,8 +134,9 @@ async fn installing_puts_the_newest_compatible_primary_file_in_place() {
     let asked = pairs(&w.server.seen()[0].0);
     assert_eq!(
         asked,
-        [("loaders", r#"["quilt"]"#), ("game_versions", r#"["1.21.1"]"#)]
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+        [("loaders", r#"["quilt","fabric"]"#), ("game_versions", r#"["1.21.1"]"#)]
+            .map(|(k, v)| (k.to_string(), v.to_string())),
+        "a Quilt build runs Fabric's mods too"
     );
     assert_eq!(installed(&w, &key, ContentKind::Mods).await, ["AANobbMI"]);
     assert!(installed(&w, &key, ContentKind::ResourcePacks).await.is_empty());

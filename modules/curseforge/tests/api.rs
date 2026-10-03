@@ -29,7 +29,7 @@ async fn every_request_names_the_launcher_and_carries_the_key() {
         class_id: 6,
         text: "sod",
         game_version: Some("1.21.1"),
-        loader: Some(4),
+        loaders: vec![4],
         index: 0,
         page_size: 16,
     };
@@ -52,11 +52,22 @@ async fn every_request_names_the_launcher_and_carries_the_key() {
             ("sortOrder", "desc"),
         ]
     );
-    api.search(&SearchQuery { text: "  ", game_version: None, loader: None, ..query }).await.unwrap();
+    // A Quilt build searches Fabric's mods too, in one list.
+    api.search(&SearchQuery { loaders: vec![5, 4], ..query.clone() }).await.unwrap();
+    let seen = server.seen();
+    let asked = pairs(&seen[1]);
     assert!(
-        !pairs(&server.seen()[1])
-            .iter()
-            .any(|(k, _)| ["searchFilter", "gameVersion", "modLoaderType"].contains(k)),
+        asked.contains(&("modLoaderTypes", "[5,4]")) && !asked.iter().any(|(k, _)| *k == "modLoaderType")
+    );
+    api.search(&SearchQuery { text: "  ", game_version: None, loaders: Vec::new(), ..query }).await.unwrap();
+    assert!(
+        !pairs(&server.seen()[2]).iter().any(|(k, _)| [
+            "searchFilter",
+            "gameVersion",
+            "modLoaderType",
+            "modLoaderTypes"
+        ]
+        .contains(k)),
         "no text, no version, no loader: no filters"
     );
 }

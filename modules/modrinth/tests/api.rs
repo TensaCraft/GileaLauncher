@@ -40,6 +40,12 @@ async fn versions_are_narrowed_by_loader_and_version() {
             .map(|(k, v)| (k.to_string(), v.to_string()))
     );
     assert_eq!(seen[1].0, "/v2/project/x%20y/version", "no filters, no query");
+    // A Quilt build asks for Fabric's versions too.
+    api.project_versions("AANobbMI", Some("quilt"), None).await.unwrap();
+    assert_eq!(
+        pairs(&server.seen()[2].0),
+        [("loaders", r#"["quilt","fabric"]"#)].map(|(k, v)| (k.to_string(), v.to_string()))
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

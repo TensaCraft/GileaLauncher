@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::api::CurseForgeApi;
 use super::catalog::{InstallFile, blocked, file_fits, file_page, pick_file, text};
 use super::held::{Finder, Held};
-use crate::types::{loader_tag, loader_type};
+use crate::types::loader_types;
 
 /// CurseForge's relation types.
 const EMBEDDED: u64 = 1;
@@ -73,12 +73,18 @@ pub struct Target<'a> {
 }
 
 impl Target<'_> {
-    fn loader_type(&self) -> Option<u32> {
-        (self.kind == ContentKind::Mods).then_some(self.loader).flatten().and_then(loader_type)
+    /// The loader files must be for (mods only).
+    fn mod_loader(&self) -> Option<&'static str> {
+        (self.kind == ContentKind::Mods).then_some(self.loader).flatten()
     }
 
-    fn loader_tag(&self) -> Option<&'static str> {
-        (self.kind == ContentKind::Mods).then_some(self.loader).flatten().and_then(loader_tag)
+    /// The one loader type CurseForge may narrow the build's files to; a build running more than one
+    /// (Quilt) gets every file of its version, narrowed here.
+    fn loader_type(&self) -> Option<u32> {
+        match self.mod_loader().map(loader_types).as_deref() {
+            Some([one]) => Some(*one),
+            _ => None,
+        }
     }
 }
 
@@ -250,10 +256,10 @@ impl Resolver<'_, '_> {
     async fn file(&self, id: u64, exact: Option<u64>) -> AppResult<Option<Value>> {
         let target = self.target;
         let files = self.api.files(id, target.game_version, target.loader_type()).await?;
-        let fits = |f: &&Value| file_fits(f, target.game_version, target.loader_tag());
+        let fits = |f: &&Value| file_fits(f, target.game_version, target.mod_loader());
         let chosen = exact
             .and_then(|wanted| files.iter().filter(fits).find(|f| f["id"].as_u64() == Some(wanted)))
-            .or_else(|| pick_file(&files, target.game_version, target.loader_tag()));
+            .or_else(|| pick_file(&files, target.game_version, target.mod_loader()));
         Ok(chosen.cloned())
     }
 }

@@ -147,7 +147,8 @@ impl ModrinthApi {
         self.get(self.url(&["search"], &pairs)?).await
     }
 
-    /// `GET /project/{id}/version`, narrowed to a loader and a Minecraft version when given.
+    /// `GET /project/{id}/version`, narrowed to the loaders a build of `loader` runs and a Minecraft
+    /// version when given.
     pub async fn project_versions(
         &self,
         project_id: &str,
@@ -156,7 +157,7 @@ impl ModrinthApi {
     ) -> AppResult<Value> {
         let mut pairs = Vec::new();
         if let Some(loader) = loader {
-            pairs.push(("loaders", serde_json::json!([loader]).to_string()));
+            pairs.push(("loaders", serde_json::json!(super::catalog::run_by(loader)).to_string()));
         }
         if let Some(version) = game_version {
             pairs.push(("game_versions", serde_json::json!([version]).to_string()));

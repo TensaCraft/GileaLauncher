@@ -24,13 +24,13 @@ const READ: Duration = Duration::from_secs(20);
 const PROVIDER: &str = "CurseForge";
 
 /// A search of one class of projects.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SearchQuery<'a> {
     pub class_id: u32,
     pub text: &'a str,
     pub game_version: Option<&'a str>,
-    /// CurseForge's mod loader type.
-    pub loader: Option<u32>,
+    /// CurseForge's mod loader types the build runs (none: any).
+    pub loaders: Vec<u32>,
     pub index: u32,
     pub page_size: u32,
 }
@@ -84,8 +84,13 @@ impl CurseForgeApi {
         if let Some(version) = query.game_version {
             pairs.push(("gameVersion", version.to_string()));
         }
-        if let Some(loader) = query.loader {
-            pairs.push(("modLoaderType", loader.to_string()));
+        match query.loaders.as_slice() {
+            [] => {}
+            [one] => pairs.push(("modLoaderType", one.to_string())),
+            many => pairs.push((
+                "modLoaderTypes",
+                format!("[{}]", many.iter().map(u32::to_string).collect::<Vec<_>>().join(",")),
+            )),
         }
         self.get("/v1/mods/search", &pairs).await
     }

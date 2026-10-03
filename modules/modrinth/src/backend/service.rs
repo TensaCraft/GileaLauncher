@@ -515,7 +515,7 @@ impl ModrinthService {
         }
         let hashes: Vec<String> = eligible.iter().filter_map(|i| i.sha512.clone()).collect();
         let loaders: Vec<&str> = match kind {
-            ContentKind::Mods => target.loader.into_iter().collect(),
+            ContentKind::Mods => target.loader.map(super::catalog::run_by).unwrap_or_default(),
             ContentKind::ResourcePacks => vec!["minecraft"],
             ContentKind::ShaderPacks => vec!["iris"],
         };
