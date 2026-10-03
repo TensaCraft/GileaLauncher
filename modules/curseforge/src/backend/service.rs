@@ -66,6 +66,9 @@ pub struct Deps {
     pub gpu_mode: Arc<dyn Fn() -> String + Send + Sync>,
     /// Where files CurseForge keeps from other apps are looked for.
     pub elsewhere: Elsewhere,
+    /// Where a pack's zip waits while the files CurseForge keeps from other apps are downloaded by
+    /// hand (the next try takes it instead of downloading it again).
+    pub kept_packs: PathBuf,
 }
 
 pub use packs::{PACK_JOURNAL, PACKS};

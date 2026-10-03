@@ -59,6 +59,7 @@ impl CurseForgeModule {
                 modrinth: Some(held::MODRINTH.to_string()),
                 downloads: launcher_core::content::held::downloads_dir(),
             },
+            kept_packs: core.paths.cache_dir.join("curseforge-packs"),
         };
         Ok(self.service.get_or_init(|| Arc::new(CurseForgeService::new(api, deps, &key))).clone())
     }

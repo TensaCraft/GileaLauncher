@@ -531,6 +531,7 @@ mod world {
             components: components.clone(),
             gpu_mode: Arc::new(|| "dgpu".to_string()),
             elsewhere: Elsewhere { modrinth: Some(server.base.clone()), downloads: Some(downloads.clone()) },
+            kept_packs: tmp.path().join("kept-packs"),
         };
         let key = ApiKey::new(TEST_KEY).unwrap();
         let api = CurseForgeApi::new(&server.base, key.clone()).unwrap();

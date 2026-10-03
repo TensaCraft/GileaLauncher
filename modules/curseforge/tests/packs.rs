@@ -136,6 +136,20 @@ async fn a_held_file_found_nowhere_is_named_to_download_by_hand_and_leaves_no_bu
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn going_on_after_a_held_file_takes_the_pack_downloaded_before() {
+    // The pack's zip (hundreds of megabytes) came down before the held file was found missing:
+    // once the user has it, the next try reads the zip kept from the first.
+    let w = world().await;
+    let jar = pack_with_a_held_file(&w);
+    let e = w.service.install_pack(&args(3001)).await.unwrap_err();
+    assert_eq!(e.code, ErrorCode::ProviderFilesHeld);
+    fs::write(w.downloads.join("held.jar"), &jar).unwrap();
+    w.service.install_pack(&args(3001)).await.unwrap();
+    let zips = w.server.seen().into_iter().filter(|s| s.path.ends_with("/big-pack-3001.zip")).count();
+    assert_eq!(zips, 1, "the pack's zip came down once");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_held_file_the_user_downloaded_is_taken_from_their_downloads() {
     let w = world().await;
     let jar = pack_with_a_held_file(&w);

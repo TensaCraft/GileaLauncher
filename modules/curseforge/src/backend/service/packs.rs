@@ -2,13 +2,16 @@
 //! version as the flow needs it — its zip downloaded and its files as CurseForge names them.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 use launcher_core::feedback::OperationHandle;
 use launcher_core::net::downloader::{DownloadProgress, DownloadTask, HashKind, hash_file};
 use launcher_core::packs::Limits;
 use launcher_core::packs::engine::{PackKind, PackVersionMeta};
 use launcher_core::packs::flow::{self, Fetched, PackFuture, PackSource};
+use launcher_core::storage::atomic::rename_retrying;
 use launcher_shared::provider::{
     ModpackBuild, PACKS_LIMIT, PackArgs, PackInstallArgs, PackInstalled, PackUpdateArgs, PackUpdated,
     PackVersion, PacksArgs, SearchPage, held_error,
@@ -97,6 +100,29 @@ fn by_id(items: Vec<Value>) -> HashMap<u64, Value> {
     items.into_iter().filter_map(|item| Some((item["id"].as_u64()?, item))).collect()
 }
 
+/// How long a pack's zip waits for its held files before it is let go.
+const KEPT_FOR: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Lets go of the packs' zips in `dir` that waited longer than a day, but `wanted`.
+fn forget_old_packs(dir: &Path, wanted: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let old = entry.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok());
+        if entry.path() != wanted && old.is_some_and(|age| age > KEPT_FOR) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Moves `from` to `to`, by a copy when they are on different drives.
+fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if rename_retrying(from, to).is_ok() {
+        return Ok(());
+    }
+    fs::copy(from, to)?;
+    fs::remove_file(from)
+}
+
 impl CurseForgeService {
     /// A page of CurseForge's modpacks.
     pub async fn packs(&self, args: &PacksArgs) -> AppResult<SearchPage> {
@@ -178,13 +204,22 @@ impl CurseForgeService {
             AppError::new(ErrorCode::NoFileFound, "the pack's zip cannot be downloaded")
                 .with_param("name", text(&info, "name"))
         })?;
-        let task = DownloadTask::new(download.url, archive.to_path_buf())
+        // Kept apart until the files CurseForge holds are all found: going on after downloading
+        // them by hand reads this zip again rather than downloading it again.
+        let kept = self.deps.kept_packs.join(format!("{file_id}.zip"));
+        let (dir, wanted) = (self.deps.kept_packs.clone(), kept.clone());
+        blocking(move || {
+            forget_old_packs(&dir, &wanted);
+            Ok(())
+        })
+        .await?;
+        let task = DownloadTask::new(download.url, kept.clone())
             .size(download.size)
             .hash(download.hash)
             .credential(self.credential.clone());
         let progress = |p: DownloadProgress| op.progress(p.bytes_done as f64, p.bytes_total.max(1) as f64);
         self.deps.downloader.download_all(vec![task], false, &progress).await?.into_result()?;
-        let path = archive.to_path_buf();
+        let path = kept.clone();
         let (manifest, overrides) = blocking(move || {
             let zip = std::fs::File::open(&path).map_err(|e| AppError::new(ErrorCode::Io, e.to_string()))?;
             pack::read(zip, Limits::default())
@@ -215,6 +250,9 @@ impl CurseForgeService {
         if !by_hand.is_empty() {
             return Err(held_error(&by_hand));
         }
+        let to = archive.to_path_buf();
+        blocking(move || move_file(&kept, &to).map_err(|e| AppError::new(ErrorCode::Io, e.to_string())))
+            .await?;
         pack.summary = text(&info, "summary");
         let meta = PackVersionMeta {
             project_id: project.to_string(),
