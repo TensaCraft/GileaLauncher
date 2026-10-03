@@ -4,6 +4,7 @@
 pub mod downloader;
 pub mod meta;
 pub mod preflight;
+pub mod server_ping;
 
 use std::sync::Arc;
 use std::time::Duration;
