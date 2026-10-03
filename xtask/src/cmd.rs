@@ -184,7 +184,16 @@ fn module_tests() -> Vec<Vec<String>> {
 }
 
 /// What `check` runs after building the frontend, in order (cargo's arguments).
+/// What `check` runs: the lint, then the tests.
 pub fn check_steps() -> Vec<Vec<String>> {
+    let mut steps = lint_steps();
+    steps.extend(test_steps());
+    steps
+}
+
+/// fmt and clippy: the app and the UI with every module, the UI for wasm too, and each module that
+/// is built by no profile (`lint`; CI runs it once, the tests on every system).
+pub fn lint_steps() -> Vec<Vec<String>> {
     let mut steps = vec![
         words("fmt --all -- --check"),
         words("clippy --workspace --all-targets -- -D warnings"),
@@ -202,7 +211,6 @@ pub fn check_steps() -> Vec<Vec<String>> {
             words(&format!("clippy -p module-{m} --features backend,ui --all-targets -- -D warnings"))
         }),
     );
-    steps.extend(test_steps());
     steps
 }
 
@@ -229,6 +237,11 @@ pub fn test() -> Result<()> {
 pub fn check() -> Result<()> {
     frontend_for_tests()?;
     cargo_steps(check_steps())
+}
+
+pub fn lint() -> Result<()> {
+    frontend_for_tests()?;
+    cargo_steps(lint_steps())
 }
 
 /// The app's icons for every system from `path` (`crates/launcher-app/icons`: ico, png, icns);
@@ -366,6 +379,17 @@ mod tests {
             assert!(steps.iter().any(|s| s.contains("wasm32-unknown-unknown") && s.contains(&ui)));
         }
         assert!(EXTRA_MODULES.contains(&"tensa") && EXTRA_MODULES.contains(&"diagnostics"));
+    }
+
+    #[test]
+    fn check_is_lint_then_the_tests() {
+        // CI runs the lint once (Linux) and the tests on every system: together they are `check`.
+        let lint = lint_steps();
+        assert!(lint.iter().all(|s| s[0] != "test"), "{lint:?}");
+        assert!(lint.iter().any(|s| s.join(" ").starts_with("fmt --all")));
+        let mut both = lint;
+        both.extend(test_steps());
+        assert_eq!(both, check_steps());
     }
 
     #[test]

@@ -49,6 +49,8 @@ enum Cmd {
     Test,
     /// fmt + clippy (native and wasm) + tests
     Check,
+    /// fmt + clippy (native and wasm), without the tests
+    Lint,
     /// Generate app icons from a square PNG/SVG
     Icons {
         path: PathBuf,
@@ -159,7 +161,13 @@ fn main() -> Result<()> {
     let command = Cli::parse().command;
     if matches!(
         command,
-        Cmd::Dev(_) | Cmd::Build { .. } | Cmd::Test | Cmd::Check | Cmd::Package { .. } | Cmd::Hook { .. }
+        Cmd::Dev(_)
+            | Cmd::Build { .. }
+            | Cmd::Test
+            | Cmd::Check
+            | Cmd::Lint
+            | Cmd::Package { .. }
+            | Cmd::Hook { .. }
     ) {
         sweep::daily(&sweep::target_dir());
     }
@@ -168,6 +176,7 @@ fn main() -> Result<()> {
         Cmd::Build { target, release } => cmd::build(&resolve(&target)?, release),
         Cmd::Test => cmd::test(),
         Cmd::Check => cmd::check(),
+        Cmd::Lint => cmd::lint(),
         Cmd::Icons { path, macos } => cmd::icons(&path, macos.as_deref()),
         Cmd::NewModule { id } => cmd::new_module(&id),
         Cmd::Profiles => cmd::profiles(),
