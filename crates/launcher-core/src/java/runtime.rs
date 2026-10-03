@@ -9,6 +9,7 @@ use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::UNIX_EPOCH;
 
 use launcher_shared::{AppError, AppResult, ErrorCode, Text};
@@ -359,10 +360,39 @@ fn write_records(dir: &Path, component: &str, version: &str, records: &[(String,
     atomic_write(&dir.join(VERIFIED_FILE), &serde_json::to_vec(&verified).map_err(io::Error::other)?)
 }
 
+/// Every packed file unpacked, a few side by side (each decodes on one core): a first runtime has
+/// hundreds of them. The first failure is the answer; the others stop taking files.
+fn unpack_all(files: &[(PathBuf, PathBuf, String)]) -> io::Result<()> {
+    let workers = std::thread::available_parallelism().map_or(2, |n| n.get()).clamp(1, 8).min(files.len());
+    let (next, failed) = (AtomicUsize::new(0), AtomicBool::new(false));
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| -> io::Result<()> {
+                    while !failed.load(Ordering::SeqCst) {
+                        let Some((packed, dest, sha1)) = files.get(next.fetch_add(1, Ordering::SeqCst))
+                        else {
+                            break;
+                        };
+                        if let Err(e) = unpack(packed, dest, sha1) {
+                            failed.store(true, Ordering::SeqCst);
+                            return Err(e);
+                        }
+                    }
+                    Ok(())
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_else(|_| Err(io::Error::other("unpacking a Java file panicked"))))
+            .collect::<io::Result<Vec<()>>>()
+            .map(|_| ())
+    })
+}
+
 fn finish(after: &AfterDownload, dir: &Path, component: &str, version: &str) -> io::Result<()> {
-    for (packed, dest, sha1) in &after.unpack {
-        unpack(packed, dest, sha1)?;
-    }
+    unpack_all(&after.unpack)?;
     set_executable(&after.executables)?;
     make_links(&after.links)?;
     write_records(dir, component, version, &after.records)
@@ -626,5 +656,43 @@ impl JavaRuntimes {
             Some(java) => Ok(Some(java)),
             None => Err(failed(component, "the runtime has no java executable")),
         }
+    }
+}
+
+#[cfg(test)]
+mod unpack_tests {
+    use super::*;
+
+    fn packed(dir: &Path, name: &str, bytes: &[u8]) -> (PathBuf, PathBuf, String) {
+        let packed = dir.join(format!("{name}.launcher.lzma"));
+        let mut out = Vec::new();
+        lzma_rs::lzma_compress(&mut &bytes[..], &mut out).unwrap();
+        fs::write(&packed, out).unwrap();
+        let sha1 = {
+            let raw = dir.join(format!("{name}.raw"));
+            fs::write(&raw, bytes).unwrap();
+            let sum = hash_file(&raw, HashKind::Sha1).unwrap();
+            fs::remove_file(raw).unwrap();
+            sum
+        };
+        (packed, dir.join(name), sha1)
+    }
+
+    #[test]
+    fn a_runtime_s_files_are_unpacked_side_by_side() {
+        let dir = tempfile::tempdir().unwrap();
+        let files: Vec<_> = (0..24)
+            .map(|i| packed(dir.path(), &format!("f{i}"), format!("file {i}").repeat(500).as_bytes()))
+            .collect();
+        unpack_all(&files).unwrap();
+        for (i, (packed, dest, _)) in files.iter().enumerate() {
+            assert_eq!(fs::read(dest).unwrap(), format!("file {i}").repeat(500).into_bytes());
+            assert!(!packed.exists(), "the packed file goes once unpacked");
+        }
+        let mut bad = vec![packed(dir.path(), "ok", b"fine"), packed(dir.path(), "bad", b"damaged")];
+        bad[1].2 = "0".repeat(40);
+        assert!(unpack_all(&bad).is_err(), "a wrong SHA-1 fails the whole unpacking");
+        assert!(!dir.path().join("bad").exists());
+        assert!(unpack_all(&[]).is_ok());
     }
 }
