@@ -88,6 +88,30 @@ async fn present_files_are_skipped_and_damaged_ones_replaced() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_jar_known_by_name_only_is_kept_while_it_opens() {
+    // Old Maven libraries come with neither size nor hash: a jar there is trusted only while it is
+    // still a readable archive (a cut-off or junk download used to stay for good).
+    let server = fake_files::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut jar = Vec::new();
+    {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut jar));
+        zip.start_file("a/B.class", zip::write::SimpleFileOptions::default()).unwrap();
+        std::io::Write::write_all(&mut zip, b"class").unwrap();
+        zip.finish().unwrap();
+    }
+    server.put("lib.jar", Served { body: jar.clone(), ..Served::default() });
+    let bare = || DownloadTask::new(server.url("lib.jar"), dir.path().join("lib.jar"));
+    run(vec![bare()]).await.unwrap();
+    let again = run(vec![bare()]).await.unwrap();
+    assert_eq!((again.downloaded, again.skipped), (0, 1), "a readable jar stays");
+    std::fs::write(dir.path().join("lib.jar"), b"<html>not found</html>").unwrap();
+    let repaired = run(vec![bare()]).await.unwrap();
+    assert_eq!((repaired.downloaded, repaired.skipped), (1, 0), "junk under a jar's name is fetched again");
+    assert_eq!(std::fs::read(dir.path().join("lib.jar")).unwrap(), jar);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn hash_mismatch_is_a_failure_without_a_file() {
     let server = fake_files::start().await;
     let dir = tempfile::tempdir().unwrap();

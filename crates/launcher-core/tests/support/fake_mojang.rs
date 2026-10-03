@@ -438,7 +438,8 @@ impl FakeMojang {
             json!({"name": coords, "downloads": {"artifact": artifact}})
         };
         let loader_path = maven_path(&coords);
-        let loader_jar = format!("{kind} {lv}").into_bytes();
+        // A real jar: one known by name alone counts only while it opens.
+        let loader_jar = zip_bytes(&[("META-INF/MANIFEST.MF", &format!("{kind} {lv}"))]);
         let mut libraries = vec![library("net.fake:boot:1.0", b"boot")];
         let version = |libraries: Vec<Value>| {
             json!({

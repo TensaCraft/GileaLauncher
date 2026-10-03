@@ -450,8 +450,21 @@ fn should_skip(task: &DownloadTask, verify: bool) -> bool {
     }
     match (&task.hash, verify) {
         (Some(hash), true) => hash_file(&task.dest, hash.kind).is_ok_and(|actual| actual == hash.hex),
+        // Known by name alone (old Maven libraries): a jar or zip counts while it still opens.
+        (None, _) if task.size.is_none() && is_archive(&task.dest) => opens_as_zip(&task.dest),
         _ => true,
     }
+}
+
+fn is_archive(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("jar") || e.eq_ignore_ascii_case("zip"))
+}
+
+/// The file reads as a zip archive (its central directory is whole).
+fn opens_as_zip(path: &Path) -> bool {
+    File::open(path).is_ok_and(|file| zip::ZipArchive::new(io::BufReader::new(file)).is_ok())
 }
 
 /// How many of `tasks` are already in place, and the rest; the checks (and with `verify` the
