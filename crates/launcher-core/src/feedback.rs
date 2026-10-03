@@ -126,6 +126,8 @@ struct State {
     activity: VecDeque<ActivityRecord>,
     last_ops_emit: Option<Instant>,
     ops_dirty: bool,
+    /// Changes of `ops` so far: each snapshot carries it.
+    ops_revision: u64,
     /// Report contexts of the latest reportable alerts, by alert id.
     reports: VecDeque<(u64, ReportContext)>,
 }
@@ -186,6 +188,7 @@ impl FeedbackService {
                 },
             );
             st.ops_dirty = true;
+            st.ops_revision += 1;
             let entry = self.record_activity(
                 &mut st,
                 ActivityEvent::Begin,
@@ -232,6 +235,7 @@ impl FeedbackService {
             let kind = op.kind.clone();
             let current_status = op.status.clone();
             st.ops_dirty = true;
+            st.ops_revision += 1;
             match (status_changed, current_status) {
                 (true, Some(text)) => self.record_activity(
                     &mut st,
@@ -266,6 +270,7 @@ impl FeedbackService {
                 }
             }
             st.ops_dirty = true;
+            st.ops_revision += 1;
             let (level, message) = match failure {
                 Some(text) => (Level::Error, text),
                 None => (Level::Success, op.title.clone()),
@@ -303,7 +308,11 @@ impl FeedbackService {
     }
 
     fn snapshot_of(st: &State) -> OpsSnapshot {
-        OpsSnapshot { busy: !st.ops.is_empty(), operations: st.ops.values().cloned().collect() }
+        OpsSnapshot {
+            busy: !st.ops.is_empty(),
+            operations: st.ops.values().cloned().collect(),
+            revision: st.ops_revision,
+        }
     }
 
     pub fn snapshot(&self) -> OpsSnapshot {
@@ -557,6 +566,25 @@ mod tests {
 
     fn spec(key: &str) -> OperationSpec {
         OperationSpec::new(Text::key(key), "install")
+    }
+
+    #[test]
+    fn each_change_of_the_operations_numbers_the_snapshot_after_the_last() {
+        // The window asks for the operations at start while their events already flow: whichever
+        // arrives last, the later state is kept, by its number.
+        let (fb, rec, _c) = setup();
+        let before = fb.snapshot();
+        let op = fb.begin(spec("a"));
+        let begun = fb.snapshot();
+        op.status(Text::key("b"));
+        let updated = fb.snapshot();
+        op.finish();
+        let ended = fb.snapshot();
+        assert!(before.revision < begun.revision && begun.revision < updated.revision);
+        assert!(updated.revision < ended.revision);
+        assert!(ended.replaces(&begun) && !begun.replaces(&ended) && ended.replaces(&ended));
+        let sent = rec.ops.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(sent, ended, "what is sent carries its number too");
     }
 
     #[test]

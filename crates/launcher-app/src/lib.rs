@@ -350,9 +350,10 @@ mod tests {
                 op(2, Some(1), true, "a_step"),
                 op(3, None, false, "update_check"),
             ],
+            revision: 3,
         };
         assert_eq!(super::under_way(&snapshot), [Text::key("installing")]);
-        assert!(super::under_way(&OpsSnapshot { busy: false, operations: vec![] }).is_empty());
+        assert!(super::under_way(&OpsSnapshot::default()).is_empty());
     }
 
     #[test]

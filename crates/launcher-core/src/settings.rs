@@ -1,7 +1,8 @@
 //! Typed launcher settings over `ConfigStore`.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use launcher_shared::{
     AppError, AppResult, ClickSound, ErrorCode, GameStartAction, SUPPORTED_LANGS, SettingUpdate,
@@ -45,6 +46,10 @@ pub struct SettingsService {
     pub paths: LauncherPaths,
     pub config: Arc<ConfigStore>,
     system_lang: String,
+    /// Changes saved so far; taken with the change, so their snapshots are numbered in order.
+    revision: Mutex<u64>,
+    /// The last number given, for the snapshots read meanwhile.
+    last: AtomicU64,
 }
 
 fn io_err(e: std::io::Error) -> AppError {
@@ -53,7 +58,7 @@ fn io_err(e: std::io::Error) -> AppError {
 
 impl SettingsService {
     pub fn new(env: PathEnv, paths: LauncherPaths, config: Arc<ConfigStore>, system_lang: String) -> Self {
-        Self { env, paths, config, system_lang }
+        Self { env, paths, config, system_lang, revision: Mutex::new(0), last: AtomicU64::new(0) }
     }
 
     pub fn lang(&self) -> String {
@@ -64,8 +69,13 @@ impl SettingsService {
     }
 
     pub fn snapshot(&self) -> SettingsSnapshot {
+        self.snapshot_at(self.last.load(Ordering::SeqCst))
+    }
+
+    fn snapshot_at(&self, revision: u64) -> SettingsSnapshot {
         let c = &self.config;
         SettingsSnapshot {
+            revision,
             lang: self.lang(),
             auto_update: c.get_bool("auto_update", true),
             include_beta_updates: c.get_bool("include_beta_updates", false),
@@ -120,12 +130,15 @@ impl SettingsService {
                 None => return Err(invalid("unknown window size").with_param("size", raw)),
             },
         };
+        let mut revision = self.revision.lock().unwrap_or_else(|e| e.into_inner());
         match value {
             Some(value) => self.config.set(key, value),
             None => self.config.delete(key),
         }
         .map_err(io_err)?;
-        Ok(self.snapshot())
+        *revision += 1;
+        self.last.store(*revision, Ordering::SeqCst);
+        Ok(self.snapshot_at(*revision))
     }
 
     /// Validates and stores the Minecraft directory. Returns `true` when a restart is needed.
@@ -198,6 +211,30 @@ mod tests {
         assert_eq!(s.click_sound, ClickSound::GateLatchClick);
         assert!(s.minecraft_dir_is_default);
         assert_eq!(s.default_minecraft_dir, s.minecraft_dir, "the default is the folder in use");
+    }
+
+    #[test]
+    fn each_change_numbers_its_snapshot_after_the_last() {
+        // Two quick switches are saved side by side: the window keeps the later answer, whichever
+        // arrives last, by its number.
+        let home = tempfile::tempdir().unwrap();
+        let svc = Arc::new(service(home.path()));
+        let before = svc.snapshot().revision;
+        let first = svc.apply(SettingUpdate::CompactSidebar(false)).unwrap();
+        let second = svc.apply(SettingUpdate::AutoUpdate(false)).unwrap();
+        assert!(before < first.revision && first.revision < second.revision);
+        assert_eq!(svc.snapshot().revision, second.revision);
+        assert!(second.replaces(&first) && !first.replaces(&second));
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let svc = svc.clone();
+                std::thread::spawn(move || svc.apply(SettingUpdate::CompactSidebar(i % 2 == 0)).unwrap())
+            })
+            .collect();
+        let mut answers: Vec<SettingsSnapshot> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+        answers.sort_by_key(|s| s.revision);
+        let last = answers.last().unwrap();
+        assert_eq!(*last, svc.snapshot(), "the highest number tells what is saved");
     }
 
     #[test]

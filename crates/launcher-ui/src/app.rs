@@ -113,8 +113,8 @@ pub fn App() -> impl IntoView {
         s.lang
     });
 
-    ipc::listen::<OpsSnapshot>(names::OPS, move |s| store.ops.set(s));
-    ipc::listen::<SettingsSnapshot>(names::SETTINGS, move |s| store.settings.set(s));
+    ipc::listen::<OpsSnapshot>(names::OPS, move |s| store.show_ops(s));
+    ipc::listen::<SettingsSnapshot>(names::SETTINGS, move |s| store.show_settings(s));
     ipc::listen::<Alert>(names::ALERT, move |a| store.alert.set(Some(a)));
     ipc::listen::<ExternalLaunch>(names::EXTERNAL_LAUNCH, move |ev| store.pending_launch.set(ev.version_id));
     ipc::listen::<Toast>(names::TOAST, move |t| {
@@ -149,7 +149,7 @@ pub fn App() -> impl IntoView {
             Err(e) => web_sys::console::error_1(&format!("app_info failed: {e}").into()),
         }
         if let Ok(s) = ipc::call::<SettingsSnapshot>("settings_get").await {
-            store.settings.set(s);
+            store.show_settings(s);
         }
         if let Ok(setup) = ipc::call::<SetupState>("setup_state").await {
             store.setup.set(Some(setup));
@@ -165,7 +165,7 @@ pub fn App() -> impl IntoView {
             }));
         }
         if let Ok(ops) = ipc::call::<OpsSnapshot>("ops_snapshot").await {
-            store.ops.set(ops);
+            store.show_ops(ops);
         }
         if let Ok(Some(version)) = ipc::call::<Option<String>>("take_pending_launch").await {
             store.pending_launch.set(Some(version));
@@ -177,7 +177,7 @@ pub fn App() -> impl IntoView {
         if let Ok(list) =
             ipc::invoke::<_, Vec<ActivityEntry>>("activity_recent", &LimitArgs { limit: 100 }).await
         {
-            store.activity.set(list);
+            store.activity.update(|shown| crate::pages::settings::activity::merge_activity(shown, list));
         }
         if let Ok(snapshot) = ipc::call::<ProfilesSnapshot>("profiles_list").await {
             store.profiles.set(snapshot.profiles);

@@ -227,6 +227,18 @@ pub struct SettingsSnapshot {
     /// `window_size`: `fullscreen`, `maximized` or `{w}x{h}`.
     #[serde(default)]
     pub window_size: String,
+    /// How many changes were saved before this snapshot (this run): a later answer has a higher
+    /// one.
+    #[serde(default)]
+    pub revision: u64,
+}
+
+impl SettingsSnapshot {
+    /// This snapshot may replace `shown`: it was taken after it (answers to changes saved side by
+    /// side may arrive in any order).
+    pub fn replaces(&self, shown: &SettingsSnapshot) -> bool {
+        self.revision >= shown.revision
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

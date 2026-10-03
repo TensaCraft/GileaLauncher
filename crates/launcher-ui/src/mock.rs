@@ -201,6 +201,7 @@ pub fn install() {
         default_max_ram_gb: None,
         gpu_mode_default: "dgpu".into(),
         window_size: "1366x800".into(),
+        revision: 0,
     }));
     let info = AppInfo {
         version: env!("CARGO_PKG_VERSION").into(),
@@ -280,6 +281,7 @@ pub fn install() {
             let update: SettingUpdate = serde_json::from_value(args["update"].clone())
                 .map_err(|e| AppError::internal(e.to_string()))?;
             apply_update(&mut settings.borrow_mut(), &update);
+            settings.borrow_mut().revision += 1;
             let snap = settings.borrow().clone();
             ipc::emit_mock(names::SETTINGS, to_value(&snap)?);
             to_value(snap)

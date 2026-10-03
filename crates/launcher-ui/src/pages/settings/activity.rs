@@ -14,6 +14,15 @@ pub fn push_activity(list: &mut Vec<ActivityEntry>, entry: ActivityEntry) {
     list.truncate(ACTIVITY_LIMIT);
 }
 
+/// The entries asked for (`recent`, newest first) joined with those already in `list` (their events
+/// came first): newest first, once each (the asked one wins), capped.
+pub fn merge_activity(list: &mut Vec<ActivityEntry>, recent: Vec<ActivityEntry>) {
+    list.retain(|e| !recent.iter().any(|r| r.seq == e.seq));
+    list.extend(recent);
+    list.sort_by_key(|e| std::cmp::Reverse(e.seq));
+    list.truncate(ACTIVITY_LIMIT);
+}
+
 fn level_icon(level: Level) -> (&'static str, &'static str) {
     match level {
         Level::Success => ("check_circle_outline", "var(--ok)"),
@@ -171,5 +180,19 @@ mod tests {
         assert_eq!(list.len(), ACTIVITY_LIMIT);
         assert_eq!(list[0].seq, 120);
         assert_eq!(list[1].seq, 119);
+    }
+
+    #[test]
+    fn the_entries_asked_for_at_start_join_those_already_heard() {
+        // The list asked for at start arrives after an entry its event brought: both stay, newest
+        // first, once each.
+        let mut list = Vec::new();
+        push_activity(&mut list, entry(5));
+        push_activity(&mut list, entry(4));
+        merge_activity(&mut list, vec![entry(4), entry(3), entry(2)]);
+        assert_eq!(list.iter().map(|e| e.seq).collect::<Vec<_>>(), [5, 4, 3, 2]);
+        let mut full = Vec::new();
+        merge_activity(&mut full, (1..=150).rev().map(entry).collect());
+        assert_eq!((full.len(), full[0].seq), (ACTIVITY_LIMIT, 150));
     }
 }

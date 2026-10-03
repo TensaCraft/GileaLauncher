@@ -42,6 +42,30 @@ impl AppStore {
     pub fn go(&self, path: &str) {
         self.nav_to.set(Some(path.to_string()));
     }
+
+    /// Shows `arrived` unless a later snapshot of the operations is shown already (the one asked
+    /// for at start and their events may arrive in any order).
+    pub fn show_ops(&self, arrived: OpsSnapshot) {
+        self.ops.maybe_update(|shown| {
+            let newer = arrived.replaces(shown);
+            if newer {
+                *shown = arrived;
+            }
+            newer
+        });
+    }
+
+    /// Shows `arrived` unless a later snapshot is shown already (answers and the backend's
+    /// announcements of changes saved side by side may arrive in any order).
+    pub fn show_settings(&self, arrived: SettingsSnapshot) {
+        self.settings.maybe_update(|shown| {
+            let newer = arrived.replaces(shown);
+            if newer {
+                *shown = arrived;
+            }
+            newer
+        });
+    }
 }
 
 pub fn provide_store() -> AppStore {
@@ -95,7 +119,7 @@ impl SettingsWriter {
         let Self { store, toasts, i18n } = *self;
         spawn_local(async move {
             match ipc::invoke::<_, SettingsSnapshot>("settings_set", &UpdateArgs { update }).await {
-                Ok(snapshot) => store.settings.set(snapshot),
+                Ok(snapshot) => store.show_settings(snapshot),
                 Err(err) => toasts.show(Level::Error, i18n.error(&err), None),
             }
         });

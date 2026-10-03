@@ -44,6 +44,17 @@ pub struct OperationDto {
 pub struct OpsSnapshot {
     pub busy: bool,
     pub operations: Vec<OperationDto>,
+    /// How many changes the operations had before this snapshot (this run).
+    #[serde(default)]
+    pub revision: u64,
+}
+
+impl OpsSnapshot {
+    /// This snapshot may replace `shown`: it was taken after it (the one asked for at start and
+    /// the events may arrive in any order).
+    pub fn replaces(&self, shown: &OpsSnapshot) -> bool {
+        self.revision >= shown.revision
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
