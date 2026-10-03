@@ -3,12 +3,12 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use launcher_shared::{AppError, AppResult, ErrorCode};
 
 use crate::lock::path_key;
-use crate::paths::probe_writable;
 
 pub const STORAGE_RESERVE: u64 = 32 * 1024 * 1024;
 
@@ -48,10 +48,11 @@ fn volume_key(dir: &Path) -> String {
 }
 
 /// Where writing is probed: a folder that exists as itself, a folder still to be made through
-/// the nearest one that exists (the one it is made in) — each once.
+/// the nearest one that exists (the one it is made in) — each once; of folders side by side that
+/// exist (an install's ~256 `assets/objects/xx`), the first stands for the rest.
 fn probe_targets(dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut targets: Vec<PathBuf> = Vec::new();
-    let mut seen = HashSet::new();
+    let (mut seen, mut sides) = (HashSet::new(), HashSet::new());
     for dir in dirs {
         let mut target = dir.as_path();
         while !target.is_dir() {
@@ -60,11 +61,23 @@ fn probe_targets(dirs: &[PathBuf]) -> Vec<PathBuf> {
                 _ => break,
             }
         }
-        if seen.insert(path_key(target)) {
+        let beside_one =
+            target == dir.as_path() && target.parent().is_some_and(|p| !sides.insert(path_key(p)));
+        if !beside_one && seen.insert(path_key(target)) {
             targets.push(target.to_path_buf());
         }
     }
     targets
+}
+
+/// A file can be made and removed in `dir` (not flushed to disk: dozens of folders are tested
+/// before a download).
+fn creatable(dir: &Path) -> io::Result<()> {
+    let probe = dir.join(format!(".launcher-write-test-{}.tmp", uuid::Uuid::new_v4().simple()));
+    let made =
+        fs::OpenOptions::new().write(true).create_new(true).open(&probe).and_then(|mut f| f.write_all(&[0]));
+    let _ = fs::remove_file(&probe);
+    made
 }
 
 /// A volume's share of the requests: a folder on it, the bytes, and the labels in first-seen order.
@@ -92,7 +105,7 @@ pub fn preflight(requests: &[SpaceRequest]) -> AppResult<()> {
         })?;
     }
     for target in &targets {
-        probe_writable(target).map_err(|e| {
+        creatable(target).map_err(|e| {
             AppError::new(ErrorCode::InvalidDirectoryPath, e.to_string())
                 .with_param("path", target.to_string_lossy())
         })?;
@@ -184,6 +197,30 @@ mod tests {
         let mut expected = vec![root.path().to_path_buf(), old];
         expected.sort();
         assert_eq!(probed, expected);
+    }
+
+    #[test]
+    fn folders_side_by_side_are_probed_once() {
+        // A second version's install writes into ~256 existing assets/objects/xx folders: one
+        // write test for folders side by side, not one each (each with a flush to disk).
+        let root = tempfile::tempdir().unwrap();
+        let objects = root.path().join("objects");
+        let dirs: Vec<PathBuf> = (0..256).map(|i| objects.join(format!("{i:02x}"))).collect();
+        for dir in &dirs {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let probed = probe_targets(&dirs);
+        assert_eq!(probed.len(), 1);
+        assert_eq!(probed[0].parent(), Some(objects.as_path()));
+        assert!(
+            preflight(
+                &dirs
+                    .iter()
+                    .map(|d| SpaceRequest { dir: d.clone(), bytes: 1, label: "x".into() })
+                    .collect::<Vec<_>>()
+            )
+            .is_ok()
+        );
     }
 
     #[test]
