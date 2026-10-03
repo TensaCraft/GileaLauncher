@@ -139,7 +139,8 @@ pub fn log_tail(path: &Path) -> io::Result<String> {
 }
 
 /// The file most likely to explain a crash, written since the launch: the newest crash report,
-/// else `latest.log`, else the launch log, else the newest `hs_err_*`.
+/// else the newest `hs_err_*` (Java itself failed, out of memory say: the game's log just stops),
+/// else `latest.log`, else the launch log.
 pub fn crash_artifact(game_dir: &Path, launched_at: SystemTime) -> Option<PathBuf> {
     let since = launched_at.checked_sub(FRESHNESS).unwrap_or(launched_at);
     let modified = |path: &Path| fs::metadata(path).and_then(|m| m.modified()).ok();
@@ -153,9 +154,9 @@ pub fn crash_artifact(game_dir: &Path, launched_at: SystemTime) -> Option<PathBu
             .max_by_key(|p| modified(p))
     };
     newest(&game_dir.join("crash-reports"), "")
+        .or_else(|| newest(game_dir, "hs_err_"))
         .or_else(|| Some(game_dir.join("logs").join("latest.log")).filter(|p| fresh(p)))
         .or_else(|| Some(game_dir.join("logs").join(LAUNCH_LOG)).filter(|p| fresh(p)))
-        .or_else(|| newest(game_dir, "hs_err_"))
 }
 
 #[cfg(test)]

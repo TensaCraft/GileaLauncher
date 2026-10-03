@@ -135,3 +135,27 @@ fn the_crash_artifact_is_the_freshest_explanation() {
     fs::write(&report, "fresh").unwrap();
     assert_eq!(crash_artifact(game, launched), Some(report));
 }
+
+#[test]
+fn a_crash_of_java_itself_is_explained_by_its_error_file() {
+    // Java out of memory: the game's log stops mid-line, the reason is in hs_err_pid*.log (a
+    // report sent the log and left the reason out). An old one of another run stays out.
+    let dir = tempfile::tempdir().unwrap();
+    let game = dir.path();
+    let launched = SystemTime::now();
+    fs::create_dir_all(game.join("logs")).unwrap();
+    let latest = game.join("logs").join("latest.log");
+    fs::write(&latest, "[11:29:15] [Render thread/INFO] [Voxy/]: Creating new world engine").unwrap();
+    let old = game.join("hs_err_pid100.log");
+    fs::write(&old, "# EXCEPTION_ACCESS_VIOLATION").unwrap();
+    age(&old, 30 * 24 * 3600);
+    assert_eq!(
+        crash_artifact(game, launched),
+        Some(latest.clone()),
+        "a month-old error file is another run's"
+    );
+    let fresh = game.join("hs_err_pid34608.log");
+    fs::write(&fresh, "# There is insufficient memory for the Java Runtime Environment to continue.")
+        .unwrap();
+    assert_eq!(crash_artifact(game, launched), Some(fresh));
+}
