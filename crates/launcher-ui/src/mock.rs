@@ -25,6 +25,7 @@ pub fn apply_update(s: &mut SettingsSnapshot, update: &SettingUpdate) {
         SettingUpdate::DefaultMaxRamGb(v) => s.default_max_ram_gb = v,
         SettingUpdate::GpuModeDefault(v) => s.gpu_mode_default = v,
         SettingUpdate::WindowSize(v) => s.window_size = v,
+        SettingUpdate::HomeRecentBuilds(v) => s.home_recent_builds = v,
     }
 }
 
@@ -201,6 +202,7 @@ pub fn install() {
         default_max_ram_gb: None,
         gpu_mode_default: "dgpu".into(),
         window_size: "1366x800".into(),
+        home_recent_builds: 5,
         revision: 0,
     }));
     let info = AppInfo {

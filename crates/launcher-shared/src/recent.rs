@@ -4,6 +4,14 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The builds «Продовжити гру» shows at most, and unless the user chose otherwise.
+pub const RECENT_MOST: u8 = 10;
+pub const RECENT_DEFAULT: u8 = 5;
+
+pub(crate) fn recent_default() -> u8 {
+    RECENT_DEFAULT
+}
+
 /// Where a launch takes the player: straight into a server or a world (for this launch only).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

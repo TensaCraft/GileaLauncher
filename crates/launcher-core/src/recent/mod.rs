@@ -10,16 +10,13 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
-use launcher_shared::recent::{Activity, RecentBuild};
+use launcher_shared::recent::{Activity, RECENT_MOST, RecentBuild};
 
 use self::logs::{LogMarkers, Marker};
 use self::worlds::{World, worlds};
 use crate::launch::options::game_dir;
 use crate::minecraft::command::release_number;
 use crate::storage::versions::VersionStore;
-
-/// The builds on «Продовжити гру» at most.
-pub const MOST: usize = 10;
 
 pub struct RecentService {
     versions: Arc<VersionStore>,
@@ -85,7 +82,7 @@ impl RecentService {
         RecentService { versions, markers: LogMarkers::default() }
     }
 
-    /// The `count` builds played last (at most `MOST`), newest first. Blocking: reads logs and
+    /// The `count` builds played last (at most `RECENT_MOST`), newest first. Blocking: reads logs and
     /// worlds (each log once while it stays as it is).
     pub fn recent(&self, count: usize) -> Vec<RecentBuild> {
         let mc_dir = self.versions.minecraft_dir();
@@ -98,7 +95,7 @@ impl RecentService {
             })
             .collect();
         found.sort_by_key(|r| std::cmp::Reverse(r.played_ms));
-        found.truncate(count.min(MOST));
+        found.truncate(count.min(usize::from(RECENT_MOST)));
         found
     }
 }

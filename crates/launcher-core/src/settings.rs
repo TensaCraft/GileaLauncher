@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use launcher_shared::recent::{RECENT_DEFAULT, RECENT_MOST};
 use launcher_shared::{
     AppError, AppResult, ClickSound, ErrorCode, GameStartAction, SUPPORTED_LANGS, SettingUpdate,
     SettingsSnapshot, WindowSize,
@@ -33,6 +34,8 @@ pub fn game_start_action(config: &ConfigStore) -> GameStartAction {
 
 pub const MINECRAFT_DIR_KEY: &str = "minecraft_game_dir";
 pub const WINDOW_SIZE_KEY: &str = "window_size";
+/// How many builds Home's «Продовжити гру» shows.
+pub const HOME_RECENT_KEY: &str = "home_recent_builds";
 
 pub fn detect_system_lang(locale: Option<&str>) -> String {
     match locale {
@@ -96,6 +99,9 @@ impl SettingsService {
                 .and_then(|raw| WindowSize::parse(&raw))
                 .unwrap_or_default()
                 .as_config_str(),
+            home_recent_builds: c
+                .get_u64(HOME_RECENT_KEY)
+                .map_or(RECENT_DEFAULT, |n| n.min(u64::from(RECENT_MOST)) as u8),
         }
     }
 
@@ -129,6 +135,10 @@ impl SettingsService {
                 Some(size) => (WINDOW_SIZE_KEY, Some(json!(size.as_config_str()))),
                 None => return Err(invalid("unknown window size").with_param("size", raw)),
             },
+            SettingUpdate::HomeRecentBuilds(count) if count > RECENT_MOST => {
+                return Err(invalid("too many recent builds").with_param("count", count.to_string()));
+            }
+            SettingUpdate::HomeRecentBuilds(count) => (HOME_RECENT_KEY, Some(json!(count))),
         };
         let mut revision = self.revision.lock().unwrap_or_else(|e| e.into_inner());
         match value {
@@ -211,6 +221,19 @@ mod tests {
         assert_eq!(s.click_sound, ClickSound::GateLatchClick);
         assert!(s.minecraft_dir_is_default);
         assert_eq!(s.default_minecraft_dir, s.minecraft_dir, "the default is the folder in use");
+        assert_eq!(s.home_recent_builds, 5);
+    }
+
+    #[test]
+    fn home_shows_up_to_ten_recent_builds_or_none() {
+        let home = tempfile::tempdir().unwrap();
+        let svc = service(home.path());
+        assert_eq!(svc.apply(SettingUpdate::HomeRecentBuilds(0)).unwrap().home_recent_builds, 0);
+        assert_eq!(svc.config.get_u64("home_recent_builds"), Some(0));
+        assert_eq!(svc.apply(SettingUpdate::HomeRecentBuilds(10)).unwrap().home_recent_builds, 10);
+        assert_eq!(svc.apply(SettingUpdate::HomeRecentBuilds(11)).unwrap_err().code, ErrorCode::InvalidInput);
+        svc.config.set("home_recent_builds", json!(400)).unwrap();
+        assert_eq!(svc.snapshot().home_recent_builds, 10, "a hand-edited count is held to the most");
     }
 
     #[test]

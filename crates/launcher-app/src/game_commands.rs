@@ -9,7 +9,7 @@ use launcher_core::launch::options::game_dir;
 use launcher_core::launch::service::LaunchRequest;
 use launcher_core::platform::shortcuts;
 use launcher_core::storage::versions::Build;
-use launcher_shared::recent::Join;
+use launcher_shared::recent::{Join, RecentBuild, ServerStatus};
 use launcher_shared::{
     AppError, AppResult, BuildDto, BuildSettingsDto, BuildSettingsUpdate, BuildsSnapshot, CatalogVersion,
     ErrorCode, JavaList, LoaderCatalog, LoaderKind, MemoryInfo, Text, names,
@@ -156,6 +156,25 @@ pub async fn build_launch(
     let started = core.launcher.launch(request).await?;
     announce_builds(&app, &core);
     Ok(started.pid)
+}
+
+/// Home's «Продовжити гру»: the builds played last, as many as the settings ask.
+#[tauri::command]
+pub async fn recent_builds(state: State<'_, AppState>) -> AppResult<Vec<RecentBuild>> {
+    let core = state.core.clone();
+    let count = usize::from(core.settings.snapshot().home_recent_builds);
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || core.recent.recent(count))
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))
+}
+
+/// A server's status as the game's list shows it; `None` when it does not answer.
+#[tauri::command]
+pub async fn server_status(host: String, port: u16) -> Option<ServerStatus> {
+    launcher_core::net::server_ping::status(&host, port).await
 }
 
 #[tauri::command(async)]

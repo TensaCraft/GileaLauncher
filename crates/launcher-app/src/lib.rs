@@ -263,6 +263,8 @@ pub fn run() -> i32 {
             game_commands::build_delete,
             game_commands::build_launch,
             game_commands::build_stop,
+            game_commands::recent_builds,
+            game_commands::server_status,
             game_commands::build_open_dir,
             game_commands::build_shortcut,
             game_commands::catalog_minecraft,

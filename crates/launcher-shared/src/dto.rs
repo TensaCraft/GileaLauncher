@@ -227,6 +227,9 @@ pub struct SettingsSnapshot {
     /// `window_size`: `fullscreen`, `maximized` or `{w}x{h}`.
     #[serde(default)]
     pub window_size: String,
+    /// How many builds Home's «Продовжити гру» shows (0 hides it; at most `recent::RECENT_MOST`).
+    #[serde(default = "crate::recent::recent_default")]
+    pub home_recent_builds: u8,
     /// How many changes were saved before this snapshot (this run): a later answer has a higher
     /// one.
     #[serde(default)]
@@ -256,6 +259,7 @@ pub enum SettingUpdate {
     DefaultMaxRamGb(Option<u64>),
     GpuModeDefault(String),
     WindowSize(String),
+    HomeRecentBuilds(u8),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

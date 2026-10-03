@@ -34,6 +34,7 @@ use crate::net::downloader::{Downloader, DownloaderConfig};
 use crate::net::meta::{META_TTL, MetaClient};
 use crate::paths::{LauncherPaths, Os, PathEnv, default_log_dir};
 use crate::platform::shortcuts::ShortcutService;
+use crate::recent::RecentService;
 use crate::settings::{MINECRAFT_DIR_KEY, SettingsService};
 use crate::setup::{self, SetupOutcome};
 use crate::storage::config::ConfigStore;
@@ -97,6 +98,8 @@ pub struct CoreApp {
     pub java_settings: Arc<JavaService>,
     /// Desktop shortcuts for builds.
     pub shortcuts: Arc<ShortcutService>,
+    /// Home's «Продовжити гру»: the builds played last and what on.
+    pub recent: Arc<RecentService>,
     pub updater: Arc<UpdateService>,
     pub startup_warnings: Vec<Text>,
 }
@@ -239,6 +242,7 @@ impl CoreApp {
             DiscoveryRoots::from_system(&paths.minecraft_dir, &paths.app_state_dir),
         ));
         let shortcuts = Arc::new(ShortcutService::from_system(&paths.app_state_dir));
+        let recent = Arc::new(RecentService::new(versions.clone()));
         let settings = SettingsService::new(env.clone(), paths.clone(), config.clone(), opts.system_lang);
         Ok(CoreApp {
             env,
@@ -262,6 +266,7 @@ impl CoreApp {
             launcher,
             java_settings,
             shortcuts,
+            recent,
             updater,
             startup_warnings,
         })

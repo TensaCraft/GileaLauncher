@@ -332,6 +332,9 @@ fn memory_and_gpu_settings_travel_as_key_and_value() {
     }))
     .unwrap();
     assert_eq!((old.default_max_ram_gb, old.gpu_mode_default.as_str()), (None, ""));
+    assert_eq!(old.home_recent_builds, 5, "Home shows five recent builds unless told otherwise");
+    let recent = SettingUpdate::HomeRecentBuilds(0);
+    assert_eq!(serde_json::to_value(&recent).unwrap(), json!({"key": "home_recent_builds", "value": 0}));
     assert_eq!(
         old.on_game_start,
         launcher_shared::GameStartAction::Nothing,
