@@ -66,6 +66,7 @@ async fn quilt_prereleases_are_unstable() {
 struct Setup {
     _tmp: tempfile::TempDir,
     mc: PathBuf,
+    minecraft: Arc<MinecraftInstaller>,
     components: ComponentInstaller,
 }
 
@@ -98,8 +99,27 @@ fn setup(fake: &FakeMojang) -> Setup {
         java,
         Arc::new(Coordinator::shared()),
     ));
-    let components = ComponentInstaller::new(minecraft, meta, fake.loader_endpoints(), &mc);
-    Setup { _tmp: tmp, mc, components }
+    let components = ComponentInstaller::new(minecraft.clone(), meta, fake.loader_endpoints(), &mc);
+    Setup { _tmp: tmp, mc, minecraft, components }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_busy_install_leaves_the_loader_profile_alone() {
+    // Another install holds the shared folder: a Fabric install is refused before it fetches and
+    // rewrites its profile in versions/.
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    fake.add_loader("fabric", "1.21.1", "0.16.9", true);
+    let s = setup(&fake);
+    let held = s.minecraft.lock("minecraft_install").unwrap();
+    let spec = ComponentSpec::loader(LoaderKind::Fabric, "1.21.1", "0.16.9");
+    let before = fake.server.total_requests();
+    let e = s.components.install(&spec, false, &|_| {}).await.unwrap_err();
+    assert_eq!(e.code, ErrorCode::SharedBusy);
+    assert!(!s.mc.join("versions").join(spec.component_id()).exists(), "no profile was written");
+    assert_eq!(fake.server.total_requests(), before, "nothing was fetched");
+    drop(held);
+    s.components.install(&spec, false, &|_| {}).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

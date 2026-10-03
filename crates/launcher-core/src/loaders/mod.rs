@@ -249,8 +249,11 @@ impl ComponentInstaller {
                         .param("loader", spec.kind.display_name())
                         .param("version", &spec.mc),
                 ));
+                // Under the shared lock from the start: busy, nothing is fetched or rewritten in
+                // versions/.
+                let lease = self.minecraft.lock("minecraft_install")?;
                 self.write_profile(spec).await?;
-                self.minecraft.install(&spec.component_id(), verify, progress).await
+                self.minecraft.install_with(&spec.component_id(), verify, &lease, progress).await
             }
             LoaderKind::Forge | LoaderKind::NeoForge => {
                 self.install_with_installer(spec, verify, progress).await
@@ -303,6 +306,7 @@ impl ComponentInstaller {
                             "Fetching the {} profile of {component} again",
                             spec.kind.display_name()
                         );
+                        let _lease = self.minecraft.lock("minecraft_install")?;
                         self.write_profile(spec).await?;
                     }
                 }
