@@ -131,11 +131,11 @@ mod tests {
         write_world(game.path(), "Test", "Test", now_ms() - 3_600_000, 0);
         log(
             game.path(),
-            "[1] [Render thread/INFO]: Connecting to tensa.co.ua, 25565\n",
+            "[1] [Render thread/INFO]: Connecting to play.example.net, 25565\n",
             Duration::from_secs(60),
         );
         let recent = recent_of(&LogMarkers::default(), "k", Some("1.21.1"), game.path()).unwrap();
-        assert_eq!(recent.activity, Some(Activity::Server { host: "tensa.co.ua".into(), port: 25565 }));
+        assert_eq!(recent.activity, Some(Activity::Server { host: "play.example.net".into(), port: 25565 }));
     }
 
     #[test]
@@ -143,7 +143,7 @@ mod tests {
         let game = tempfile::tempdir().unwrap();
         log(
             game.path(),
-            "[1] [Render thread/INFO]: Connecting to tensa.co.ua, 25565\n",
+            "[1] [Render thread/INFO]: Connecting to play.example.net, 25565\n",
             Duration::from_secs(3600),
         );
         write_world(game.path(), "Test", "Мій світ", now_ms() - 60_000, 1);

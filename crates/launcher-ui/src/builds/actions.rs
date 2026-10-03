@@ -263,13 +263,13 @@ mod tests {
             profile_key: Some("Steve".into()),
             allow_duplicate: true,
             allow_low_memory: false,
-            join: Some(Join::Server { host: "tensa.co.ua".into(), port: 25565 }),
+            join: Some(Join::Server { host: "play.example.net".into(), port: 25565 }),
         };
         assert_eq!(
             serde_json::to_value(launch).unwrap(),
             json!({
                 "key": "aero", "profileKey": "Steve", "allowDuplicate": true, "allowLowMemory": false,
-                "join": {"kind": "server", "host": "tensa.co.ua", "port": 25565}
+                "join": {"kind": "server", "host": "play.example.net", "port": 25565}
             })
         );
         let delete = DeleteArgs { key: "aero".into(), delete_files: false };

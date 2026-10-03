@@ -253,14 +253,14 @@ mod tests {
         let description = json!({
             "text": "",
             "extra": [
-                {"text": "Tensa", "color": "aqua", "bold": true},
+                {"text": "Block", "color": "aqua", "bold": true},
                 {"text": "Craft ", "color": "#12AB34"},
                 "§cred",
                 {"text": " plain"}
             ]
         });
         let spans = parse_motd(&description);
-        assert_eq!(plain(&spans), "TensaCraft red plain");
+        assert_eq!(plain(&spans), "BlockCraft red plain");
         assert_eq!((spans[0].color.as_deref(), spans[0].bold), (Some("#55ffff"), true));
         assert_eq!(spans[1].color.as_deref(), Some("#12ab34"));
         assert_eq!(spans[2].color.as_deref(), Some("#ff5555"));
@@ -277,8 +277,8 @@ mod tests {
 
     #[test]
     fn a_launch_goes_where_the_activity_was() {
-        let server = Activity::Server { host: "tensa.co.ua".into(), port: 25565 };
-        assert_eq!(server.join(), Join::Server { host: "tensa.co.ua".into(), port: 25565 });
+        let server = Activity::Server { host: "play.example.net".into(), port: 25565 };
+        assert_eq!(server.join(), Join::Server { host: "play.example.net".into(), port: 25565 });
         let world = Activity::World {
             folder: "Test".into(),
             name: "Test".into(),

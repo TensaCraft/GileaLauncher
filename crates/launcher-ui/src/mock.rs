@@ -324,7 +324,7 @@ pub fn install() {
                 RecentBuild {
                     key: "aeronautics".into(),
                     played_ms: now - 40 * 60_000,
-                    activity: Some(Activity::Server { host: "tensa.co.ua".into(), port: 25565 }),
+                    activity: Some(Activity::Server { host: "play.example.net".into(), port: 25565 }),
                 },
                 RecentBuild {
                     key: "vanilna_1_20_1".into(),
@@ -341,8 +341,8 @@ pub fn install() {
                 },
             ])
         }
-        "server_status" if args["host"] == "tensa.co.ua" => to_value(Some(ServerStatus {
-            motd: parse_motd(&serde_json::json!("§bTensaCraft §f— §eсезон 3\n§aласкаво просимо")),
+        "server_status" if args["host"] == "play.example.net" => to_value(Some(ServerStatus {
+            motd: parse_motd(&serde_json::json!("§bBlockCraft §f— §eсезон 3\n§aласкаво просимо")),
             online: 42,
             max: 200,
             version: "Velocity 1.7.2-1.21.4".into(),

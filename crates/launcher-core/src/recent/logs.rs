@@ -107,14 +107,17 @@ mod tests {
 
     #[test]
     fn a_server_joined_is_found_in_every_loader_s_log() {
-        let neoforge = "[03жовт.2026 16:13:20.310] [Render thread/INFO] [net.minecraft.client.gui.screens.ConnectScreen/]: Connecting to auro.tensa.co.ua, 25565\n\
+        let neoforge = "[03жовт.2026 16:13:20.310] [Render thread/INFO] [net.minecraft.client.gui.screens.ConnectScreen/]: Connecting to survival.example.net, 25565\n\
             [03жовт.2026 16:13:28.226] [Render thread/INFO] [voicechat/]: [voicechat] Connecting to voice chat server: '95.217.119.207:65535'\n";
         assert_eq!(
             last_marker(neoforge),
-            Some(Marker::Server { host: "auro.tensa.co.ua".into(), port: 25565 })
+            Some(Marker::Server { host: "survival.example.net".into(), port: 25565 })
         );
-        let vanilla = "[12:14:40] [Render thread/INFO]: Connecting to tensa.co.ua, 25565\n[12:14:47] [Render thread/INFO]: Loaded 315 advancements\n";
-        assert_eq!(last_marker(vanilla), Some(Marker::Server { host: "tensa.co.ua".into(), port: 25565 }));
+        let vanilla = "[12:14:40] [Render thread/INFO]: Connecting to play.example.net, 25565\n[12:14:47] [Render thread/INFO]: Loaded 315 advancements\n";
+        assert_eq!(
+            last_marker(vanilla),
+            Some(Marker::Server { host: "play.example.net".into(), port: 25565 })
+        );
     }
 
     #[test]

@@ -224,7 +224,7 @@ mod tests {
             provide_store();
             provide_launch_flow()
         });
-        let server = Join::Server { host: "tensa.co.ua".into(), port: 25565 };
+        let server = Join::Server { host: "play.example.net".into(), port: 25565 };
         flow.join.set(Some(server.clone()));
         assert_eq!(flow.asks().join, Some(server), "asked again after a question, it still goes there");
         flow.join.set(None);

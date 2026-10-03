@@ -191,9 +191,9 @@ mod tests {
 
     #[test]
     fn an_address_names_its_port_only_when_it_is_not_the_default() {
-        assert_eq!(address_label("tensa.co.ua", 25565), "tensa.co.ua");
+        assert_eq!(address_label("play.example.net", 25565), "play.example.net");
         assert_eq!(address_label("play.example.net", 25570), "play.example.net:25570");
-        assert_eq!(server_key("Tensa.co.UA", 25565), server_key("tensa.co.ua", 25565));
+        assert_eq!(server_key("Play.Example.NET", 25565), server_key("play.example.net", 25565));
     }
 
     #[test]
