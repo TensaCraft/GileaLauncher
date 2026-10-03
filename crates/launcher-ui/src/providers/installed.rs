@@ -106,6 +106,12 @@ pub fn ContentIcon(
     }
 }
 
+/// Whether the tab is looked at on `revision`: each arrival of the list (from 1); not the mount
+/// before it (0), or every opening would look twice.
+fn looks_at(revision: u64) -> bool {
+    revision > 0
+}
+
 #[component]
 pub fn ProviderTools(
     provider: ProviderInfo,
@@ -119,10 +125,11 @@ pub fn ProviderTools(
     let key = StoredValue::new(key);
     let info = StoredValue::new(provider.clone());
     let id = StoredValue::new(provider.id.clone());
-    // Again whenever the list arrives again.
+    // Whenever the list arrives (the page asks for it on opening).
     Effect::new(move |_| {
-        revision.track();
-        info.with_value(|p| load(p, key.get_value(), kind));
+        if looks_at(revision.get()) {
+            info.with_value(|p| load(p, key.get_value(), kind));
+        }
     });
     let flow = InstallFlow::new(provider.clone(), Callback::new(move |_| reload.run(())));
     let confirm = UpdateConfirm::new(flow);
@@ -280,6 +287,14 @@ impl UpdateConfirm {
 #[cfg(test)]
 mod tests {
     use launcher_shared::provider::FileNote;
+
+    #[test]
+    fn a_tab_is_looked_at_once_its_list_arrives_not_before() {
+        // Opening the tab: the list's first arrival starts the look; the mount before it did too,
+        // so every opening checked updates twice (files hashed, the provider asked).
+        assert!(!super::looks_at(0));
+        assert!(super::looks_at(1) && super::looks_at(7));
+    }
 
     #[test]
     fn a_page_is_opened_with_its_provider_s_mark() {
