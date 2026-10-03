@@ -2,7 +2,9 @@
 //! loader chips, a version search and the unstable filter over
 //! Minecraft / Fabric / Quilt / Forge / NeoForge rows, 80 at a time.
 
-use launcher_shared::{AppError, CatalogVersion, LoaderKind, LoaderOption};
+use std::sync::Arc;
+
+use launcher_shared::{AppError, CatalogVersion, LoaderBuild, LoaderCatalog, LoaderKind};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
@@ -23,7 +25,8 @@ pub struct CreateRow {
     /// The default loader build is a prerelease.
     pub beta: bool,
     pub release_time: Option<String>,
-    pub builds: Vec<launcher_shared::LoaderBuild>,
+    /// Shared by the rows offering the same builds (a copy of a row stays cheap).
+    pub builds: Arc<[LoaderBuild]>,
     pub default_version: Option<String>,
 }
 
@@ -35,22 +38,28 @@ pub fn rows_from_minecraft(list: Vec<CatalogVersion>) -> Vec<CreateRow> {
             mc: v.id,
             beta: false,
             release_time: v.release_time,
-            builds: Vec::new(),
+            builds: Arc::from([]),
             default_version: None,
         })
         .collect()
 }
 
-pub fn rows_from_loader(kind: LoaderKind, list: Vec<LoaderOption>) -> Vec<CreateRow> {
-    list.into_iter()
-        .map(|o| CreateRow {
-            kind,
-            beta: o.builds.iter().any(|b| b.version == o.default_version && !b.stable),
-            snapshot: o.snapshot,
-            mc: o.mc,
-            release_time: None,
-            builds: o.builds,
-            default_version: Some(o.default_version),
+pub fn rows_from_loader(kind: LoaderKind, catalog: LoaderCatalog) -> Vec<CreateRow> {
+    let shared: Arc<[LoaderBuild]> = Arc::from(catalog.builds);
+    catalog
+        .options
+        .into_iter()
+        .map(|o| {
+            let builds = if o.builds.is_empty() { shared.clone() } else { Arc::from(o.builds) };
+            CreateRow {
+                kind,
+                beta: builds.iter().any(|b| b.version == o.default_version && !b.stable),
+                snapshot: o.snapshot,
+                mc: o.mc,
+                release_time: None,
+                builds,
+                default_version: Some(o.default_version),
+            }
         })
         .collect()
 }
@@ -109,13 +118,21 @@ pub async fn load_rows(kind: LoaderKind, unstable: bool) -> Result<Vec<CreateRow
                 .await
                 .map(rows_from_minecraft)
         }
-        kind => ipc::invoke::<_, Vec<LoaderOption>>(
-            "catalog_loader",
-            &LoaderCatalogArgs { loader: kind, unstable },
-        )
-        .await
-        .map(|list| rows_from_loader(kind, list)),
+        kind => {
+            ipc::invoke::<_, LoaderCatalog>("catalog_loader", &LoaderCatalogArgs { loader: kind, unstable })
+                .await
+                .map(|list| rows_from_loader(kind, list))
+        }
     }
+}
+
+/// What the catalog's list area shows.
+#[derive(Clone, PartialEq)]
+enum Listing {
+    Loading,
+    Failed(String),
+    Empty,
+    Rows,
 }
 
 /// The catalog toolbar and rows. `on_pick` gets the row whose "Install" was pressed. With
@@ -237,9 +254,32 @@ pub fn Catalog(
             </div>
         }
     };
+    // The rows the search leaves, as far as the pages shown reach (only those are copied), and
+    // whether more follow.
+    let shown = Memo::new(move |_| {
+        versions.with(|v| match v {
+            Some(Ok(list)) => {
+                let matching: Vec<&CreateRow> =
+                    query.with(|q| list.iter().filter(|r| matches_query(r, q)).collect());
+                let upto = catalog_shown(matching.len(), pages.get());
+                (matching[..upto].iter().map(|r| (*r).clone()).collect::<Vec<_>>(), upto < matching.len())
+            }
+            _ => (Vec::new(), false),
+        })
+    });
+    // What the list area shows; its rows follow `shown` by key, so a keystroke keeps the rows that
+    // stay.
+    let state = Memo::new(move |_| {
+        versions.with(|v| match v {
+            None => Listing::Loading,
+            Some(Err(message)) => Listing::Failed(message.clone()),
+            Some(Ok(_)) if shown.with(|(rows, _)| rows.is_empty()) => Listing::Empty,
+            Some(Ok(_)) => Listing::Rows,
+        })
+    });
     let body = move || {
-        match versions.get() {
-        None => view! {
+        match state.get() {
+        Listing::Loading => view! {
             <div class="builds__list">
                 {(0..6)
                     .map(|_| view! { <div class="list-row create__skeleton"><Skeleton width=48 /><Skeleton width=260 /></div> })
@@ -247,30 +287,24 @@ pub fn Catalog(
             </div>
         }
         .into_any(),
-        Some(Err(message)) => view! {
+        Listing::Failed(message) => view! {
             <EmptyState icon="cloud_off" title=t("version_create_error") desc=message>
                 <Button icon="refresh" on_click=move |_| load()>{move || i18n.t("version_create_retry")}</Button>
             </EmptyState>
         }
         .into_any(),
-        Some(Ok(list)) => {
-            let q = query.get();
-            let list: Vec<CreateRow> = list.into_iter().filter(|row| matches_query(row, &q)).collect();
-            if list.is_empty() {
-                return view! { <EmptyState icon="search_off" title=t("version_create_empty") /> }.into_any();
-            }
-            let total = list.len();
-            let shown = catalog_shown(total, pages.get());
-            view! {
-                <div class="builds__list">{list.into_iter().take(shown).map(row).collect_view()}</div>
-                {(shown < total).then(|| view! {
-                    <div class="create__more">
-                        <Button on_click=move |_| pages.update(|p| *p += 1)>{move || i18n.t("load_more")}</Button>
-                    </div>
-                })}
-            }
-            .into_any()
+        Listing::Empty => view! { <EmptyState icon="search_off" title=t("version_create_empty") /> }.into_any(),
+        Listing::Rows => view! {
+            <div class="builds__list">
+                <For each=move || shown.with(|(rows, _)| rows.clone()) key=|r| (r.kind, r.mc.clone()) children=row />
+            </div>
+            {move || shown.with(|(_, more)| *more).then(|| view! {
+                <div class="create__more">
+                    <Button on_click=move |_| pages.update(|p| *p += 1)>{move || i18n.t("load_more")}</Button>
+                </div>
+            })}
         }
+        .into_any(),
     }
     };
     let filter_label = move || {
@@ -314,7 +348,7 @@ pub fn Catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use launcher_shared::LoaderBuild;
+    use launcher_shared::LoaderOption;
 
     #[test]
     fn catalog_rows_cover_minecraft_and_loaders() {
@@ -334,10 +368,28 @@ mod tests {
             ],
             default_version: "0.17.0-beta.1".into(),
         }];
-        let rows = rows_from_loader(LoaderKind::Fabric, options);
+        let rows = rows_from_loader(LoaderKind::Fabric, LoaderCatalog::pack(options));
         assert_eq!(row_title(&rows[0]), "Fabric 1.21.1");
         assert_eq!(rows[0].default_version.as_deref(), Some("0.17.0-beta.1"));
         assert!(rows[0].beta, "the default build is a prerelease");
+    }
+
+    #[test]
+    fn the_rows_of_a_loader_hold_its_builds_once() {
+        // Every Fabric version offers the same builds: one list in memory, not one per row (a
+        // search copies the rows it shows).
+        let offered = vec![LoaderBuild { version: "0.16.9".into(), stable: true }];
+        let options: Vec<LoaderOption> = (0..3)
+            .map(|i| LoaderOption {
+                mc: format!("1.21.{i}"),
+                snapshot: false,
+                builds: offered.clone(),
+                default_version: "0.16.9".into(),
+            })
+            .collect();
+        let rows = rows_from_loader(LoaderKind::Fabric, LoaderCatalog::pack(options));
+        assert!(std::sync::Arc::ptr_eq(&rows[0].builds, &rows[2].builds));
+        assert_eq!(&*rows[1].builds, &offered[..]);
     }
 
     #[test]
@@ -352,7 +404,10 @@ mod tests {
             builds: vec![LoaderBuild { version: "21.1.77".into(), stable: true }],
             default_version: "21.1.77".into(),
         }];
-        assert_eq!(row_title(&rows_from_loader(LoaderKind::NeoForge, options)[0]), "NeoForge 1.21.1");
+        assert_eq!(
+            row_title(&rows_from_loader(LoaderKind::NeoForge, LoaderCatalog::pack(options))[0]),
+            "NeoForge 1.21.1"
+        );
     }
 
     #[test]
@@ -381,7 +436,7 @@ mod tests {
         assert_eq!(row_component_id(&vanilla[0]), "1.21.1");
         let fabric = rows_from_loader(
             LoaderKind::Fabric,
-            vec![LoaderOption {
+            LoaderCatalog::pack(vec![LoaderOption {
                 mc: "1.21.1".into(),
                 snapshot: false,
                 builds: vec![
@@ -389,7 +444,7 @@ mod tests {
                     LoaderBuild { version: "0.17.0-beta.1".into(), stable: false },
                 ],
                 default_version: "0.16.9".into(),
-            }],
+            }]),
         );
         assert_eq!(row_component_id(&fabric[0]), "fabric-loader-0.16.9-1.21.1");
         let labels: Vec<String> =

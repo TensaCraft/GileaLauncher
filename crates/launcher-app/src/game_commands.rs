@@ -11,7 +11,7 @@ use launcher_core::platform::shortcuts;
 use launcher_core::storage::versions::Build;
 use launcher_shared::{
     AppError, AppResult, BuildDto, BuildSettingsDto, BuildSettingsUpdate, BuildsSnapshot, CatalogVersion,
-    ErrorCode, JavaList, LoaderKind, LoaderOption, MemoryInfo, Text, names,
+    ErrorCode, JavaList, LoaderCatalog, LoaderKind, MemoryInfo, Text, names,
 };
 use tauri::{AppHandle, Emitter, State};
 
@@ -201,9 +201,9 @@ pub async fn catalog_loader(
     state: State<'_, AppState>,
     loader: LoaderKind,
     unstable: bool,
-) -> AppResult<Vec<LoaderOption>> {
+) -> AppResult<LoaderCatalog> {
     let core = state.core.clone();
-    core.components.catalog(loader, unstable).await
+    core.components.catalog(loader, unstable).await.map(LoaderCatalog::pack)
 }
 
 #[tauri::command(async)]

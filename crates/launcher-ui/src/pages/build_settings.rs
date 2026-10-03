@@ -999,7 +999,7 @@ a/b=ALL-UNNAMED"
             |version: &str, stable: bool| launcher_shared::LoaderBuild { version: version.into(), stable };
         let rows = crate::builds::catalog::rows_from_loader(
             LoaderKind::Fabric,
-            vec![
+            launcher_shared::LoaderCatalog::pack(vec![
                 launcher_shared::LoaderOption {
                     mc: "1.21.4".into(),
                     snapshot: false,
@@ -1012,7 +1012,7 @@ a/b=ALL-UNNAMED"
                     builds: vec![build("0.16.10", true), build("0.16.9", true)],
                     default_version: "0.16.10".into(),
                 },
-            ],
+            ]),
         );
         assert_eq!(preferred_mc(&rows, Some("1.20.1")), "1.20.1", "the build's own Minecraft version");
         assert_eq!(preferred_mc(&rows, Some("1.12.2")), "1.21.4", "else the newest");

@@ -480,6 +480,37 @@ pub struct LoaderOption {
     pub default_version: String,
 }
 
+/// A loader's Minecraft versions as sent to the window: the builds the first version offers are
+/// sent once (`builds`), and every version offering the same ones has an empty list of its own.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoaderCatalog {
+    pub builds: Vec<LoaderBuild>,
+    pub options: Vec<LoaderOption>,
+}
+
+impl LoaderCatalog {
+    pub fn pack(mut options: Vec<LoaderOption>) -> LoaderCatalog {
+        let builds = options.first().map(|o| o.builds.clone()).unwrap_or_default();
+        for option in &mut options {
+            if option.builds == builds {
+                option.builds = Vec::new();
+            }
+        }
+        LoaderCatalog { builds, options }
+    }
+
+    /// The versions each with its builds again.
+    pub fn unpack(self) -> Vec<LoaderOption> {
+        let LoaderCatalog { builds, mut options } = self;
+        for option in &mut options {
+            if option.builds.is_empty() {
+                option.builds = builds.clone();
+            }
+        }
+        options
+    }
+}
+
 /// One installed version in `versions/`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentDto {
@@ -651,4 +682,40 @@ pub struct ScreenshotDto {
     pub modified_ms: Option<u64>,
     /// Where the page loads the picture from (the `shot` scheme).
     pub src: String,
+}
+
+#[cfg(test)]
+mod loader_catalog_tests {
+    use super::*;
+
+    fn builds(versions: &[&str]) -> Vec<LoaderBuild> {
+        versions.iter().map(|v| LoaderBuild { version: v.to_string(), stable: true }).collect()
+    }
+
+    fn option(mc: &str, offered: Vec<LoaderBuild>) -> LoaderOption {
+        LoaderOption {
+            mc: mc.into(),
+            snapshot: false,
+            default_version: offered[0].version.clone(),
+            builds: offered,
+        }
+    }
+
+    #[test]
+    fn builds_every_version_shares_are_sent_once() {
+        // Fabric offers its ~200 builds for each of ~900 versions: sent per version, the list
+        // came to megabytes. Forge's builds are each version's own and stay with it.
+        let shared = builds(&["0.17.2", "0.16.9"]);
+        let options = vec![
+            option("1.21.1", shared.clone()),
+            option("1.20.1", shared.clone()),
+            option("1.12.2", builds(&["14.23.5"])),
+        ];
+        let catalog = LoaderCatalog::pack(options.clone());
+        assert_eq!(catalog.builds, shared);
+        assert!(catalog.options[0].builds.is_empty() && catalog.options[1].builds.is_empty());
+        assert_eq!(catalog.options[2].builds, builds(&["14.23.5"]));
+        assert_eq!(catalog.unpack(), options);
+        assert_eq!(LoaderCatalog::pack(Vec::new()).unpack(), Vec::new());
+    }
 }
