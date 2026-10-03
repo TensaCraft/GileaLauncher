@@ -99,9 +99,38 @@ pub fn backup_of<'a>(
         .filter(|b| !same_bytes(b, current))
 }
 
+/// How much of each file is compared at a time.
+const PIECE: usize = 64 * 1024;
+
+/// The backup and `current` hold the same bytes: read side by side in pieces (listings ask this of
+/// every restored mod; a jar is never held whole in memory for it).
 fn same_bytes(backup: &Backup, current: &Path) -> bool {
-    fs::metadata(current).is_ok_and(|m| m.len() == backup.size)
-        && matches!((fs::read(&backup.path), fs::read(current)), (Ok(a), Ok(b)) if a == b)
+    if !fs::metadata(current).is_ok_and(|m| m.len() == backup.size) {
+        return false;
+    }
+    let (Ok(mut a), Ok(mut b)) = (fs::File::open(&backup.path), fs::File::open(current)) else {
+        return false;
+    };
+    let (mut x, mut y) = (vec![0u8; PIECE], vec![0u8; PIECE]);
+    loop {
+        match (fill(&mut a, &mut x), fill(&mut b, &mut y)) {
+            (Ok(0), Ok(0)) => return true,
+            (Ok(n), Ok(m)) if n == m && x[..n] == y[..m] => {}
+            _ => return false,
+        }
+    }
+}
+
+/// Reads into `buf` until it is full or the file ends; how much was read.
+fn fill(file: &mut impl io::Read, buf: &mut [u8]) -> io::Result<usize> {
+    let mut read = 0;
+    while read < buf.len() {
+        match file.read(&mut buf[read..])? {
+            0 => break,
+            n => read += n,
+        }
+    }
+    Ok(read)
 }
 
 /// Puts `backup` back in place of mod file `current`: under the backup's own name, switched off
@@ -130,4 +159,35 @@ pub fn restore(game: &Path, backup: &Backup, current: &Path, enabled: bool) -> A
         fs::remove_file(current).map_err(|e| io_error(ErrorCode::of_io(&e), current, e))?;
     }
     Ok(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_backup_is_compared_with_the_mod_piece_by_piece() {
+        // Larger than a piece, unequal only at its very end: the whole file is still compared.
+        let dir = tempfile::tempdir().unwrap();
+        let bytes: Vec<u8> = (0..300_001u32).map(|i| (i % 251) as u8).collect();
+        let (saved, current) = (dir.path().join("a.jar.backup"), dir.path().join("a.jar"));
+        fs::write(&saved, &bytes).unwrap();
+        fs::write(&current, &bytes).unwrap();
+        let backup = Backup {
+            path: saved.clone(),
+            filename: "a.jar".into(),
+            mod_id: None,
+            size: bytes.len() as u64,
+            modified: None,
+        };
+        assert!(same_bytes(&backup, &current));
+        let mut changed = bytes.clone();
+        *changed.last_mut().unwrap() ^= 1;
+        fs::write(&current, &changed).unwrap();
+        assert!(!same_bytes(&backup, &current));
+        fs::write(&current, &bytes[..1000]).unwrap();
+        assert!(!same_bytes(&backup, &current), "another size");
+        fs::remove_file(&current).unwrap();
+        assert!(!same_bytes(&backup, &current), "no mod file");
+    }
 }
