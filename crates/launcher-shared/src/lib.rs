@@ -8,6 +8,7 @@ pub mod events;
 pub mod naming;
 pub mod profiles;
 pub mod provider;
+pub mod recent;
 pub mod text;
 pub mod units;
 pub mod update;
