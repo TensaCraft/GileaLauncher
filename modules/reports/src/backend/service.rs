@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use launcher_core::builds::settings::split_jvm_arguments;
 use launcher_core::core_app::CoreApp;
@@ -46,20 +47,24 @@ fn io(e: std::io::Error) -> AppError {
     AppError::new(ErrorCode::Io, e.to_string())
 }
 
-/// The newest file in `dir` whose name `keep` accepts.
+/// How old a crash file may be to explain what a report is about.
+const RECENT: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// The newest file in `dir` whose name `keep` accepts, written in the last day (an older one is
+/// another run's, maybe another launcher's).
 fn newest(dir: &Path, keep: impl Fn(&str) -> bool) -> Option<PathBuf> {
     std::fs::read_dir(dir)
         .ok()?
         .flatten()
         .filter(|entry| keep(&entry.file_name().to_string_lossy()))
         .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
-        .filter(|(_, path)| path.is_file())
+        .filter(|(modified, path)| path.is_file() && modified.elapsed().map_or(true, |age| age <= RECENT))
         .max_by_key(|(modified, _)| *modified)
         .map(|(_, path)| path)
 }
 
 /// A build's files a report of it attaches: the game's log, the launch log,
-/// the newest crash report and the newest JVM crash log — those there are.
+/// the newest crash report and the newest JVM crash log of the last day — those there are.
 pub fn build_attachments(game_dir: &Path) -> Vec<PathBuf> {
     let logs = game_dir.join("logs");
     [

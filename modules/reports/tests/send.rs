@@ -160,6 +160,24 @@ async fn a_build_report_attaches_the_build_s_logs() {
     assert_eq!(reports.contact(), "me@example.com", "the contact is kept for next time");
 }
 
+#[test]
+fn a_build_report_leaves_out_crash_files_of_long_ago() {
+    // A report about a crash sent the game's JVM error file of a month before (from another
+    // launcher's run of the folder): only crash files of the last day explain what just happened.
+    let dir = tempfile::tempdir().unwrap();
+    let reports = reports(dir.path(), "");
+    let (build, game) = aero(&reports);
+    write(game.join("logs").join("latest.log"), "game log");
+    let month = SystemTime::now() - Duration::from_secs(30 * 24 * 3600);
+    for old in [game.join("hs_err_pid32976.log"), game.join("crash-reports").join("crash-2026-08-29.txt")] {
+        write(old.clone(), "long ago");
+        File::options().write(true).open(&old).unwrap().set_modified(month).unwrap();
+    }
+    assert_eq!(reports.attachments(&build.key).unwrap(), ["latest.log"]);
+    write(game.join("hs_err_pid34608.log"), "now");
+    assert_eq!(reports.attachments(&build.key).unwrap(), ["latest.log", "hs_err_pid34608.log"]);
+}
+
 #[tokio::test]
 async fn the_contact_is_saved_and_an_empty_one_removed() {
     let dir = tempfile::tempdir().unwrap();
