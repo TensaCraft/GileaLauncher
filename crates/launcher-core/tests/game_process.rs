@@ -82,6 +82,12 @@ fn a_second_copy_keeps_the_running_game_s_launch_log() {
     assert!(text.contains("first game output"), "{text}");
     assert_eq!(text.matches("Minecraft process diagnostics").count(), 2, "{text}");
     drop(lock);
+    // A game another test starts at this moment holds a copy of the lock until it runs (between
+    // its fork and its exec): the world is free once that is gone.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while launcher_core::launch::alive::game_open(&game) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
     prepare_launch_log(&game, "1.21.1", "1.21.1").unwrap();
     assert!(!fs::read_to_string(&log).unwrap().contains("first game output"), "no game runs: a new log");
 }
