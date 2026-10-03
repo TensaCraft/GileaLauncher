@@ -321,7 +321,11 @@ impl launcher_core::auth::UrlOpener for FakeBrowser {
         let Some(redirect) = param("redirect_uri") else { return true };
         let query = match self.mode {
             Browser::Consent => format!("code={GOOD_CODE}&state={}", param("state").unwrap_or_default()),
-            Browser::Deny => "error=access_denied&error_description=The+user+declined".to_string(),
+            // As Microsoft does (RFC 6749 4.1.2.1): the state comes back with an error too.
+            Browser::Deny => format!(
+                "error=access_denied&error_description=The+user+declined&state={}",
+                param("state").unwrap_or_default()
+            ),
             Browser::Broken | Browser::Idle => return true,
         };
         let target = format!("{redirect}?{query}");

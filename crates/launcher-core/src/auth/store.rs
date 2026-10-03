@@ -43,6 +43,8 @@ pub struct StoredProfile {
     marked: bool,
     stored_reason: Option<String>,
     decryption_failed: bool,
+    /// The token key could not be read (for a moment): the tokens are out of reach, not lost.
+    key_unavailable: bool,
 }
 
 impl StoredProfile {
@@ -58,7 +60,10 @@ impl StoredProfile {
     /// Why this Microsoft profile needs a new sign-in; priority as in the original: stored reason,
     /// undecryptable tokens, missing refresh token.
     pub fn reauth_reason(&self) -> Option<String> {
-        if self.is_offline() || !(self.marked || self.decryption_failed || self.refresh_token.is_none()) {
+        if self.is_offline()
+            || self.key_unavailable
+            || !(self.marked || self.decryption_failed || self.refresh_token.is_none())
+        {
             return None;
         }
         Some(match &self.stored_reason {
@@ -69,9 +74,19 @@ impl StoredProfile {
         })
     }
 
+    /// The token key could not be read: nothing can be signed or renewed until it can.
+    pub fn key_unavailable(&self) -> bool {
+        self.key_unavailable
+    }
+
     /// A usable access token that stays valid for at least `TOKEN_REFRESH_LEEWAY` seconds.
     pub fn is_fresh(&self, now: i64) -> bool {
-        self.access_token.is_some() && self.expires_at.is_some_and(|t| t > now + TOKEN_REFRESH_LEEWAY)
+        self.is_fresh_for(now, TOKEN_REFRESH_LEEWAY)
+    }
+
+    /// A usable access token that stays valid for at least `margin` seconds.
+    pub fn is_fresh_for(&self, now: i64, margin: i64) -> bool {
+        self.access_token.is_some() && self.expires_at.is_some_and(|t| t > now + margin)
     }
 
     pub fn to_dto(&self) -> ProfileDto {
@@ -130,6 +145,19 @@ struct Inner {
     records: BTreeMap<String, Record>,
     /// The file could not be read; it is backed up before the first write.
     file_invalid: bool,
+    /// The file could not be opened or read (a scanner or a sync tool held it): it is read again
+    /// before it is used, and never written over unread.
+    unread: bool,
+}
+
+/// The records of a read `profiles.json`.
+fn records_of(map: serde_json::Map<String, Value>) -> BTreeMap<String, Record> {
+    map.into_iter()
+        .filter_map(|(key, value)| match value {
+            Value::Object(record) => Some((key, record)),
+            _ => None,
+        })
+        .collect()
 }
 
 pub struct ProfileStore {
@@ -149,30 +177,10 @@ fn not_found(key: &str) -> AppError {
 impl ProfileStore {
     pub fn open(state_dir: &Path) -> ProfileStore {
         let path = state_dir.join(PROFILES_FILE);
-        let (records, file_invalid) = match read_json_object(&path) {
-            Ok(JsonRead::Object(map)) => (
-                map.into_iter()
-                    .filter_map(|(key, value)| match value {
-                        Value::Object(record) => Some((key, record)),
-                        _ => None,
-                    })
-                    .collect(),
-                false,
-            ),
-            Ok(JsonRead::Missing) => (BTreeMap::new(), false),
-            Ok(JsonRead::Invalid(reason)) => {
-                tracing::warn!("Ignoring unreadable {}: {reason}", path.display());
-                (BTreeMap::new(), true)
-            }
-            Err(e) => {
-                tracing::warn!("Unable to read {}: {e}", path.display());
-                (BTreeMap::new(), true)
-            }
-        };
         let store = ProfileStore {
             path,
             cipher: TokenCipher::new(state_dir),
-            inner: Mutex::new(Inner { records, file_invalid }),
+            inner: Mutex::new(Inner { records: BTreeMap::new(), file_invalid: false, unread: true }),
         };
         store.migrate();
         store
@@ -182,11 +190,32 @@ impl ProfileStore {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Seals plaintext tokens and makes a lone profile the default, in one write. On any failure
-    /// the file and memory stay as loaded (plaintext tokens remain readable in memory).
-    fn migrate(&self) {
+    /// The state, read from the file first if it could not be until now.
+    fn loaded(&self) -> MutexGuard<'_, Inner> {
         let mut inner = self.lock();
-        if inner.file_invalid {
+        if inner.unread {
+            match read_json_object(&self.path) {
+                Ok(JsonRead::Object(map)) => (inner.records, inner.file_invalid) = (records_of(map), false),
+                Ok(JsonRead::Missing) => (inner.records, inner.file_invalid) = (BTreeMap::new(), false),
+                Ok(JsonRead::Invalid(reason)) => {
+                    tracing::warn!("Ignoring unreadable {}: {reason}", self.path.display());
+                    (inner.records, inner.file_invalid) = (BTreeMap::new(), true);
+                }
+                Err(e) => {
+                    tracing::warn!("Unable to read {}: {e}", self.path.display());
+                    return inner;
+                }
+            }
+            inner.unread = false;
+        }
+        inner
+    }
+
+    /// Seals plaintext tokens and gives the profiles a default when they have none, in one write.
+    /// On any failure the file and memory stay as loaded (plaintext tokens remain readable in memory).
+    fn migrate(&self) {
+        let mut inner = self.loaded();
+        if inner.file_invalid || inner.unread {
             return;
         }
         let mut candidate = inner.records.clone();
@@ -209,10 +238,13 @@ impl ProfileStore {
                 }
             }
         }
-        if candidate.len() == 1 && !candidate.values().any(is_default) {
-            candidate.values_mut().for_each(|r| {
-                r.insert("default".to_string(), json!(true));
-            });
+        // No default (the original launcher could leave several so): the first by name is, as
+        // after a delete.
+        if !candidate.values().any(is_default)
+            && let Some(first) = candidate.keys().min_by_key(|k| k.to_lowercase()).cloned()
+            && let Some(record) = candidate.get_mut(&first)
+        {
+            record.insert("default".to_string(), json!(true));
             changed = true;
         }
         if changed {
@@ -242,7 +274,13 @@ impl ProfileStore {
 
     /// Applies `change` to a copy, writes it, and only then replaces the in-memory state.
     fn mutate(&self, change: impl FnOnce(&mut BTreeMap<String, Record>) -> AppResult<()>) -> AppResult<()> {
-        let mut inner = self.lock();
+        let mut inner = self.loaded();
+        if inner.unread {
+            return Err(AppError::new(
+                ErrorCode::ProfileSaveFailed,
+                format!("{} could not be read; it is not written over", self.path.display()),
+            ));
+        }
         let mut candidate = inner.records.clone();
         change(&mut candidate)?;
         self.write(&mut inner, &candidate)?;
@@ -381,12 +419,12 @@ impl ProfileStore {
     }
 
     pub fn get(&self, key: &str) -> Option<StoredProfile> {
-        let inner = self.lock();
+        let inner = self.loaded();
         inner.records.get(key).map(|record| self.view(key, record))
     }
 
     pub fn list(&self) -> Vec<StoredProfile> {
-        let inner = self.lock();
+        let inner = self.loaded();
         inner.records.iter().map(|(key, record)| self.view(key, record)).collect()
     }
 
@@ -403,8 +441,10 @@ impl ProfileStore {
     fn view(&self, key: &str, record: &Record) -> StoredProfile {
         let text = |field: &str| record.get(field).and_then(Value::as_str).map(str::to_string);
         let mut decryption_failed = false;
+        let mut sealed = false;
         let mut token = |field: &str| match text(field) {
             Some(value) if value.starts_with(ENC_PREFIX) => {
+                sealed = true;
                 let plain = self.cipher.decrypt(&value);
                 decryption_failed |= plain.is_none();
                 plain
@@ -413,6 +453,8 @@ impl ProfileStore {
         };
         let access_token = token("access_token");
         let refresh_token = token("refresh_token");
+        let key_unavailable = decryption_failed && sealed && !self.cipher.key_available();
+        let decryption_failed = decryption_failed && !key_unavailable;
         let name = text("name").unwrap_or_else(|| key.to_string());
         let offline = text("type").as_deref() == Some(OFFLINE_TOKEN)
             || access_token.as_deref() == Some(OFFLINE_TOKEN)
@@ -432,6 +474,7 @@ impl ProfileStore {
             marked: record.get("reauth_required").and_then(Value::as_bool).unwrap_or(false),
             stored_reason: text("reauth_reason"),
             decryption_failed,
+            key_unavailable,
             name,
         }
     }
@@ -458,6 +501,47 @@ mod tests {
 
     fn file(dir: &Path) -> String {
         fs::read_to_string(dir.join(PROFILES_FILE)).unwrap()
+    }
+
+    /// A scanner or a sync tool held the file at start: it is no corrupt file, and the profiles it
+    /// holds are never written over.
+    #[cfg(windows)]
+    #[test]
+    fn a_file_unreadable_for_a_moment_at_start_keeps_its_profiles() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        ProfileStore::open(dir.path()).save("Notch_UA", microsoft("Notch_UA"), true).unwrap();
+        let held =
+            fs::OpenOptions::new().read(true).share_mode(0).open(dir.path().join(PROFILES_FILE)).unwrap();
+        let store = ProfileStore::open(dir.path());
+        assert!(store.list().is_empty(), "nothing could be read");
+        assert!(store.save("Alex", NewProfile::offline("Alex"), false).is_err(), "no write while unread");
+        drop(held);
+        store.save("Alex", NewProfile::offline("Alex"), false).unwrap();
+        let names: Vec<String> = ProfileStore::open(dir.path()).list().into_iter().map(|p| p.name).collect();
+        assert_eq!(names, ["Alex", "Notch_UA"], "the profiles from before are kept");
+        let backups = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains("corrupt"))
+            .count();
+        assert_eq!(backups, 0, "a file that was only busy is no corrupt file");
+    }
+
+    #[test]
+    fn profiles_with_no_default_get_one_at_start() {
+        // The original launcher could leave several profiles and none marked: Play would ask for one.
+        let dir = tempfile::tempdir().unwrap();
+        let record = |name: &str| json!({"name": name, "type": "offline", "access_token": "offline"});
+        let all = json!({"steve": record("steve"), "Alex": record("Alex"), "zed": record("zed")});
+        fs::write(dir.path().join(PROFILES_FILE), all.to_string()).unwrap();
+        let store = ProfileStore::open(dir.path());
+        assert_eq!(
+            store.default_profile().map(|p| p.key).as_deref(),
+            Some("Alex"),
+            "first by name, any case"
+        );
+        assert!(file(dir.path()).contains("\"default\": true"), "and it is saved");
     }
 
     #[test]

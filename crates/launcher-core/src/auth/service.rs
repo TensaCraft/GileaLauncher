@@ -13,7 +13,7 @@ use super::http::{AuthHttp, FlowError};
 use super::msa::{self, MsTokens};
 use super::offline::validate_offline_name;
 use super::store::{NewProfile, ProfileStore, REASON_REFRESH_INVALID, StoredProfile, TokenUpdate};
-use super::{AuthConfig, UrlOpener, now_secs, xbox};
+use super::{AuthConfig, LAUNCH_SESSION_MARGIN, TOKEN_REFRESH_LEEWAY, UrlOpener, now_secs, xbox};
 use crate::feedback::{EventSink, FeedbackService};
 
 /// Who plays: what the launch passes to Minecraft. Stays inside `launcher-core`.
@@ -223,10 +223,18 @@ impl AuthService {
         msa::device_poll(&self.http, ep, &self.cfg.client_id, &code, &self.cfg.timings, cancel).await
     }
 
-    /// `Some` when no network refresh is needed (or none can help).
-    fn settled(&self, profile: &StoredProfile, force: bool) -> AppResult<Option<StoredProfile>> {
+    /// `Some` when no network refresh is needed (or none can help): the session lasts `margin`
+    /// seconds more.
+    fn settled(&self, profile: &StoredProfile, force: bool, margin: i64) -> AppResult<Option<StoredProfile>> {
         if profile.is_offline() {
             return Ok(Some(profile.clone()));
+        }
+        if profile.key_unavailable() {
+            return Err(AppError::new(
+                ErrorCode::CredentialStorageUnavailable,
+                "the sign-in key cannot be read for now",
+            )
+            .with_param("profile", &profile.name));
         }
         if let Some(reason) = profile.reauth_reason() {
             if !profile.is_marked() {
@@ -235,7 +243,7 @@ impl AuthService {
             }
             return Ok(Some(self.store.get(&profile.key).unwrap_or_else(|| profile.clone())));
         }
-        if !force && profile.is_fresh(now_secs()) {
+        if !force && profile.is_fresh_for(now_secs(), margin) {
             return Ok(Some(profile.clone()));
         }
         Ok(None)
@@ -259,39 +267,53 @@ impl AuthService {
     /// Brings a Microsoft profile's tokens up to date. A network failure keeps
     /// the current session; a rejected refresh token marks the profile for a new sign-in.
     pub async fn refresh(&self, key: &str, force: bool) -> AppResult<StoredProfile> {
+        self.refresh_within(key, force, TOKEN_REFRESH_LEEWAY).await
+    }
+
+    /// `refresh`, renewing a session that ends within `margin` seconds.
+    async fn refresh_within(&self, key: &str, force: bool, margin: i64) -> AppResult<StoredProfile> {
+        self.renewed(key, force, margin).await.map(|(profile, _)| profile)
+    }
+
+    /// `refresh_within`, with why the session could not be renewed when it was kept (a network or
+    /// Xbox failure: no new sign-in helps).
+    async fn renewed(
+        &self,
+        key: &str,
+        force: bool,
+        margin: i64,
+    ) -> AppResult<(StoredProfile, Option<AppError>)> {
         let profile = self.store.get(key).ok_or_else(|| no_profile(key))?;
-        if let Some(done) = self.settled(&profile, force)? {
-            return Ok(done);
+        if let Some(done) = self.settled(&profile, force, margin)? {
+            return Ok((done, None));
         }
         let seen_token = profile.access_token.clone();
         let _guard = self.refresh.lock().await;
         let profile = self.store.get(key).ok_or_else(|| no_profile(key))?;
         // Another task refreshed this profile while this one waited: use its result.
-        if profile.access_token != seen_token && profile.is_fresh(now_secs()) {
-            return Ok(profile);
+        if profile.access_token != seen_token && profile.is_fresh_for(now_secs(), margin) {
+            return Ok((profile, None));
         }
-        if let Some(done) = self.settled(&profile, force)? {
-            return Ok(done);
+        if let Some(done) = self.settled(&profile, force, margin)? {
+            return Ok((done, None));
         }
         let refresh_token = profile.refresh_token.clone().unwrap_or_default();
         match self.renew(&refresh_token).await {
             Ok(update) => {
                 let saved = self.store.update_tokens(key, &update)?;
                 self.changed();
-                Ok(saved)
+                Ok((saved, None))
             }
             Err(error) if is_revoked(&error) => {
                 tracing::warn!("The Microsoft refresh token of {key} was rejected; a new sign-in is needed");
                 self.store.mark_reauth(key, REASON_REFRESH_INVALID)?;
                 self.changed();
-                self.store.get(key).ok_or_else(|| no_profile(key))
+                Ok((self.store.get(key).ok_or_else(|| no_profile(key))?, None))
             }
             Err(error) => {
-                tracing::warn!(
-                    "Token refresh for {key} failed; keeping the session: {}",
-                    error.into_app_error().detail
-                );
-                Ok(profile)
+                let failure = error.into_app_error();
+                tracing::warn!("Token refresh for {key} failed; keeping the session: {}", failure.detail);
+                Ok((profile, Some(failure)))
             }
         }
     }
@@ -321,13 +343,21 @@ impl AuthService {
             Some(key) => key.to_string(),
             None => self.store.default_profile().map(|p| p.key).ok_or_else(|| no_profile(""))?,
         };
-        let profile = self.refresh(&key, false).await?;
+        let (profile, failure) = self.renewed(&key, false, LAUNCH_SESSION_MARGIN).await?;
         if let Some(reason) = profile.reauth_reason() {
             return Err(AppError::new(ErrorCode::ReauthRequired, reason).with_param("profile", &profile.name));
         }
-        let access_token = profile.access_token.clone().ok_or_else(|| {
-            AppError::new(ErrorCode::ReauthRequired, "no access token").with_param("profile", &profile.name)
-        })?;
+        let Some(access_token) = profile.access_token.clone() else {
+            // No session at all: why it could not be had (the network), not a sign-in to redo.
+            let error =
+                failure.unwrap_or_else(|| AppError::new(ErrorCode::ReauthRequired, "no access token"));
+            return Err(error.with_param("profile", &profile.name));
+        };
+        if failure.is_some() && !profile.is_fresh(now_secs()) {
+            // Single player needs no session; servers will refuse an ended one.
+            let said = Text::key("auth_session_not_renewed").param("profile", &profile.name);
+            self.feedback.toast(Level::Warning, said, None, None);
+        }
         Ok(LaunchIdentity {
             username: profile.name,
             uuid: profile.id,

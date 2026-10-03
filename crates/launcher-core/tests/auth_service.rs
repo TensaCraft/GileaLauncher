@@ -173,6 +173,71 @@ async fn refresh_keeps_the_old_refresh_token_when_none_is_returned() {
     assert_eq!(refresh_requests(&fake), ["refresh-of-Notch_UA", "refresh-of-Notch_UA"]);
 }
 
+fn now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_launch_renews_a_session_that_would_end_during_play() {
+    // A Minecraft session lasts a day: one with two hours left would drop out of servers mid-game.
+    let fake = fake_ms::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    stored_microsoft(dir.path(), "Notch_UA", Some("old-access"), now() + 2 * 3600, true);
+    stored_microsoft(dir.path(), "Steve_UA", Some("day-access"), now() + 20 * 3600, false);
+    let (svc, _) = service(&fake, dir.path(), Arc::new(NoOpener));
+    let identity = svc.launch_identity(Some("Notch_UA")).await.unwrap();
+    assert_ne!(identity.access_token, "old-access");
+    svc.launch_identity(Some("Steve_UA")).await.unwrap();
+    assert_eq!(refresh_requests(&fake), ["refresh-of-Notch_UA"], "a session with most of a day left is used");
+}
+
+fn warned(rec: &Rec, key: &str) -> bool {
+    rec.toasts.lock().unwrap().iter().any(|t| serde_json::to_value(&t.title).unwrap()["key"] == key)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ended_session_that_cannot_be_renewed_still_plays_with_a_warning() {
+    let fake = fake_ms::start().await;
+    fake.knobs().token_failures = 1_000;
+    let dir = tempfile::tempdir().unwrap();
+    stored_microsoft(dir.path(), "Notch_UA", Some("old-access"), 1_000, true);
+    let (svc, rec) = service(&fake, dir.path(), Arc::new(NoOpener));
+    let identity = svc.launch_identity(None).await.unwrap();
+    assert_eq!(identity.access_token, "old-access", "single player needs no session");
+    assert!(warned(&rec, "auth_session_not_renewed"), "the player learns why servers may refuse");
+    assert!(!svc.snapshot().profiles[0].reauth_required, "no new sign-in is asked for a network failure");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_session_and_no_network_is_told_as_such() {
+    let fake = fake_ms::start().await;
+    fake.knobs().token_failures = 1_000;
+    let dir = tempfile::tempdir().unwrap();
+    stored_microsoft(dir.path(), "Notch_UA", None, 0, true);
+    let (svc, _) = service(&fake, dir.path(), Arc::new(NoOpener));
+    let error = svc.launch_identity(None).await.unwrap_err();
+    assert_ne!(error.code, ErrorCode::ReauthRequired, "signing in again would not help: {error:?}");
+}
+
+/// A scanner holds the token key for a moment: the accounts are not to be signed into again.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_key_unreadable_for_a_moment_asks_for_no_new_sign_in() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let fake = fake_ms::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    stored_microsoft(dir.path(), "Notch_UA", Some("day-access"), now() + 20 * 3600, true);
+    let key = dir.path().join(launcher_core::auth::crypto::KEY_FILE);
+    let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&key).unwrap();
+    let (svc, _) = service(&fake, dir.path(), Arc::new(NoOpener));
+    let error = svc.launch_identity(None).await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::CredentialStorageUnavailable);
+    assert!(!svc.snapshot().profiles[0].reauth_required, "nothing is wrong with the account");
+    drop(held);
+    assert_eq!(svc.launch_identity(None).await.unwrap().access_token, "day-access");
+    assert!(fake.requests("/token").is_empty());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn missing_access_token_forces_a_refresh() {
     let fake = fake_ms::start().await;
@@ -269,7 +334,11 @@ async fn offline_profile_rules() {
     assert_eq!(svc.create_offline("Steve").unwrap_err().code, ErrorCode::ProfileExists);
     assert_eq!(svc.create_offline("Notch_UA").unwrap_err().code, ErrorCode::ProfileExists);
     assert_eq!(svc.create_offline("two words").unwrap_err().code, ErrorCode::ProfileNameInvalid);
-    assert_eq!(svc.create_offline("Іван").unwrap().profiles[0].name, "Іван");
+    assert_eq!(
+        svc.create_offline("Іван").unwrap_err().code,
+        ErrorCode::ProfileNameInvalid,
+        "Minecraft lets in names of visible ASCII only"
+    );
     let microsoft = svc.launch_identity(Some("Notch_UA")).await.unwrap();
     assert_eq!(microsoft.access_token, "mc-access", "the Microsoft profile is intact");
     let offline = svc.launch_identity(Some("Steve")).await.unwrap();

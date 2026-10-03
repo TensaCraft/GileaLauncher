@@ -15,6 +15,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// An access token is refreshed when it expires within this many seconds.
 pub const TOKEN_REFRESH_LEEWAY: i64 = 300;
+/// A launch renews a session that ends sooner than this (sessions last a day): a game played on it
+/// would drop out of servers when it ends.
+pub const LAUNCH_SESSION_MARGIN: i64 = 12 * 60 * 60;
 
 pub const SCOPE: &str = "XboxLive.signin offline_access";
 pub const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";

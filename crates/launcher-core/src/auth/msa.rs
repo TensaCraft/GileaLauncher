@@ -166,6 +166,12 @@ async fn serve_callback(mut stream: TcpStream, state: &str, lang: &str) -> Optio
         return None;
     }
     let param = |name: &str| url.query_pairs().find(|(k, _)| k == name).map(|(_, v)| v.into_owned());
+    // Only this sign-in's redirect counts (Microsoft sends the state with an error too): a stale
+    // tab, another program or a page's image must not end it.
+    if param("state").as_deref() != Some(state) {
+        respond(&mut stream, 400, "Bad Request", &callback_page(lang, Some("invalid_state"))).await;
+        return None;
+    }
     let outcome = if let Some(error) = param("error") {
         let description = param("error_description").unwrap_or_else(|| error.clone());
         respond(&mut stream, 400, "Bad Request", &callback_page(lang, Some(&description))).await;
@@ -174,9 +180,6 @@ async fn serve_callback(mut stream: TcpStream, state: &str, lang: &str) -> Optio
         } else {
             Err(FlowError::Failed(format!("microsoft authorization failed: {error}: {description}")))
         }
-    } else if param("state").as_deref() != Some(state) {
-        respond(&mut stream, 400, "Bad Request", &callback_page(lang, Some("invalid_state"))).await;
-        Err(FlowError::Failed("invalid_state".into()))
     } else if let Some(code) = param("code").filter(|c| !c.is_empty()) {
         respond(&mut stream, 200, "OK", &callback_page(lang, None)).await;
         Ok(code)

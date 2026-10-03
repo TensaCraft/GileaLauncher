@@ -127,13 +127,17 @@ async fn loopback_ignores_other_paths_and_returns_the_code() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn loopback_rejects_a_foreign_state() {
+async fn loopback_turns_away_a_foreign_state_and_keeps_waiting() {
+    // A stale tab, another program or a page's <img> must not end this sign-in.
     let loopback = Loopback::bind(0).await.unwrap();
     let port = loopback.port();
     let waiting = wait_in_background(loopback, "mine").await;
     let page = visit(&format!("http://127.0.0.1:{port}/callback?code=abc&state=other")).await;
     assert!(page.starts_with("HTTP/1.1 400"), "{page}");
-    assert_eq!(waiting.await.unwrap(), Err(FlowError::Failed("invalid_state".into())));
+    let page = visit(&format!("http://127.0.0.1:{port}/callback?error=access_denied")).await;
+    assert!(page.starts_with("HTTP/1.1 400"), "an error without this sign-in's state: {page}");
+    visit(&format!("http://127.0.0.1:{port}/callback?code=real&state=mine")).await;
+    assert_eq!(waiting.await.unwrap(), Ok("real".to_string()));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -142,7 +146,7 @@ async fn loopback_reports_denial_and_escapes_the_text() {
     let port = loopback.port();
     let waiting = wait_in_background(loopback, "s").await;
     let page = visit(&format!(
-        "http://127.0.0.1:{port}/callback?error=access_denied&error_description=%3Cb%3Eno%3C%2Fb%3E"
+        "http://127.0.0.1:{port}/callback?error=access_denied&error_description=%3Cb%3Eno%3C%2Fb%3E&state=s"
     ))
     .await;
     assert!(page.contains("&lt;b&gt;no&lt;/b&gt;") && !page.contains("<b>no"), "{page}");

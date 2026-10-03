@@ -13,18 +13,18 @@ pub fn offline_uuid(name: &str) -> String {
     format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
 }
 
-/// Trimmed nickname of 1–16 characters without whitespace or control characters (any script).
+/// Trimmed nickname of 1–16 visible ASCII characters: Minecraft 1.20.3+ lets no other name in, not
+/// even in single player (`StringUtil.isValidPlayerName`). Profiles made before stay as they are.
 pub fn validate_offline_name(raw: &str) -> AppResult<String> {
     let name = raw.trim();
     let count = name.chars().count();
-    let valid =
-        (1..=MAX_NAME_CHARS).contains(&count) && !name.chars().any(|c| c.is_whitespace() || c.is_control());
+    let valid = (1..=MAX_NAME_CHARS).contains(&count) && name.chars().all(|c| c.is_ascii_graphic());
     if valid {
         Ok(name.to_string())
     } else {
         Err(AppError::new(
             ErrorCode::ProfileNameInvalid,
-            "offline nickname must be 1-16 characters without spaces",
+            "offline nickname must be 1-16 visible ASCII characters",
         )
         .with_param("max", MAX_NAME_CHARS.to_string()))
     }
@@ -45,9 +45,10 @@ mod tests {
     #[test]
     fn offline_names() {
         assert_eq!(validate_offline_name("  Steve  ").unwrap(), "Steve");
-        assert_eq!(validate_offline_name("Іван").unwrap(), "Іван");
-        assert_eq!(validate_offline_name(&"я".repeat(16)).unwrap().chars().count(), 16);
-        for bad in ["", "   ", "two words", "tab\tname", &"x".repeat(17)] {
+        assert_eq!(validate_offline_name("Player_01").unwrap(), "Player_01");
+        assert_eq!(validate_offline_name(&"x".repeat(16)).unwrap().len(), 16);
+        // Minecraft 1.20.3+ lets in names of visible ASCII only, single player too.
+        for bad in ["", "   ", "two words", "tab\tname", &"x".repeat(17), "Іван", "Steve·", "名前"] {
             assert_eq!(
                 validate_offline_name(bad).unwrap_err().code,
                 ErrorCode::ProfileNameInvalid,

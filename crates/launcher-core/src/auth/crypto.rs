@@ -46,6 +46,12 @@ impl TokenCipher {
         let bytes = self.fernet().ok()?.decrypt(token).ok()?;
         String::from_utf8(bytes).ok()
     }
+
+    /// Whether the key can be read now. A key a scanner holds for a moment is no wrong key: the
+    /// tokens are not lost, only out of reach until it lets go.
+    pub fn key_available(&self) -> bool {
+        self.fernet().is_ok()
+    }
 }
 
 fn load_or_create_key(path: &Path) -> io::Result<Fernet> {
