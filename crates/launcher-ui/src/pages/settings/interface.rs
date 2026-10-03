@@ -33,9 +33,11 @@ pub fn InterfaceSection() -> impl IntoView {
             .collect::<Vec<_>>()
     });
 
-    let stored = move || store.settings.get().window_size;
+    // Follows the saved size only when it changes: another setting saved meanwhile keeps "Custom"
+    // open while its fields are filled in.
+    let stored = Memo::new(move |_| store.settings.with(|s| s.window_size.clone()));
     let window = RwSignal::new(window_choice(&store.settings.get_untracked().window_size));
-    Effect::new(move |_| window.set(window_choice(&stored())));
+    Effect::new(move |_| window.set(window_choice(&stored.get())));
     let initial = WindowSize::parse(&store.settings.get_untracked().window_size).unwrap_or_default();
     let (start_w, start_h) = match initial {
         WindowSize::Size { width, height } => (width, height),
