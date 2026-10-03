@@ -136,6 +136,15 @@ fn spec_of(pack: &Pack) -> AppResult<ComponentSpec> {
     }
 }
 
+/// Runs blocking file work (hundreds of renames, the journal) so the async workers keep going: on
+/// the multi-thread runtime the worker hands its other tasks on first; elsewhere it just runs.
+fn off_the_workers<T>(work: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current().map(|h| h.runtime_flavor()) {
+        Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(work),
+        _ => work(),
+    }
+}
+
 /// Swaps the planned files in, deletes the stale ones and saves `target` — all or nothing.
 async fn apply(
     deps: &SyncDeps<'_>,
@@ -157,7 +166,8 @@ async fn apply(
         remove_empty_folders(root, &plan.managed_dirs);
         Ok(())
     };
-    let transaction = FileTransaction::begin(root, JOURNAL, transaction_plan, Some(&commit))?;
+    let transaction =
+        off_the_workers(|| FileTransaction::begin(root, JOURNAL, transaction_plan, Some(&commit)))?;
     let tasks: AppResult<Vec<DownloadTask>> =
         plan.downloads.iter().map(|file| Ok(file.task(transaction.stage_path(&file.relative)?))).collect();
     let tasks = match tasks {
@@ -170,7 +180,7 @@ async fn apply(
     if let Err(e) = staged {
         return Err(transaction.abort(e));
     }
-    transaction.apply(ApplyHooks { commit: Some(&commit), ..ApplyHooks::default() })
+    off_the_workers(|| transaction.apply(ApplyHooks { commit: Some(&commit), ..ApplyHooks::default() }))
 }
 
 /// Brings `build` in line with the server; `force` downloads every managed file again and makes

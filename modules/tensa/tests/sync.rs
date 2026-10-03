@@ -96,7 +96,8 @@ fn downloads(w: &World) -> usize {
     w.server.seen().iter().filter(|s| s.starts_with("/files/")).count()
 }
 
-#[tokio::test]
+// The launcher's runtime: the file work is handed off the async workers there.
+#[tokio::test(flavor = "multi_thread")]
 async fn a_sync_downloads_new_files_deletes_stale_ones_and_saves_the_build() {
     let w = World::start().await;
     catalog(&w, json!({"jvm_arguments": ["-XX:+UseG1GC"], "force_update_profile_fields": ["jvm"]}));

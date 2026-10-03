@@ -5,7 +5,7 @@
 mod packs;
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use launcher_core::content::backups::back_up;
@@ -100,6 +100,39 @@ struct Target {
     game: PathBuf,
     game_version: Option<String>,
     loader: Option<&'static str>,
+}
+
+/// The safety net under the plan: no new jar declares a mod id an enabled jar of `game` that stays
+/// already declares (two copies of a mod stop the game). Blocking: every jar there is read.
+fn one_copy_each(
+    tx: &FileTransaction,
+    game: &Path,
+    loader: Option<LoaderKind>,
+    metadata: &MetadataCache,
+    destinations: &[String],
+    stale: &[String],
+) -> AppResult<()> {
+    let here = scan_mods(game, loader, metadata, &[]);
+    let leaving = |file: &str| {
+        stale.iter().chain(destinations).any(|gone| gone.eq_ignore_ascii_case(&format!("mods/{file}")))
+    };
+    for relative in destinations {
+        let Ok(descriptor) = inspect_mod_jar(&tx.stage_path(relative)?, loader) else { continue };
+        let id = normalized(&descriptor.mod_id);
+        let taken = here.iter().find(|entry| {
+            entry.item.enabled
+                && !leaving(&entry.item.file)
+                && entry.item.mod_id.as_deref().is_some_and(|other| normalized(other) == id)
+        });
+        if let Some(entry) = taken {
+            return Err(AppError::new(
+                ErrorCode::ContentConflict,
+                format!("{} already has mod {id}: {}", game.display(), entry.item.file),
+            )
+            .with_param("name", entry.item.file.clone()));
+        }
+    }
+    Ok(())
 }
 
 impl Target {
@@ -457,19 +490,24 @@ impl CurseForgeService {
         };
         let root = game.clone();
         let tx = blocking(move || FileTransaction::begin(&root, JOURNAL, transaction, None)).await?;
-        let mut staged = self.stage(&tx, &planned, &records, op).await;
-        if staged.is_ok() && kind == ContentKind::Mods {
-            let destinations: Vec<String> = planned.iter().map(|p| p.relative.clone()).collect();
-            staged = self.one_copy_each(&tx, target, &destinations, &stale);
-        }
-        if staged.is_ok()
-            && let Some(file) = listing
-        {
-            staged = stage_listing(&tx, game, file, kind, legacy, &renames);
-        }
-        blocking(move || match staged {
-            Ok(()) => tx.apply(ApplyHooks::default()),
-            Err(e) => Err(tx.abort(e)),
+        let staged = self.stage(&tx, &planned, &records, op).await;
+        let destinations: Vec<String> = planned.iter().map(|p| p.relative.clone()).collect();
+        let (metadata, game, loader) = (self.metadata.clone(), game.clone(), target.loader_kind());
+        // Every jar of the build may be read here, so not on the async workers.
+        blocking(move || {
+            let staged = staged
+                .and_then(|()| match kind {
+                    ContentKind::Mods => one_copy_each(&tx, &game, loader, &metadata, &destinations, &stale),
+                    _ => Ok(()),
+                })
+                .and_then(|()| match listing {
+                    Some(file) => stage_listing(&tx, &game, file, kind, legacy, &renames),
+                    None => Ok(()),
+                });
+            match staged {
+                Ok(()) => tx.apply(ApplyHooks::default()),
+                Err(e) => Err(tx.abort(e)),
+            }
         })
         .await
     }
@@ -504,39 +542,6 @@ impl CurseForgeService {
         let staged = tx.stage_path(PROVENANCE)?;
         write_json_file(&staged, &document(records), 2)
             .map_err(|e| AppError::new(ErrorCode::Io, format!("{}: {e}", staged.display())))
-    }
-
-    /// The safety net under the plan: no new jar declares a mod id an enabled jar here that stays
-    /// already declares (two copies of a mod stop the game).
-    fn one_copy_each(
-        &self,
-        tx: &FileTransaction,
-        target: &Target,
-        destinations: &[String],
-        stale: &[String],
-    ) -> AppResult<()> {
-        let loader = target.loader_kind();
-        let here = scan_mods(&target.game, loader, &self.metadata, &[]);
-        let leaving = |file: &str| {
-            stale.iter().chain(destinations).any(|gone| gone.eq_ignore_ascii_case(&format!("mods/{file}")))
-        };
-        for relative in destinations {
-            let Ok(descriptor) = inspect_mod_jar(&tx.stage_path(relative)?, loader) else { continue };
-            let id = normalized(&descriptor.mod_id);
-            let taken = here.iter().find(|entry| {
-                entry.item.enabled
-                    && !leaving(&entry.item.file)
-                    && entry.item.mod_id.as_deref().is_some_and(|other| normalized(other) == id)
-            });
-            if let Some(entry) = taken {
-                return Err(AppError::new(
-                    ErrorCode::ContentConflict,
-                    format!("{} already has mod {id}: {}", target.game.display(), entry.item.file),
-                )
-                .with_param("name", entry.item.file.clone()));
-            }
-        }
-        Ok(())
     }
 
     /// The build's files of `args.kind` installed from CurseForge, each with its page.
