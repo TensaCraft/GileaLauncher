@@ -31,14 +31,21 @@ pub fn BackupsSettings() -> impl IntoView {
     let dir = RwSignal::new(String::new());
     let error = RwSignal::new(None::<AppError>);
     let saving = RwSignal::new(false);
+    // Unread, the section says why and its controls wait (they would save over what is unknown).
     spawn_local(async move {
-        if let Ok(s) = api::settings().await {
-            let _ = enabled.try_set(s.enabled);
-            let _ = keep.try_set(s.keep.to_string());
-            let _ = dir.try_set(s.dir.clone());
-            let _ = saved.try_set(Some(s));
+        match api::settings().await {
+            Ok(s) => {
+                let _ = enabled.try_set(s.enabled);
+                let _ = keep.try_set(s.keep.to_string());
+                let _ = dir.try_set(s.dir.clone());
+                let _ = saved.try_set(Some(s));
+            }
+            Err(e) => {
+                let _ = error.try_set(Some(e));
+            }
         }
     });
+    let unread = Signal::derive(move || saved.with(Option::is_none));
     let keep_invalid = Signal::derive(move || keep.with(|k| !k.is_empty() && keep_of(k).is_none()));
     let store = move |wanted: BackupSettings| {
         saving.set(true);
@@ -84,7 +91,7 @@ pub fn BackupsSettings() -> impl IntoView {
     view! {
         <Section icon="backup" title=t("world_backups") desc=t("world_backups_desc")>
             <SettingRow title=t("world_backups_enabled")>
-                <Switch checked=enabled on_change=toggle label=t("world_backups_enabled") />
+                <Switch checked=enabled on_change=toggle disabled=unread label=t("world_backups_enabled") />
             </SettingRow>
             <SettingRow title=t("world_backups_keep_count")>
                 <TextInput value=keep invalid=keep_invalid />
@@ -103,12 +110,12 @@ pub fn BackupsSettings() -> impl IntoView {
                     <PathField value=dir browse_label=t("browse_directory") on_browse=browse invalid=Signal::derive(move || error.get().is_some()) />
                 </Field>
                 <div class="wrap" style="justify-content:flex-end;padding-bottom:12px">
-                    <Button icon="restart_alt" on_click=move |_| save(true)>{move || i18n.t("setup_wizard_use_defaults")}</Button>
+                    <Button icon="restart_alt" disabled=unread on_click=move |_| save(true)>{move || i18n.t("setup_wizard_use_defaults")}</Button>
                     <Button
                         variant=Variant::Primary
                         icon="save"
                         loading=Signal::derive(move || saving.get())
-                        disabled=keep_invalid
+                        disabled=Signal::derive(move || keep_invalid.get() || unread.get())
                         on_click=move |_| save(false)
                     >
                         {move || i18n.t("save")}
