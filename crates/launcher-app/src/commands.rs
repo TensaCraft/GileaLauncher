@@ -229,12 +229,19 @@ pub fn revealable_file(path: &str) -> AppResult<std::path::PathBuf> {
 
 #[tauri::command(async)]
 pub fn open_url(app: AppHandle, url: String) -> AppResult<()> {
-    if !url.starts_with("https://") {
+    let Some(link) = https_link(&url) else {
         return Err(
             AppError::new(ErrorCode::InvalidInput, "only https links can be opened").with_param("url", url)
         );
-    }
-    open_link(&app, &url).map_err(|e| AppError::new(ErrorCode::Io, e))
+    };
+    open_link(&app, &link).map_err(|e| AppError::new(ErrorCode::Io, e))
+}
+
+/// `raw` as a whole `https` link with a host, written out escaped: spaces, quotes or control
+/// characters from a provider's data never reach the browser's command line as they are.
+fn https_link(raw: &str) -> Option<String> {
+    let url = tauri::Url::parse(raw.trim()).ok()?;
+    (url.scheme() == "https" && url.host_str().is_some_and(|h| !h.is_empty())).then(|| url.to_string())
 }
 
 /// A module's command: one dispatcher instead of a Tauri plugin per module.
@@ -354,6 +361,19 @@ pub async fn profile_avatar(state: State<'_, AppState>, key: String) -> AppResul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_whole_https_link_is_opened_and_it_goes_out_escaped() {
+        assert_eq!(
+            https_link("https://modrinth.com/mod/a b\"c").as_deref(),
+            Some("https://modrinth.com/mod/a%20b%22c")
+        );
+        for refused in
+            ["http://modrinth.com", "https://", "javascript:alert(1)", "file:///etc/passwd", "https//x"]
+        {
+            assert_eq!(https_link(refused), None, "{refused}");
+        }
+    }
 
     #[test]
     fn openable_dir_accepts_only_existing_directories() {
