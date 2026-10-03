@@ -157,7 +157,7 @@ async fn the_snapshot_lists_builds_by_name_with_their_state() {
     let w = world(&fake);
     w.service.install_vanilla("zeta", "1.21.1").await.unwrap();
     w.service.install_vanilla("Alpha", "1.21.1").await.unwrap();
-    let snapshot = w.service.snapshot(|key| key == "zeta");
+    let snapshot = w.service.snapshot(|build| build.key == "zeta");
     let names: Vec<(&str, bool)> = snapshot.builds.iter().map(|b| (b.name.as_str(), b.running)).collect();
     assert_eq!(names, [("Alpha", false), ("zeta", true)]);
     let alpha = &snapshot.builds[0];

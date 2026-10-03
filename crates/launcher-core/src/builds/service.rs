@@ -115,10 +115,10 @@ impl BuildService {
 
     /// Every build in the user's order (the rest by name); `running` tells which build keys have
     /// a game running.
-    pub fn snapshot(&self, running: impl Fn(&str) -> bool) -> BuildsSnapshot {
+    pub fn snapshot(&self, running: impl Fn(&Build) -> bool) -> BuildsSnapshot {
         let mc_dir = self.versions.minecraft_dir();
         let mut builds: Vec<BuildDto> =
-            self.versions.list().iter().map(|b| build_dto(b, mc_dir, running(&b.key))).collect();
+            self.versions.list().iter().map(|b| build_dto(b, mc_dir, running(b))).collect();
         ordered(&mut builds, &saved_order(&self.config));
         BuildsSnapshot { builds }
     }

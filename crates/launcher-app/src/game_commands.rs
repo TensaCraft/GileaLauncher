@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::commands::AppState;
 
 fn builds_snapshot(core: &CoreApp) -> BuildsSnapshot {
-    core.builds.snapshot(|key| core.launcher.is_running(key))
+    core.builds.snapshot(|build| core.launcher.runs(build))
 }
 
 pub(crate) fn announce_builds(app: &AppHandle, core: &CoreApp) -> BuildsSnapshot {
@@ -34,7 +34,7 @@ fn find_build(core: &CoreApp, key: &str) -> AppResult<Build> {
 }
 
 fn dto(core: &CoreApp, build: &Build) -> BuildDto {
-    build_dto(build, &core.paths.minecraft_dir, core.launcher.is_running(&build.key))
+    build_dto(build, &core.paths.minecraft_dir, core.launcher.runs(build))
 }
 
 #[tauri::command(async)]

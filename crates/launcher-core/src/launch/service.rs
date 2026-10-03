@@ -156,10 +156,12 @@ impl LaunchService {
     /// A game of this build is running: one the launcher started, or one that has its folder open
     /// (`game_open`: the launcher lost it, or another launcher started it).
     pub fn is_running(&self, build_key: &str) -> bool {
-        self.deps.versions.get(build_key).is_some_and(|build| {
-            self.registry.is_active(&self.registry_key(&build))
-                || game_open(&game_dir(&build, &self.deps.mc_dir))
-        })
+        self.deps.versions.get(build_key).is_some_and(|build| self.runs(&build))
+    }
+
+    /// `is_running` of a build already read (its record is not read again).
+    pub fn runs(&self, build: &Build) -> bool {
+        self.registry.is_active(&self.registry_key(build)) || game_open(&game_dir(build, &self.deps.mc_dir))
     }
 
     /// Stops the build's games — its own and the Java processes that hold its folder
