@@ -11,6 +11,9 @@ use ui_kit::{
 use crate::shell::PageHeader;
 use crate::store::{use_settings_writer, use_store};
 
+/// How long typing in the folder field pauses before the folders it gives are asked for.
+const PREVIEW_PAUSE: Duration = Duration::from_millis(300);
+
 #[derive(serde::Serialize)]
 struct PlanArgs {
     plan: SetupPlan,
@@ -55,24 +58,39 @@ pub fn SetupPage() -> impl IntoView {
         ]
     });
     // The backend computes the real folders (rebasing, per-OS Minecraft dir); latest request wins.
+    // Typing asks after a pause, not on every key; the first folder is asked for at once.
     let preview = RwSignal::new(None::<SetupPreview>);
     let generation = StoredValue::new(0u64);
-    Effect::new(move |_| {
+    let timer = StoredValue::new(None::<TimeoutHandle>);
+    let cancel_timer = move || {
+        if let Some(handle) = timer.try_get_value().flatten() {
+            handle.clear();
+        }
+    };
+    Effect::new(move |asked: Option<()>| {
         let current = dir.get();
         generation.update_value(|g| *g += 1);
         let mine = generation.get_value();
+        cancel_timer();
         if current.trim().is_empty() {
             preview.set(None);
             return;
         }
-        spawn_local(async move {
-            let result = ipc::invoke::<_, SetupPreview>("setup_preview", &DirArgs { dir: current }).await;
-            // The page may be gone by the answer.
-            if generation.try_get_value() == Some(mine) {
-                let _ = preview.try_set(result.ok());
-            }
-        });
+        let ask = move || {
+            spawn_local(async move {
+                let result = ipc::invoke::<_, SetupPreview>("setup_preview", &DirArgs { dir: current }).await;
+                // The page may be gone by the answer.
+                if generation.try_get_value() == Some(mine) {
+                    let _ = preview.try_set(result.ok());
+                }
+            })
+        };
+        match asked {
+            None => ask(),
+            Some(()) => timer.set_value(set_timeout_with_handle(ask, PREVIEW_PAUSE).ok()),
+        }
     });
+    on_cleanup(cancel_timer);
     let minecraft = move || preview.get().map(|p| p.minecraft_dir).unwrap_or_default();
     let backups = move || preview.get().map(|p| p.backups_dir).unwrap_or_default();
 

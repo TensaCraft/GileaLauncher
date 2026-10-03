@@ -81,13 +81,28 @@ impl WindowDrag {
     }
 }
 
+/// How long resizing pauses before the window is looked up again (dragging its edge sends a resize
+/// on every frame).
+const RESIZE_PAUSE: std::time::Duration = std::time::Duration::from_millis(150);
+
 /// The shell's one `WindowDrag`, which also knows whether the window fills the screen: looked up
-/// at start and after every resize (the window manager's own maximize too).
+/// at start and once a resize settles (the window manager's own maximize too).
 pub fn provide_window_drag() -> WindowDrag {
     let drag = WindowDrag { armed: StoredValue::new(false), filled: RwSignal::new(false) };
     drag.act(WindowAction::Look);
-    let resize = window_event_listener(leptos::ev::resize, move |_| drag.act(WindowAction::Look));
-    on_cleanup(move || resize.remove());
+    let timer = StoredValue::new(None::<TimeoutHandle>);
+    let resize = window_event_listener(leptos::ev::resize, move |_| {
+        if let Some(handle) = timer.try_get_value().flatten() {
+            handle.clear();
+        }
+        timer.set_value(set_timeout_with_handle(move || drag.act(WindowAction::Look), RESIZE_PAUSE).ok());
+    });
+    on_cleanup(move || {
+        resize.remove();
+        if let Some(handle) = timer.try_get_value().flatten() {
+            handle.clear();
+        }
+    });
     provide_context(drag);
     drag
 }
