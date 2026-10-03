@@ -18,7 +18,7 @@ use super::packs::{
     INCOMPATIBLE_RESOURCE_PACKS, RESOURCE_PACKS, legacy_pack_names, read_options_list, remove_options_entry,
     resourcepack_entry, write_options_list, write_properties,
 };
-use super::screenshots::{SCREENSHOTS, ScreenshotFile, list_screenshots};
+use super::screenshots::{SCREENSHOTS, ScreenshotFile, find_screenshot, list_screenshots};
 use crate::feedback::FeedbackService;
 use crate::launch::options::{component_id, game_dir};
 use crate::lock::Coordinator;
@@ -193,9 +193,9 @@ impl ContentService {
         Ok(list_screenshots(&self.folder(&self.build(key)?)))
     }
 
-    /// Screenshot `name` of build `key` — only one its list has.
+    /// Screenshot `name` of build `key` — only one its list has (found without listing them).
     pub fn screenshot(&self, key: &str, name: &str) -> AppResult<ScreenshotFile> {
-        self.screenshots(key)?.into_iter().find(|s| s.name == name).ok_or_else(|| {
+        find_screenshot(&self.folder(&self.build(key)?), name).ok_or_else(|| {
             AppError::new(ErrorCode::NotFound, format!("no screenshot {name}")).with_param("name", name)
         })
     }
