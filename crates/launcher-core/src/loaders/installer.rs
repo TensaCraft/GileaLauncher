@@ -140,11 +140,15 @@ pub fn parse_profile(json: &Value) -> AppResult<InstallProfile> {
     }))
 }
 
+/// Puts `bytes` at `dest`: a file already so is left alone, any other is replaced whole (never
+/// rewritten in place: another build on this loader may be running with it on its classpath).
 fn write_file(dest: &Path, bytes: &[u8]) -> AppResult<()> {
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(|e| io_error(parent, e))?;
+    let same = fs::metadata(dest).is_ok_and(|m| m.len() == bytes.len() as u64)
+        && fs::read(dest).is_ok_and(|present| present == bytes);
+    if same {
+        return Ok(());
     }
-    fs::write(dest, bytes).map_err(|e| io_error(dest, e))
+    crate::storage::atomic::atomic_write(dest, bytes).map_err(|e| io_error(dest, e))
 }
 
 /// An installer jar opened for reading.
@@ -280,6 +284,26 @@ mod tests {
             ("forge-universal.jar", Some("1.7.10"))
         );
         assert_eq!(parse_profile(&json!({"spec": 1})).unwrap_err().code, ErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn a_jar_already_in_place_is_left_alone_and_a_changed_one_is_replaced_whole() {
+        // Another build on this Forge may be running with the jar on its classpath.
+        let dir = tempfile::tempdir().unwrap();
+        let path = jar(dir.path(), &[("maven/net/f/forge/1/forge-1.jar", b"forge")]);
+        let libraries = dir.path().join("libraries");
+        let dest = libraries.join("net/f/forge/1/forge-1.jar");
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, b"forge").unwrap();
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        fs::File::options().write(true).open(&dest).unwrap().set_modified(long_ago).unwrap();
+        InstallerJar::open(&path).unwrap().extract_maven(&libraries).unwrap();
+        assert_eq!(fs::metadata(&dest).unwrap().modified().unwrap(), long_ago, "not written again");
+        fs::write(&dest, b"other").unwrap();
+        InstallerJar::open(&path).unwrap().extract_maven(&libraries).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"forge");
+        let temps = fs::read_dir(dest.parent().unwrap()).unwrap().count();
+        assert_eq!(temps, 1, "no temp file stays beside it");
     }
 
     #[test]
