@@ -263,12 +263,16 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_name_that_differs_only_in_case_never_replaces_another_file() {
-        // Files whose names differ only in case are two files on Linux.
+        // Files whose names differ only in case are two files where the folder tells case apart.
         let game = tempfile::tempdir().unwrap();
         let dir = game.path().join(SCREENSHOTS);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("base.png"), b"lower").unwrap();
         fs::write(dir.join("Base.png"), b"upper").unwrap();
+        if fs::read_dir(&dir).unwrap().count() < 2 {
+            // A folder that ignores case (macOS by default) holds one file: nothing to replace.
+            return;
+        }
         let shot = find_screenshot(game.path(), "base.png").unwrap();
         assert_eq!(rename_screenshot(&shot, "Base").unwrap_err().code, ErrorCode::FileNameTaken);
         assert_eq!(fs::read(dir.join("Base.png")).unwrap(), b"upper");
