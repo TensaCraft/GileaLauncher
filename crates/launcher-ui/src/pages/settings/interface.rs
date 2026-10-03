@@ -1,3 +1,4 @@
+use launcher_shared::recent::RECENT_MOST;
 use launcher_shared::{ClickSound, SettingUpdate, WINDOW_MAX, WINDOW_MIN, WINDOW_PRESETS, WindowSize};
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
@@ -23,6 +24,16 @@ pub fn InterfaceSection() -> impl IntoView {
     let writer = use_settings_writer();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
     let compact = mirror_bool(|s| s.compact_sidebar);
+    let recent = RwSignal::new(store.settings.get_untracked().home_recent_builds.to_string());
+    Effect::new(move |_| recent.set(store.settings.get().home_recent_builds.to_string()));
+    let recent_options = Signal::derive(move || {
+        (0..=RECENT_MOST)
+            .map(|n| {
+                let label = if n == 0 { i18n.t("home_recent_builds_none") } else { n.to_string() };
+                SelectOption::new(n.to_string(), label)
+            })
+            .collect::<Vec<_>>()
+    });
     let sounds_on = mirror_bool(|s| s.click_sound_enabled);
     let variant = RwSignal::new(store.settings.get_untracked().click_sound.as_config_str().to_string());
     Effect::new(move |_| variant.set(store.settings.get().click_sound.as_config_str().to_string()));
@@ -79,6 +90,20 @@ pub fn InterfaceSection() -> impl IntoView {
         <Section icon="dashboard" title=t("interface") desc=t("interface_desc")>
             <SettingRow title=t("compact_sidebar") desc=t("compact_sidebar_desc")>
                 <Switch checked=compact on_change=Callback::new(move |v| writer.apply(SettingUpdate::CompactSidebar(v))) />
+            </SettingRow>
+            <SettingRow title=t("home_recent_builds") desc=t("home_recent_builds_desc")>
+                <div style="width:220px">
+                    <Select
+                        options=recent_options
+                        value=recent
+                        icon="history"
+                        on_change=Callback::new(move |v: String| {
+                            if let Ok(count) = v.parse() {
+                                writer.apply(SettingUpdate::HomeRecentBuilds(count));
+                            }
+                        })
+                    />
+                </div>
             </SettingRow>
             <SettingRow title=t("ui_click_sound_enabled") desc=t("ui_click_sound_desc")>
                 <Switch checked=sounds_on on_change=Callback::new(move |v| writer.apply(SettingUpdate::ClickSoundEnabled(v))) />

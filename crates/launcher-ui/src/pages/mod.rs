@@ -2,6 +2,7 @@ pub mod build_settings;
 pub mod builds;
 pub mod components;
 pub mod content;
+pub mod continue_playing;
 pub mod create;
 pub mod home;
 pub mod kit;

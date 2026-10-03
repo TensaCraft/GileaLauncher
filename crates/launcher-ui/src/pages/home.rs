@@ -1,4 +1,5 @@
-//! Home: a grid of build cards; hover shows Play, right-click the build menu.
+//! Home: «Продовжити гру» (the builds played last, each with its last server or world), then a
+//! grid of build cards; hover shows Play, right-click the build menu.
 
 use leptos::ev::MouseEvent;
 use leptos::prelude::*;
@@ -12,6 +13,7 @@ use crate::builds::build_subtitle;
 use crate::builds::dialogs::use_build_menu;
 use crate::builds::launch::use_launch_flow;
 use crate::modules::use_module_parts;
+use crate::pages::continue_playing::{ContinuePlaying, fold_state};
 use crate::shell::PageHeader;
 use crate::store::use_store;
 
@@ -51,6 +53,9 @@ pub fn HomePage() -> impl IntoView {
     // "No builds yet" only when Home has no card at all: modules' cards (a server's builds to
     // install) count too.
     let module_cards = provide_home_cards();
+    // «Усі збірки» folds only under its title, which «Продовжити гру» brings.
+    let builds_folded = fold_state("home.fold.builds");
+    let recent_shown = RwSignal::new(false);
     let empty = move || store.builds_loaded.get() && store.builds.with(Vec::is_empty) && !module_cards.any();
     view! {
         <PageHeader title_key="home_title" />
@@ -66,7 +71,9 @@ pub fn HomePage() -> impl IntoView {
                     </Button>
                 </EmptyState>
             </Show>
-            <div class="home__grid">
+            <ContinuePlaying builds_folded=builds_folded shown=recent_shown />
+            // Folded with CSS, not unmounted: modules' cards stay (Home's emptiness counts them).
+            <div class="home__grid" class:is-hidden=move || recent_shown.get() && builds_folded.get()>
                     <For
                         each=move || store.builds.get()
                         key=|b| (b.key.clone(), b.name.clone(), b.running, b.image.clone(), b.version.clone())

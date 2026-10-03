@@ -1,5 +1,6 @@
 //! IPC actions on builds. Create during component setup (`use_build_actions`), call from handlers.
 
+use launcher_shared::recent::Join;
 use launcher_shared::{AppError, BuildDto, BuildsSnapshot, ErrorCode, Level, LoaderKind};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -54,6 +55,8 @@ struct LaunchArgs {
     profile_key: Option<String>,
     allow_duplicate: bool,
     allow_low_memory: bool,
+    /// Straight into this server or world (this launch only).
+    join: Option<Join>,
 }
 
 /// Reports the outcome of a finished call; nothing happens when the page that asked is gone.
@@ -202,14 +205,14 @@ impl BuildActions {
     /// Starts `build` (the backend shows "starting"). A missing account opens "Profile required"
     /// (`need_profile`); too little free memory beside a running game goes to `low_memory`.
     pub fn launch(&self, build: BuildDto, profile_key: Option<String>, asks: LaunchAsks) {
-        let LaunchAsks { allow_duplicate, allow_low_memory, need_profile, low_memory } = asks;
+        let LaunchAsks { allow_duplicate, allow_low_memory, need_profile, low_memory, join } = asks;
         let this = *self;
         let key = build.key.clone();
         this.store.launching.update(|set| {
             set.insert(key.clone());
         });
         spawn_local(async move {
-            let args = LaunchArgs { key: key.clone(), profile_key, allow_duplicate, allow_low_memory };
+            let args = LaunchArgs { key: key.clone(), profile_key, allow_duplicate, allow_low_memory, join };
             let result = ipc::invoke::<_, u32>("build_launch", &args).await;
             this.store.launching.update(|set| {
                 set.remove(&key);
@@ -226,13 +229,14 @@ impl BuildActions {
     }
 }
 
-/// What a launch was allowed and where its questions go.
-#[derive(Clone, Copy)]
+/// What a launch was allowed, where its questions go and where it takes the player.
+#[derive(Clone)]
 pub struct LaunchAsks {
     pub allow_duplicate: bool,
     pub allow_low_memory: bool,
     pub need_profile: RwSignal<bool>,
     pub low_memory: Callback<AppError>,
+    pub join: Option<Join>,
 }
 
 pub fn use_build_actions() -> BuildActions {
@@ -259,10 +263,14 @@ mod tests {
             profile_key: Some("Steve".into()),
             allow_duplicate: true,
             allow_low_memory: false,
+            join: Some(Join::Server { host: "tensa.co.ua".into(), port: 25565 }),
         };
         assert_eq!(
             serde_json::to_value(launch).unwrap(),
-            json!({"key": "aero", "profileKey": "Steve", "allowDuplicate": true, "allowLowMemory": false})
+            json!({
+                "key": "aero", "profileKey": "Steve", "allowDuplicate": true, "allowLowMemory": false,
+                "join": {"kind": "server", "host": "tensa.co.ua", "port": 25565}
+            })
         );
         let delete = DeleteArgs { key: "aero".into(), delete_files: false };
         assert_eq!(serde_json::to_value(delete).unwrap(), json!({"key": "aero", "deleteFiles": false}));

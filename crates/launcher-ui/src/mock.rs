@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use launcher_shared::recent::{Activity, RecentBuild, ServerStatus, parse_motd};
 use launcher_shared::{
     AccountKind, ActivityEntry, ActivityEvent, AppError, AppInfo, AuthState, ClickSound, ErrorCode, Level,
     LogEntry, LogLevel, LogView, ModuleInfo, OpsSnapshot, PathsInfo, ProfileDto, ProfilesSnapshot,
@@ -317,6 +318,38 @@ pub fn install() {
         "setup_apply" => to_value(false),
         "startup_warnings" => to_value(Vec::<Text>::new()),
         "take_pending_launch" => Ok(Value::Null),
+        "recent_builds" => {
+            let now = js_sys::Date::now() as u64;
+            to_value(vec![
+                RecentBuild {
+                    key: "aeronautics".into(),
+                    played_ms: now - 40 * 60_000,
+                    activity: Some(Activity::Server { host: "tensa.co.ua".into(), port: 25565 }),
+                },
+                RecentBuild {
+                    key: "vanilna_1_20_1".into(),
+                    played_ms: now - 26 * 3_600_000,
+                    activity: Some(Activity::World {
+                        folder: "Test".into(),
+                        name: "Мій світ".into(),
+                        mode: "survival".into(),
+                        difficulty: "hard".into(),
+                        hardcore: false,
+                        icon: None,
+                        quick_play: true,
+                    }),
+                },
+            ])
+        }
+        "server_status" if args["host"] == "tensa.co.ua" => to_value(Some(ServerStatus {
+            motd: parse_motd(&serde_json::json!("§bTensaCraft §f— §eсезон 3\n§aласкаво просимо")),
+            online: 42,
+            max: 200,
+            version: "Velocity 1.7.2-1.21.4".into(),
+            favicon: None,
+            ping_ms: 31,
+        })),
+        "server_status" => Ok(Value::Null),
         // The launcher plays clicks; the browser preview stays quiet.
         "play_click" => Ok(Value::Null),
         "ops_snapshot" => to_value(OpsSnapshot::default()),

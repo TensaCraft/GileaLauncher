@@ -3,6 +3,7 @@
 //! opens "Profile required", too little free memory beside a running game asks first. The
 //! `LaunchDialogs` host in `App` renders these dialogs for every page.
 
+use launcher_shared::recent::Join;
 use launcher_shared::{AppError, BuildDto};
 use leptos::prelude::*;
 use ui_kit::ConfirmDialog;
@@ -31,6 +32,8 @@ pub struct LaunchFlow {
     /// Why memory may run short (the backend's words), and the question about it.
     low_memory: RwSignal<Option<AppError>>,
     confirm_memory: RwSignal<bool>,
+    /// Where `pending` takes the player (Home's «Грати»), kept while its questions are open.
+    join: RwSignal<Option<Join>>,
     /// Opens the memory question. Made with the flow, not per launch: a shortcut's launch starts
     /// from an effect whose run is dropped before the backend answers.
     ask_memory: Callback<AppError>,
@@ -39,8 +42,14 @@ pub struct LaunchFlow {
 impl LaunchFlow {
     /// Play on `build`.
     pub fn start(&self, build: BuildDto) {
+        self.start_into(build, None);
+    }
+
+    /// Play on `build` straight into `join`, a server or a world.
+    pub fn start_into(&self, build: BuildDto, join: Option<Join>) {
         self.duplicate_ok.set(false);
         self.memory_ok.set(false);
+        self.join.set(join);
         self.proceed(build);
     }
 
@@ -89,6 +98,7 @@ impl LaunchFlow {
             allow_low_memory: self.memory_ok.get_untracked(),
             need_profile: self.need_profile,
             low_memory: self.ask_memory,
+            join: self.join.get_untracked(),
         }
     }
 
@@ -113,6 +123,7 @@ pub fn provide_launch_flow() -> LaunchFlow {
         memory_ok: RwSignal::new(false),
         low_memory,
         confirm_memory,
+        join: RwSignal::new(None),
         ask_memory: Callback::new(move |e: AppError| {
             low_memory.set(Some(e));
             confirm_memory.set(true);
@@ -201,6 +212,23 @@ mod tests {
         let _ = asks.low_memory.try_run(AppError::new(ErrorCode::LowMemory, "6 GiB free"));
         assert!(flow.confirm_memory.get_untracked(), "the memory question opens");
         assert!(flow.low_memory.with_untracked(Option::is_some));
+        app.cleanup();
+    }
+
+    #[test]
+    fn home_s_play_carries_its_server_through_the_questions() {
+        let app = Owner::new();
+        let flow = app.with(|| {
+            provide_i18n(I18n::new("uk_UA", Dictionary::default(), Dictionary::default()));
+            provide_toasts();
+            provide_store();
+            provide_launch_flow()
+        });
+        let server = Join::Server { host: "tensa.co.ua".into(), port: 25565 };
+        flow.join.set(Some(server.clone()));
+        assert_eq!(flow.asks().join, Some(server), "asked again after a question, it still goes there");
+        flow.join.set(None);
+        assert_eq!(flow.asks().join, None);
         app.cleanup();
     }
 }

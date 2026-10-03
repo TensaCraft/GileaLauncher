@@ -18,6 +18,7 @@ mod modules;
 mod pages;
 mod profiles;
 mod providers;
+mod recent;
 mod shell;
 mod store;
 mod update;

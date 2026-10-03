@@ -78,6 +78,7 @@ pub fn App() -> impl IntoView {
     provide_support();
     let build_actions = use_build_actions();
     provide_launch_flow();
+    crate::recent::provide_recent();
     provide_build_dialogs();
     // What modules may ask of the app: a build's content tab, a build started as Play starts it.
     let flow = crate::builds::launch::use_launch_flow();
