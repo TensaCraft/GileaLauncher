@@ -492,14 +492,17 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
     let javas = RwSignal::new(JavaList::default());
     let components = RwSignal::new(Vec::<ComponentDto>::new());
 
-    // Saved settings on the page; `try_set` because answers may come after the page is gone.
+    // Saved settings on the page. An answer after the page is gone changes nothing: the header is
+    // the app's, and another page shows it by then.
     let fill = move |s: &BuildSettingsDto| {
+        if loaded.try_set(Some(Ok(s.clone()))).is_some() {
+            return;
+        }
         form.fill(s);
         let _ = icon_error.try_set(None);
         let _ = name_error.try_set(None);
         let _ = port_error.try_set(None);
         let _ = header.subtitle.try_set(Some(s.name.clone()));
-        let _ = loaded.try_set(Some(Ok(s.clone())));
     };
     let load = move || {
         let key = key();
