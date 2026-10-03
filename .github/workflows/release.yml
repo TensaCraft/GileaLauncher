@@ -46,6 +46,8 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-tools
       - name: Version, tag and editions
         id: meta
         shell: bash
@@ -92,12 +94,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ runner.os == 'macOS' && 'wasm32-unknown-unknown,aarch64-apple-darwin,x86_64-apple-darwin' || 'wasm32-unknown-unknown' }}
+      # One cache a system for every edition (their crates are the same), saved by the first.
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.edition.edition }}
+          shared-key: release
+          save-if: ${{ matrix.edition.edition == fromJSON(needs.meta.outputs.editions)[0].edition }}
       - uses: taiki-e/install-action@v2
         with:
-          tool: trunk,tauri-cli@2
+          tool: trunk@0.21.14,tauri-cli@2.9.1
       - name: The CurseForge key is there
         # A missing secret would hide CurseForge in the release without a word.
         if: ${{ !inputs.dry_run }}
@@ -148,9 +152,34 @@ jobs:
           retention-days: 1
           compression-level: 0
 
+  # The code released passes the checks (a release may start before CI has finished).
+  test:
+    name: Checks
+    needs: meta
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libasound2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-checks
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.21.14
+      - name: fmt + clippy + tests
+        run: cargo xtask check
+
   publish:
     name: Publish the release
-    needs: [meta, build]
+    needs: [meta, build, test]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
@@ -162,6 +191,8 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-tools
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
