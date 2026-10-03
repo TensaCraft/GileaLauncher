@@ -31,6 +31,9 @@ pub struct LaunchFlow {
     /// Why memory may run short (the backend's words), and the question about it.
     low_memory: RwSignal<Option<AppError>>,
     confirm_memory: RwSignal<bool>,
+    /// Opens the memory question. Made with the flow, not per launch: a shortcut's launch starts
+    /// from an effect whose run is dropped before the backend answers.
+    ask_memory: Callback<AppError>,
 }
 
 impl LaunchFlow {
@@ -79,24 +82,25 @@ impl LaunchFlow {
         }
     }
 
-    fn launch(&self, build: BuildDto, profile_key: Option<String>) {
-        self.pending.set(Some(build.clone()));
-        self.pending_profile.set(profile_key.clone());
-        let (low_memory, confirm_memory) = (self.low_memory, self.confirm_memory);
-        let asks = LaunchAsks {
+    /// What this launch was allowed, and where its questions go.
+    fn asks(&self) -> LaunchAsks {
+        LaunchAsks {
             allow_duplicate: self.duplicate_ok.get_untracked(),
             allow_low_memory: self.memory_ok.get_untracked(),
             need_profile: self.need_profile,
-            low_memory: Callback::new(move |e: AppError| {
-                low_memory.set(Some(e));
-                confirm_memory.set(true);
-            }),
-        };
-        self.actions.launch(build, profile_key, asks);
+            low_memory: self.ask_memory,
+        }
+    }
+
+    fn launch(&self, build: BuildDto, profile_key: Option<String>) {
+        self.pending.set(Some(build.clone()));
+        self.pending_profile.set(profile_key.clone());
+        self.actions.launch(build, profile_key, self.asks());
     }
 }
 
 pub fn provide_launch_flow() -> LaunchFlow {
+    let (low_memory, confirm_memory) = (RwSignal::new(None), RwSignal::new(false));
     let flow = LaunchFlow {
         store: use_store(),
         actions: use_build_actions(),
@@ -107,8 +111,12 @@ pub fn provide_launch_flow() -> LaunchFlow {
         need_profile: RwSignal::new(false),
         pending_profile: RwSignal::new(None),
         memory_ok: RwSignal::new(false),
-        low_memory: RwSignal::new(None),
-        confirm_memory: RwSignal::new(false),
+        low_memory,
+        confirm_memory,
+        ask_memory: Callback::new(move |e: AppError| {
+            low_memory.set(Some(e));
+            confirm_memory.set(true);
+        }),
     };
     provide_context(flow);
     flow
@@ -164,5 +172,35 @@ pub fn LaunchDialogs() -> impl IntoView {
         />
         <LaunchProfileSelector open=flow.pick_profile version=name on_pick=pick />
         <ProfileRequiredDialog open=flow.need_profile />
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use launcher_shared::ErrorCode;
+    use ui_kit::i18n::{Dictionary, I18n, provide_i18n};
+    use ui_kit::provide_toasts;
+
+    use super::*;
+    use crate::store::provide_store;
+
+    #[test]
+    fn a_shortcut_s_launch_still_asks_about_memory() {
+        let app = Owner::new();
+        let flow = app.with(|| {
+            provide_i18n(I18n::new("uk_UA", Dictionary::default(), Dictionary::default()));
+            provide_toasts();
+            provide_store();
+            provide_launch_flow()
+        });
+        // A shortcut's build is played from an effect that runs again at once, dropping what its
+        // run made, while the backend still answers.
+        let effect_run = app.with(Owner::new);
+        let asks = effect_run.with(|| flow.asks());
+        effect_run.cleanup();
+        let _ = asks.low_memory.try_run(AppError::new(ErrorCode::LowMemory, "6 GiB free"));
+        assert!(flow.confirm_memory.get_untracked(), "the memory question opens");
+        assert!(flow.low_memory.with_untracked(Option::is_some));
+        app.cleanup();
     }
 }
