@@ -115,6 +115,42 @@ async fn server_errors_are_retried() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_server_asking_to_wait_is_waited_for() {
+    let server = fake_files::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let body = content(3_000, 4);
+    server.put(
+        "busy.jar",
+        Served { body: body.clone(), fail_times: 1, throttle: Some(1), ..Served::default() },
+    );
+    let started = std::time::Instant::now();
+    let report = run(vec![task(&server, "busy.jar", dir.path(), &body)]).await.unwrap();
+    assert_eq!(report.downloaded, 1);
+    assert!(started.elapsed() >= Duration::from_millis(900), "Retry-After is kept: {:?}", started.elapsed());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_network_that_is_down_stops_the_batch_soon() {
+    // Nothing answers on port 1: every connection is refused, as with the network down.
+    let dir = tempfile::tempdir().unwrap();
+    let tasks: Vec<DownloadTask> = (0..40)
+        .map(|i| {
+            DownloadTask::new(
+                format!("http://127.0.0.1:1/file-{i}.jar"),
+                dir.path().join(format!("f{i}.jar")),
+            )
+        })
+        .collect();
+    let report = run(tasks).await.unwrap();
+    assert_eq!(report.failed.len(), 40);
+    let gave_up = report.failed.iter().filter(|f| f.contains("the network is unreachable")).count();
+    assert!(gave_up > 0, "the files left are not tried once the network is down: {:?}", report.failed);
+    let error = report.into_result().unwrap_err();
+    assert_eq!(error.code, ErrorCode::Network, "{error:?}");
+    assert!(error.detail.len() < 2_000, "one reason, not forty: {}", error.detail.len());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn missing_files_fail_without_retries() {
     let server = fake_files::start().await;
     let dir = tempfile::tempdir().unwrap();

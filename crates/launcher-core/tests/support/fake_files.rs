@@ -21,6 +21,8 @@ pub struct Served {
     pub etag: Option<String>,
     /// Answer 503 this many times first.
     pub fail_times: u32,
+    /// Those first answers are `429 Too Many Requests` with `Retry-After` of this many seconds.
+    pub throttle: Option<u64>,
     /// Answer with this status instead of the file.
     pub status: Option<u16>,
     /// The first full answer breaks off half-way.
@@ -122,6 +124,10 @@ async fn serve(
     }
     if served.fail_times > 0 {
         served.fail_times -= 1;
+        if let Some(seconds) = served.throttle {
+            return (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, seconds.to_string())])
+                .into_response();
+        }
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
     if let Some(target) = &served.redirect_to {

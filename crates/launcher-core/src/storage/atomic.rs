@@ -27,7 +27,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         {
             let _ = fs::set_permissions(&tmp, meta.permissions());
         }
-        fs::rename(&tmp, path)
+        rename_retrying(&tmp, path)
     })();
 
     if result.is_err() {
@@ -38,6 +38,28 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 pub fn atomic_write_text(path: &Path, text: &str) -> io::Result<()> {
     atomic_write(path, text.as_bytes())
+}
+
+/// Renames `from` to `to`, trying again for a moment while Windows refuses because another program
+/// holds one of them (an antivirus scanning a file just written: "access denied", "in use").
+pub fn rename_retrying(from: &Path, to: &Path) -> io::Result<()> {
+    const ATTEMPTS: u32 = 12;
+    const PAUSE: std::time::Duration = std::time::Duration::from_millis(150);
+    let mut attempt = 1;
+    loop {
+        match fs::rename(from, to) {
+            Err(e) if attempt < ATTEMPTS && held_elsewhere(&e) => {
+                std::thread::sleep(PAUSE);
+                attempt += 1;
+            }
+            other => return other,
+        }
+    }
+}
+
+/// Windows' "access denied", "sharing violation" and "lock violation": another program has it.
+fn held_elsewhere(e: &io::Error) -> bool {
+    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33))
 }
 
 #[cfg(test)]
@@ -51,6 +73,25 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .filter(|n| n.ends_with(".tmp"))
             .collect()
+    }
+
+    /// An antivirus scans a file just written and holds it for a moment: it still takes its place.
+    #[cfg(windows)]
+    #[test]
+    fn a_rename_waits_out_a_file_held_for_a_moment() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (from, to) = (dir.path().join("lib.jar.part"), dir.path().join("lib.jar"));
+        fs::write(&from, b"jar").unwrap();
+        let held = fs::OpenOptions::new().read(true).share_mode(0x1).open(&from).unwrap();
+        let scanner = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            drop(held);
+        });
+        rename_retrying(&from, &to).unwrap();
+        scanner.join().unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"jar");
+        assert!(!from.exists());
     }
 
     #[test]

@@ -61,9 +61,11 @@ fn file_task(file: &FileRef, dest: PathBuf) -> DownloadTask {
     task
 }
 
-/// Worth another whole attempt: the network failed, not the metadata or the disk.
+/// Worth another whole attempt: the network failed, not the metadata or the disk, and it is not
+/// down altogether (another attempt soon would only wait out the same refusals).
 fn retryable(error: &AppError) -> bool {
     matches!(error.code, ErrorCode::DownloadFailed | ErrorCode::Network)
+        && error.params.get("network").map(String::as_str) != Some("down")
 }
 
 impl MinecraftInstaller {
@@ -322,5 +324,17 @@ impl MinecraftInstaller {
             .await
             .map_err(|e| AppError::internal(e.to_string()))?
             .map(Some)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_network_that_is_down_is_not_tried_again_at_once() {
+        use launcher_shared::{AppError, ErrorCode};
+        assert!(super::retryable(&AppError::new(ErrorCode::DownloadFailed, "x")));
+        assert!(super::retryable(&AppError::new(ErrorCode::Network, "x")));
+        let down = AppError::new(ErrorCode::Network, "x").with_param("network", "down");
+        assert!(!super::retryable(&down));
     }
 }

@@ -23,6 +23,7 @@ use sha2::{Digest, Sha256, Sha512};
 use super::preflight::{SpaceRequest, preflight};
 use super::{HTTPS_ONLY, redirect_policy, redirect_policy_within, url_allowed};
 use crate::lock::path_key;
+use crate::storage::atomic::rename_retrying;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashKind {
@@ -213,17 +214,32 @@ pub struct DownloadReport {
     pub mismatched: usize,
 }
 
+/// Why the files left were not even tried: too many connections failed in a row.
+pub const NETWORK_DOWN: &str = "the network is unreachable";
+/// How many failures in a row (no connection, no answer) mean the network is down.
+const OUTAGE_AFTER: usize = 6;
+/// How many failures an error names; the rest are counted.
+const NAMED_FAILURES: usize = 5;
+/// The longest a server's `Retry-After` is waited for.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
+
 impl DownloadReport {
-    /// `DownloadFailed` naming the first failure when anything failed.
+    /// `DownloadFailed` naming the first failures when anything failed; `Network` (with the param
+    /// `network` = `down`) when the network went down, which another attempt soon will not mend.
     pub fn into_result(self) -> AppResult<DownloadReport> {
-        match self.failed.first() {
-            None => Ok(self),
-            Some(first) => Err(AppError::new(
-                ErrorCode::DownloadFailed,
-                format!("{} file(s) failed: {}", self.failed.len(), self.failed.join("; ")),
-            )
-            .with_param("error", first.clone())),
+        let Some(first) = self.failed.first() else { return Ok(self) };
+        let down = self.failed.iter().any(|f| f.ends_with(NETWORK_DOWN));
+        let mut named = self.failed.iter().take(NAMED_FAILURES).cloned().collect::<Vec<_>>().join("; ");
+        if self.failed.len() > NAMED_FAILURES {
+            named.push_str(&format!("; and {} more", self.failed.len() - NAMED_FAILURES));
         }
+        let detail = format!("{} file(s) failed: {named}", self.failed.len());
+        let error = if down {
+            AppError::new(ErrorCode::Network, detail).with_param("network", "down")
+        } else {
+            AppError::new(ErrorCode::DownloadFailed, detail)
+        };
+        Err(error.with_param("error", first.clone()))
     }
 }
 
@@ -231,7 +247,7 @@ impl DownloadReport {
 pub struct DownloaderConfig {
     pub workers: usize,
     pub retries: u32,
-    /// Pause before retry `n` is `retry_delay × n`.
+    /// Pause before retry `n` is `retry_delay × 4ⁿ⁻¹` (or what the server asks for).
     pub retry_delay: Duration,
     pub timeout: Duration,
     /// Limit for files of unknown size.
@@ -256,10 +272,13 @@ impl Default for DownloaderConfig {
 
 type ProgressFn<'a> = &'a (dyn Fn(DownloadProgress) + Send + Sync);
 
-/// Why one attempt failed: `Retry` and `Mismatch` (a wrong digest) are worth another attempt,
-/// `Fatal` is not.
+/// Why one attempt failed: `Retry`, `Unreachable` (no connection or no answer: counted towards
+/// the network being down), `Wait` (the server says when) and `Mismatch` (a wrong digest) are worth
+/// another attempt, `Fatal` is not.
 enum Failure {
     Retry(String),
+    Unreachable(String),
+    Wait(String, Duration),
     Mismatch(String),
     Fatal(String),
 }
@@ -275,18 +294,34 @@ fn fatal(e: impl std::fmt::Display) -> Failure {
 }
 
 fn send_failure(e: reqwest::Error) -> Failure {
-    if e.is_redirect() { Failure::Fatal(error_chain(&e)) } else { Failure::Retry(e.to_string()) }
+    if e.is_redirect() {
+        Failure::Fatal(error_chain(&e))
+    } else if e.is_connect() || e.is_timeout() {
+        Failure::Unreachable(e.to_string())
+    } else {
+        Failure::Retry(e.to_string())
+    }
 }
 
-/// A client error (bar 408 and 429) is final; anything else is worth another attempt.
-fn status_failure(status: StatusCode) -> Failure {
+/// A client error (bar 408 and 429) is final; anything else is worth another attempt, after the
+/// server's `Retry-After` (seconds) when it gives one.
+fn status_failure(response: &reqwest::Response) -> Failure {
+    let status = response.status();
     if status.is_client_error()
         && status != StatusCode::TOO_MANY_REQUESTS
         && status != StatusCode::REQUEST_TIMEOUT
     {
-        Failure::Fatal(format!("HTTP {status}"))
-    } else {
-        Failure::Retry(format!("HTTP {status}"))
+        return Failure::Fatal(format!("HTTP {status}"));
+    }
+    let after = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|secs| Duration::from_secs(secs).min(MAX_RETRY_AFTER));
+    match after {
+        Some(after) => Failure::Wait(format!("HTTP {status}"), after),
+        None => Failure::Retry(format!("HTTP {status}")),
     }
 }
 
@@ -299,6 +334,8 @@ struct Counters {
     files_total: usize,
     bytes_done: AtomicU64,
     bytes_total: u64,
+    /// Failures in a row that reached no one, across the batch.
+    unreached: AtomicUsize,
 }
 
 impl Counters {
@@ -309,6 +346,19 @@ impl Counters {
             bytes_done: self.bytes_done.load(Ordering::Relaxed),
             bytes_total: self.bytes_total,
         }
+    }
+
+    /// The network is down: the last `OUTAGE_AFTER` attempts of the batch reached no one.
+    fn network_down(&self) -> bool {
+        self.unreached.load(Ordering::Relaxed) >= OUTAGE_AFTER
+    }
+
+    fn reached(&self) {
+        self.unreached.store(0, Ordering::Relaxed);
+    }
+
+    fn unreached(&self) {
+        self.unreached.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Moves one file's contribution from `reported` to `now` bytes.
@@ -385,7 +435,7 @@ fn write_whole(part: &Path, dest: &Path, body: &[u8]) -> io::Result<()> {
     };
     let written = file.write_all(body).and_then(|()| file.sync_all());
     drop(file);
-    if let Err(e) = written.and_then(|()| fs::rename(part, dest)) {
+    if let Err(e) = written.and_then(|()| rename_retrying(part, dest)) {
         let _ = fs::remove_file(part);
         return Err(e);
     }
@@ -706,6 +756,7 @@ impl Downloader {
             files_total: report.skipped + pending.len(),
             bytes_done: AtomicU64::new(0),
             bytes_total: pending.iter().filter_map(|t| t.size).sum(),
+            unreached: AtomicUsize::new(0),
         };
         progress(counters.snapshot());
         let counters = &counters;
@@ -755,17 +806,35 @@ impl Downloader {
         let mut last = Failed { reason: String::from("no attempt was made"), mismatch: false };
         let attempts = self.cfg.retries.max(1);
         for attempt in 1..=attempts {
+            if counters.network_down() {
+                counters.set_file_bytes(&mut reported, 0);
+                return Err(Failed { reason: NETWORK_DOWN.into(), mismatch: false });
+            }
+            let mut wait = None;
             match self.download_once(task, counters, progress, &mut reported).await {
-                Ok(()) => return Ok(()),
+                Ok(()) => {
+                    counters.reached();
+                    return Ok(());
+                }
                 Err(Failure::Fatal(e)) => {
                     counters.set_file_bytes(&mut reported, 0);
                     return Err(Failed { reason: e, mismatch: false });
                 }
                 Err(Failure::Retry(e)) => last = Failed { reason: e, mismatch: false },
+                Err(Failure::Unreachable(e)) => {
+                    counters.unreached();
+                    last = Failed { reason: e, mismatch: false };
+                }
+                Err(Failure::Wait(e, after)) => {
+                    wait = Some(after);
+                    last = Failed { reason: e, mismatch: false };
+                }
                 Err(Failure::Mismatch(e)) => last = Failed { reason: e, mismatch: true },
             }
             if attempt < attempts {
-                tokio::time::sleep(self.cfg.retry_delay * attempt).await;
+                // Longer each time (×4): a busy server gets room, unless it says how long itself.
+                let backoff = self.cfg.retry_delay * 4u32.saturating_pow(attempt - 1);
+                tokio::time::sleep(wait.unwrap_or(backoff)).await;
             }
         }
         counters.set_file_bytes(&mut reported, 0);
@@ -811,7 +880,7 @@ impl Downloader {
             return Err(Failure::Retry("the server sent an unusable range".into()));
         }
         if !status.is_success() {
-            return Err(status_failure(status));
+            return Err(status_failure(&response));
         }
         let limit = task.size.unwrap_or(self.cfg.in_memory_up_to);
         let mut body = Vec::with_capacity(usize::try_from(limit).unwrap_or(0));
@@ -909,7 +978,7 @@ impl Downloader {
                 partial.start(identity, response.headers()).map_err(fatal)?;
                 (File::create(&partial.part).map_err(fatal)?, 0)
             }
-            (status, _) => return Err(status_failure(status)),
+            (_, _) => return Err(status_failure(&response)),
         };
         counters.set_file_bytes(reported, written);
         progress(counters.snapshot());
@@ -956,7 +1025,7 @@ impl Downloader {
         }
         let (part, dest, sidecar) = (partial.part.clone(), task.dest.clone(), partial.sidecar.clone());
         tokio::task::spawn_blocking(move || {
-            fs::rename(&part, &dest)?;
+            rename_retrying(&part, &dest)?;
             let _ = fs::remove_file(&sidecar);
             Ok::<_, io::Error>(())
         })
