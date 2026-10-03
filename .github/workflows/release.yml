@@ -158,23 +158,49 @@ jobs:
     needs: meta
     runs-on: ubuntu-22.04
     timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
     steps:
+      # A commit CI has already passed is not checked twice: seconds instead of half an hour.
+      - name: Did CI pass this commit?
+        id: ci
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          passed="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --status success --json databaseId --jq length)"
+          if [ "$passed" -gt 0 ]; then
+            echo "CI passed $GITHUB_SHA: its checks stand."
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v7
+        if: steps.ci.outputs.passed != 'true'
       - name: Linux dependencies
+        if: steps.ci.outputs.passed != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libasound2-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.ci.outputs.passed != 'true'
         with:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
+      # CI's cache of the same checks (saved from main).
       - uses: Swatinem/rust-cache@v2
+        if: steps.ci.outputs.passed != 'true'
         with:
-          shared-key: release-checks
+          shared-key: checks
+          save-if: false
       - uses: taiki-e/install-action@v2
+        if: steps.ci.outputs.passed != 'true'
         with:
           tool: trunk@0.21.14
       - name: fmt + clippy + tests
+        if: steps.ci.outputs.passed != 'true'
         run: cargo xtask check
 
   publish:

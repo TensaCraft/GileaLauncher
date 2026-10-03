@@ -84,6 +84,8 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
+          # The release's checks read this cache too.
+          shared-key: checks
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # Compiled crates are kept by their content between runs: the crates a change leaves alone
       # are not compiled again. Not on Windows: there sccache cannot start rustc for a crate with a
