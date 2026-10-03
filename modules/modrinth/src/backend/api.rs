@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use launcher_core::net::api_client;
+use launcher_core::net::{api_client, send_patiently};
 use launcher_shared::branding::{APP_NAME, SUPPORT_URL, VERSION};
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use reqwest::header::CONTENT_TYPE;
@@ -67,12 +67,12 @@ impl ModrinthApi {
     }
 
     async fn get(&self, url: Url) -> AppResult<Value> {
-        Self::answer(self.client.get(url).send().await.map_err(network)?).await
+        Self::answer(send_patiently(self.client.get(url)).await.map_err(network)?).await
     }
 
     async fn post(&self, url: Url, body: &Value) -> AppResult<Value> {
         let request = self.client.post(url).header(CONTENT_TYPE, "application/json").body(body.to_string());
-        Self::answer(request.send().await.map_err(network)?).await
+        Self::answer(send_patiently(request).await.map_err(network)?).await
     }
 
     /// `GET /version/{id}`.

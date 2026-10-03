@@ -67,12 +67,62 @@ pub(crate) fn redirect_policy() -> reqwest::redirect::Policy {
 
 /// A client for a JSON API: `user_agent`, the timeouts and the downloader's redirect rules.
 pub fn api_client(user_agent: &str, connect: Duration, read: Duration) -> AppResult<reqwest::Client> {
+    client_with(user_agent, connect, read, redirect_policy())
+}
+
+/// `api_client` for an API that takes a key (a header no redirect strips): no redirect leaves the
+/// hosts `within` accepts, so the key never goes elsewhere.
+pub fn api_client_within(
+    user_agent: &str,
+    connect: Duration,
+    read: Duration,
+    within: Arc<dyn Fn(&Url) -> bool + Send + Sync>,
+) -> AppResult<reqwest::Client> {
+    client_with(user_agent, connect, read, redirect_policy_within(within))
+}
+
+/// How many times an API request goes out to a busy server.
+const API_ATTEMPTS: u32 = 3;
+/// The longest a server's `Retry-After` is waited for by an API request (someone waits on it).
+const API_RETRY_AFTER: Duration = Duration::from_secs(10);
+
+/// Sends `request`; a busy server (429, 502, 503, 504) is asked again, up to twice, after its
+/// `Retry-After` (at most 10 s) or a pause that grows (0.5 s, 1 s).
+pub async fn send_patiently(mut request: reqwest::RequestBuilder) -> reqwest::Result<reqwest::Response> {
+    let mut attempt = 1;
+    loop {
+        let again = request.try_clone();
+        let response = request.send().await?;
+        let busy = matches!(response.status().as_u16(), 429 | 502 | 503 | 504);
+        match again {
+            Some(next) if busy && attempt < API_ATTEMPTS => {
+                let asked = response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.trim().parse::<u64>().ok())
+                    .map(|secs| Duration::from_secs(secs).min(API_RETRY_AFTER));
+                tokio::time::sleep(asked.unwrap_or(Duration::from_millis(500) * attempt)).await;
+                request = next;
+                attempt += 1;
+            }
+            _ => return Ok(response),
+        }
+    }
+}
+
+fn client_with(
+    user_agent: &str,
+    connect: Duration,
+    read: Duration,
+    redirect: reqwest::redirect::Policy,
+) -> AppResult<reqwest::Client> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::builder()
         .user_agent(user_agent)
         .connect_timeout(connect)
         .read_timeout(read)
-        .redirect(redirect_policy())
+        .redirect(redirect)
         .build()
         .map_err(|e| AppError::internal(e.to_string()))
 }

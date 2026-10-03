@@ -151,6 +151,38 @@ async fn a_network_that_is_down_stops_the_batch_soon() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_api_client_kept_to_its_hosts_follows_no_redirect_elsewhere() {
+    // A client that carries a key (CurseForge's) never takes it to another host.
+    let server = fake_files::start().await;
+    let elsewhere = server.url("target").replace("127.0.0.1", "localhost");
+    server.put("moved", Served { redirect_to: Some(elsewhere), ..Served::default() });
+    server.put("target", Served { body: b"secret".to_vec(), ..Served::default() });
+    let within = std::sync::Arc::new(|url: &reqwest::Url| url.host_str() == Some("127.0.0.1"));
+    let client =
+        launcher_core::net::api_client_within("test", Duration::from_secs(5), Duration::from_secs(5), within)
+            .unwrap();
+    let error = client.get(server.url("moved")).send().await.unwrap_err();
+    assert!(error.is_redirect(), "{error:?}");
+    assert!(server.seen("target").is_empty(), "the other host is never asked");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_api_asks_a_busy_server_again() {
+    let server = fake_files::start().await;
+    server
+        .put("busy", Served { body: b"{}".to_vec(), fail_times: 1, throttle: Some(1), ..Served::default() });
+    server.put("down", Served { body: b"{}".to_vec(), fail_times: 2, ..Served::default() });
+    let client =
+        launcher_core::net::api_client("test", Duration::from_secs(5), Duration::from_secs(5)).unwrap();
+    let started = std::time::Instant::now();
+    let busy = launcher_core::net::send_patiently(client.get(server.url("busy"))).await.unwrap();
+    assert_eq!(busy.status(), 200);
+    assert!(started.elapsed() >= Duration::from_millis(900), "Retry-After is kept");
+    let down = launcher_core::net::send_patiently(client.get(server.url("down"))).await.unwrap();
+    assert_eq!((down.status(), server.seen("down").len()), (reqwest::StatusCode::OK, 3));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn missing_files_fail_without_retries() {
     let server = fake_files::start().await;
     let dir = tempfile::tempdir().unwrap();

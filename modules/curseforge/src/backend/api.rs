@@ -5,14 +5,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use launcher_core::net::api_client;
+use launcher_core::net::{api_client_within, send_patiently};
 use launcher_shared::branding::{APP_NAME, SUPPORT_URL, VERSION};
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, StatusCode, Url};
 use serde_json::Value;
 
-use super::key::{ApiKey, KEY_HEADER};
+use super::key::{ApiKey, KEY_HEADER, keyed_host};
 
 pub const BASE: &str = "https://api.curseforge.com";
 /// Minecraft on CurseForge.
@@ -54,7 +54,8 @@ pub struct CurseForgeApi {
 impl CurseForgeApi {
     pub fn new(base: &str, key: ApiKey) -> AppResult<CurseForgeApi> {
         Ok(CurseForgeApi {
-            client: api_client(&user_agent(), CONNECT, READ)?,
+            // The key rides in a header: no redirect may take it off CurseForge's own hosts.
+            client: api_client_within(&user_agent(), CONNECT, READ, std::sync::Arc::new(keyed_host))?,
             base: base.trim_end_matches('/').to_string(),
             key,
             rejected: Arc::default(),
@@ -165,7 +166,7 @@ impl CurseForgeApi {
     async fn get(&self, path: &str, query: &[(&str, String)]) -> AppResult<Value> {
         self.usable()?;
         let request = self.client.get(self.url(path, query)?).header(KEY_HEADER, self.key.header());
-        self.answer(request.send().await.map_err(network)?).await
+        self.answer(send_patiently(request).await.map_err(network)?).await
     }
 
     async fn post(&self, path: &str, body: &Value) -> AppResult<Value> {
@@ -176,7 +177,7 @@ impl CurseForgeApi {
             .header(KEY_HEADER, self.key.header())
             .header(CONTENT_TYPE, "application/json")
             .body(body.to_string());
-        self.answer(request.send().await.map_err(network)?).await
+        self.answer(send_patiently(request).await.map_err(network)?).await
     }
 
     async fn answer(&self, response: reqwest::Response) -> AppResult<Value> {
