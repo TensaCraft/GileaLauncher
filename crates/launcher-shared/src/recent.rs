@@ -6,7 +6,7 @@ use serde_json::Value;
 
 /// The builds «Продовжити гру» shows at most, and unless the user chose otherwise.
 pub const RECENT_MOST: u8 = 10;
-pub const RECENT_DEFAULT: u8 = 5;
+pub const RECENT_DEFAULT: u8 = 0;
 
 pub(crate) fn recent_default() -> u8 {
     RECENT_DEFAULT

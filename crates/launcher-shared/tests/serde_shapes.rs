@@ -332,7 +332,7 @@ fn memory_and_gpu_settings_travel_as_key_and_value() {
     }))
     .unwrap();
     assert_eq!((old.default_max_ram_gb, old.gpu_mode_default.as_str()), (None, ""));
-    assert_eq!(old.home_recent_builds, 5, "Home shows five recent builds unless told otherwise");
+    assert_eq!(old.home_recent_builds, 0, "Home shows no recent builds unless told to");
     let recent = SettingUpdate::HomeRecentBuilds(0);
     assert_eq!(serde_json::to_value(&recent).unwrap(), json!({"key": "home_recent_builds", "value": 0}));
     assert_eq!(
@@ -620,4 +620,24 @@ fn screenshots_carry_their_thumbnail_and_come_by_build() {
     assert_eq!(old.thumb, "", "an answer without thumbnails still reads");
     let all = vec![launcher_shared::BuildShots { key: "aero".into(), shots: vec![old] }];
     assert_eq!(serde_json::to_value(&all).unwrap()[0]["key"], json!("aero"));
+}
+
+#[test]
+fn a_build_card_s_play_button_is_one_of_three_places() {
+    use launcher_shared::CardPlay;
+    assert_eq!(CardPlay::default(), CardPlay::Center);
+    for play in CardPlay::ALL {
+        assert_eq!(CardPlay::from_config_str(play.as_config_str()), play);
+        assert!(play.label_key().starts_with("card_play_"));
+    }
+    assert_eq!(CardPlay::from_config_str("nonsense"), CardPlay::Center);
+    let update = SettingUpdate::CardPlay(CardPlay::Corner);
+    assert_eq!(serde_json::to_value(&update).unwrap(), json!({"key": "card_play", "value": "corner"}));
+    let old: SettingsSnapshot = serde_json::from_value(json!({
+        "lang": "uk_UA", "auto_update": true, "include_beta_updates": false,
+        "ask_profile_on_launch": false, "compact_sidebar": true, "click_sound_enabled": true,
+        "click_sound": "gate_latch_click", "minecraft_dir": "M", "minecraft_dir_is_default": true
+    }))
+    .unwrap();
+    assert_eq!(old.card_play, CardPlay::Center, "a snapshot without it plays from the middle");
 }

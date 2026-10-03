@@ -70,6 +70,44 @@ pub struct AppInfo {
     pub paths: PathsInfo,
 }
 
+/// Where a build card on Home has its Play button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CardPlay {
+    /// A round button in the middle of the cover, on hover.
+    #[default]
+    Center,
+    /// A bar with the word in place of the version, on hover.
+    Bar,
+    /// A small button in the corner, always there.
+    Corner,
+}
+
+impl CardPlay {
+    pub const ALL: [CardPlay; 3] = [CardPlay::Center, CardPlay::Bar, CardPlay::Corner];
+
+    pub fn as_config_str(self) -> &'static str {
+        match self {
+            CardPlay::Center => "center",
+            CardPlay::Bar => "bar",
+            CardPlay::Corner => "corner",
+        }
+    }
+
+    /// The place `raw` names; the middle for anything else.
+    pub fn from_config_str(raw: &str) -> CardPlay {
+        CardPlay::ALL.into_iter().find(|p| p.as_config_str() == raw).unwrap_or_default()
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            CardPlay::Center => "card_play_center",
+            CardPlay::Bar => "card_play_bar",
+            CardPlay::Corner => "card_play_corner",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClickSound {
@@ -233,6 +271,9 @@ pub struct SettingsSnapshot {
     /// When «Продовжити гру» was cleared (ms since the epoch): builds played before stay out.
     #[serde(default)]
     pub home_recent_cleared_ms: Option<u64>,
+    /// Where Home's build cards have their Play button.
+    #[serde(default)]
+    pub card_play: CardPlay,
     /// How many changes were saved before this snapshot (this run): a later answer has a higher
     /// one.
     #[serde(default)]
@@ -265,6 +306,7 @@ pub enum SettingUpdate {
     HomeRecentBuilds(u8),
     /// `true` clears «Продовжити гру» now; `false` gives its history back.
     HomeRecentClear(bool),
+    CardPlay(CardPlay),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
