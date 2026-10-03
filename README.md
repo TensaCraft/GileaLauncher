@@ -14,6 +14,7 @@
 - Modrinth modpacks and mods: search, install, update.
 - CurseForge modpacks, mods, resource packs and shaders: search, install with dependencies, update.
 - Several builds side by side, each with its own worlds, mods and settings.
+- Continue playing on Home: each recent build's last server, with its MOTD, players and ping, or world, one click back in.
 - Microsoft accounts and offline profiles; a build can have an account of its own.
 - Java for the game is picked and downloaded automatically.
 - World backups.
@@ -36,7 +37,7 @@
   </tr>
   <tr>
     <td><img src="docs/screenshots/settings.jpg" alt="Settings"><br><sub>Settings</sub></td>
-    <td></td>
+    <td><img src="docs/screenshots/continue-playing.jpg" alt="Continue playing"><br><sub>Continue playing: your last server or world, one click back in</sub></td>
   </tr>
 </table>
 
