@@ -189,6 +189,7 @@ pub fn launch_options(input: OptionsInput<'_>) -> (LaunchOptions, GpuMode) {
         resolution: resolution(options),
         demo: truthy(options.get("demo")),
         server: server_address(options),
+        world: None,
         disable_multiplayer: truthy(options.get("disableMultiplayer")),
         disable_chat: truthy(options.get("disableChat")),
     };

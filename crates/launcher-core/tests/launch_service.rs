@@ -27,6 +27,7 @@ use launcher_core::net::meta::MetaClient;
 use launcher_core::storage::config::ConfigStore;
 use launcher_core::storage::versions::VersionStore;
 use launcher_shared::branding::MS_CLIENT_ID;
+use launcher_shared::recent::Join;
 use launcher_shared::{
     ActivityEntry, Alert, AppError, ErrorCode, GameEvent, GameState, LoaderKind, OpsSnapshot, Text, Toast,
 };
@@ -881,4 +882,48 @@ async fn a_build_whose_account_is_gone_starts_with_the_default() {
     let started = w.launcher.launch(request(&key)).await.unwrap();
     w.wait_for(finished);
     assert_eq!(username(&started.game_dir), "Steve");
+}
+
+/// The game arguments (after the main class) a build's game started with.
+fn game_args(game_dir: &Path) -> Vec<String> {
+    let record: Value =
+        serde_json::from_str(&std::fs::read_to_string(game_dir.join("fake-game.json")).unwrap()).unwrap();
+    let args: Vec<String> = serde_json::from_value(record["args"].clone()).unwrap();
+    let main = args.iter().position(|a| a == "net.minecraft.client.main.Main").unwrap();
+    args[main + 1..].to_vec()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn play_goes_straight_into_the_server_or_world_asked() {
+    let w = world().await;
+    w.auth.create_offline("Steve").unwrap();
+    let launches = [
+        (
+            Join::Server { host: "other.example".into(), port: 25566 },
+            ["--quickPlayMultiplayer", "other.example:25566"],
+        ),
+        (Join::World { folder: "Мій світ".into() }, ["--quickPlaySingleplayer", "Мій світ"]),
+        // A world that is not there (or not a folder name) starts the build as it is.
+        (Join::World { folder: "Gone".into() }, ["--quickPlayMultiplayer", "own.example:25570"]),
+        (Join::World { folder: "../Мій світ".into() }, ["--quickPlayMultiplayer", "own.example:25570"]),
+    ];
+    for (round, (join, expected)) in launches.into_iter().enumerate() {
+        // A build each: one build is not started twice within moments.
+        let key = w.build(&format!("Aero {round}"), &[]).await;
+        let mut build = w.versions.get(&key).unwrap();
+        build.options.insert("server".into(), json!("own.example:25570"));
+        w.versions.save(&mut build).unwrap();
+        let game = game_dir(&build, &w.mc);
+        std::fs::create_dir_all(game.join("saves").join("Мій світ")).unwrap();
+        std::fs::create_dir_all(game.join("Мій світ")).unwrap();
+        w.launcher.launch(LaunchRequest { join: Some(join.clone()), ..request(&key) }).await.unwrap();
+        w.wait_for(|games| {
+            games.iter().filter(|g| matches!(g, GameState::Exited { .. } | GameState::Crashed { .. })).count()
+                > round
+        });
+        let args = game_args(&game);
+        assert!(args.ends_with(&expected.map(String::from)), "{join:?}: {args:?}");
+        let quick = args.iter().filter(|a| a.starts_with("--quickPlay") || *a == "--server").count();
+        assert_eq!(quick, 1, "one place to go: {args:?}");
+    }
 }

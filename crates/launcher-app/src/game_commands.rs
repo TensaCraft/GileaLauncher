@@ -9,6 +9,7 @@ use launcher_core::launch::options::game_dir;
 use launcher_core::launch::service::LaunchRequest;
 use launcher_core::platform::shortcuts;
 use launcher_core::storage::versions::Build;
+use launcher_shared::recent::Join;
 use launcher_shared::{
     AppError, AppResult, BuildDto, BuildSettingsDto, BuildSettingsUpdate, BuildsSnapshot, CatalogVersion,
     ErrorCode, JavaList, LoaderCatalog, LoaderKind, MemoryInfo, Text, names,
@@ -148,9 +149,10 @@ pub async fn build_launch(
     profile_key: Option<String>,
     allow_duplicate: bool,
     allow_low_memory: bool,
+    join: Option<Join>,
 ) -> AppResult<u32> {
     let core = state.core.clone();
-    let request = LaunchRequest { build_key: key, profile_key, allow_duplicate, allow_low_memory };
+    let request = LaunchRequest { build_key: key, profile_key, allow_duplicate, allow_low_memory, join };
     let started = core.launcher.launch(request).await?;
     announce_builds(&app, &core);
     Ok(started.pid)

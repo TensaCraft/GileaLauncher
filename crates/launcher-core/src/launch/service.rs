@@ -3,10 +3,11 @@
 //! launch slot, so a retry is never throttled.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+use launcher_shared::recent::Join;
 use launcher_shared::{AppError, AppResult, ErrorCode, GameEvent, GameStartAction, GameState, Text};
 
 use super::alive::{game_open, game_processes};
@@ -26,7 +27,7 @@ use crate::loaders::{ComponentInstaller, ComponentSpec};
 use crate::lock::{Coordinator, path_key};
 use crate::minecraft::InstallProgress;
 use crate::minecraft::assets::{AssetIndex, index_path};
-use crate::minecraft::command::build_command;
+use crate::minecraft::command::{LaunchOptions, build_command};
 use crate::minecraft::platform::GamePlatform;
 use crate::minecraft::version::{VersionInfo, load_merged};
 use crate::net::downloader::Downloader;
@@ -88,6 +89,31 @@ pub struct LaunchRequest {
     pub allow_duplicate: bool,
     /// Start although a game runs and less memory is free than this one asks (the user confirmed).
     pub allow_low_memory: bool,
+    /// Go straight into this server or world, this launch only (the build's own server aside).
+    pub join: Option<Join>,
+}
+
+/// `options` going where `join` asks: a server instead of the build's own, or a world of the
+/// game folder (none then); a world that is not one of its folders leaves them as they are.
+fn apply_join(options: &mut LaunchOptions, join: Option<&Join>) {
+    match join {
+        Some(Join::Server { host, port }) if !host.trim().is_empty() => {
+            options.server = Some((host.trim().to_string(), *port));
+        }
+        Some(Join::World { folder }) => {
+            let plain = matches!(
+                Path::new(folder).components().collect::<Vec<_>>().as_slice(),
+                [Component::Normal(name)] if *name == folder.as_str()
+            );
+            if plain && options.game_dir.join("saves").join(folder).is_dir() {
+                options.server = None;
+                options.world = Some(folder.clone());
+            } else {
+                tracing::warn!("No world {folder:?} to open; starting the build as it is");
+            }
+        }
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -348,7 +374,8 @@ impl LaunchService {
             config: &d.config,
             limits: (d.memory)(),
         };
-        let (options, gpu) = launch_options(input);
+        let (mut options, gpu) = launch_options(input);
+        apply_join(&mut options, request.join.as_ref());
         fs::create_dir_all(&options.game_dir)
             .map_err(|e| failed(format!("{}: {e}", options.game_dir.display())))?;
         let ctx = LaunchContext {

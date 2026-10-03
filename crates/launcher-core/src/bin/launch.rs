@@ -134,6 +134,7 @@ async fn main() {
         profile_key: Some(player.clone()),
         allow_duplicate: false,
         allow_low_memory: false,
+        join: None,
     };
     let started = launcher.launch(request).await.unwrap_or_else(|e| fail(e));
     println!("started pid {} with {}", started.pid, started.java.display());

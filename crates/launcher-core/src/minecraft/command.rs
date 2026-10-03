@@ -39,6 +39,8 @@ pub struct LaunchOptions {
     pub resolution: Option<(u32, u32)>,
     pub demo: bool,
     pub server: Option<(String, u16)>,
+    /// A world (its folder in `saves/`) to open straight away, where the game can (1.20+).
+    pub world: Option<String>,
     pub disable_multiplayer: bool,
     pub disable_chat: bool,
 }
@@ -254,7 +256,8 @@ pub fn build_command(
             command.extend(arguments(game.map_or(&[][..], Vec::as_slice), platform, &features, &values));
         }
     }
-    let quick_play = opts.server.as_ref().filter(|_| supports_quick_play(json, &info, minecraft_version));
+    let quick_play_known = supports_quick_play(json, &info, minecraft_version);
+    let quick_play = opts.server.as_ref().filter(|_| quick_play_known);
     if let Some((host, port)) = &opts.server
         && quick_play.is_none()
     {
@@ -268,6 +271,9 @@ pub fn build_command(
     }
     if let Some((host, port)) = quick_play {
         command.extend(["--quickPlayMultiplayer".into(), format!("{host}:{port}")]);
+    }
+    if let Some(world) = opts.world.as_ref().filter(|_| quick_play_known) {
+        command.extend(["--quickPlaySingleplayer".into(), world.clone()]);
     }
     Ok(command)
 }
@@ -425,6 +431,32 @@ mod tests {
         assert!(joined.contains("--width 1280 --height 720"), "{joined}");
         assert!(joined.ends_with("--quickPlayMultiplayer mc.example.org:25565"), "{joined}");
         assert!(!joined.contains("--server") && !joined.contains("${quickPlayMultiplayer}"), "{joined}");
+    }
+
+    #[test]
+    fn a_world_opens_straight_away_where_the_game_can() {
+        let options = LaunchOptions { world: Some("Мій світ".into()), ..opts() };
+        let modern_cmd = build_command(
+            Path::new("MC"),
+            modern().as_object().unwrap(),
+            Some("1.21.1"),
+            &options,
+            &windows(),
+        )
+        .unwrap();
+        assert_eq!(modern_cmd[modern_cmd.len() - 2..], ["--quickPlaySingleplayer", "Мій світ"]);
+        let legacy_cmd = build_command(
+            Path::new("MC"),
+            legacy().as_object().unwrap(),
+            Some("1.12.2"),
+            &options,
+            &windows(),
+        )
+        .unwrap();
+        assert!(
+            !legacy_cmd.iter().any(|a| a.contains("Мій світ") || a.starts_with("--quickPlay")),
+            "{legacy_cmd:?}"
+        );
     }
 
     #[test]
