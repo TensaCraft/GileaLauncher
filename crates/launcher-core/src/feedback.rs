@@ -272,7 +272,11 @@ impl FeedbackService {
             st.ops_dirty = true;
             st.ops_revision += 1;
             let (level, message) = match failure {
-                Some(text) => (Level::Error, text),
+                Some(text) => {
+                    // The window shows it for a while; the log keeps it, with its detail.
+                    tracing::warn!("{} failed: {}", op.kind, plain(&text));
+                    (Level::Error, text)
+                }
                 None => (Level::Success, op.title.clone()),
             };
             self.record_activity(&mut st, ActivityEvent::Finish, level, message, Some(id), Some(op.kind))
@@ -520,6 +524,18 @@ impl Drop for OperationHandle {
     }
 }
 
+/// `text` for the log: its key and what fills it in, or its words.
+fn plain(text: &Text) -> String {
+    match text {
+        Text::Raw { text } => text.clone(),
+        Text::Key { key, params } if params.is_empty() => key.clone(),
+        Text::Key { key, params } => {
+            let filled: Vec<String> = params.iter().map(|(name, value)| format!("{name}={value}")).collect();
+            format!("{key} ({})", filled.join(", "))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -585,6 +601,42 @@ mod tests {
         assert!(ended.replaces(&begun) && !begun.replaces(&ended) && ended.replaces(&ended));
         let sent = rec.ops.lock().unwrap().last().cloned().unwrap();
         assert_eq!(sent, ended, "what is sent carries its number too");
+    }
+
+    /// What `run` logs, as the log file has it.
+    fn logged(run: impl FnOnce()) -> String {
+        #[derive(Clone, Default)]
+        struct Buffer(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Buffer {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let buffer = Buffer::default();
+        let writer = buffer.clone();
+        let subscriber =
+            tracing_subscriber::fmt().with_writer(move || writer.clone()).with_ansi(false).finish();
+        tracing::subscriber::with_default(subscriber, run);
+        String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap()
+    }
+
+    #[test]
+    fn a_failed_operation_is_logged_with_why() {
+        // The window shows the failure for a while; the log keeps it, with the detail the window
+        // does not show.
+        let (fb, _rec, _c) = setup();
+        let log = logged(|| {
+            fb.begin(spec("installation_started"))
+                .fail(Text::key("version_install_error").param("error", "D:/games/x.jar: access denied"));
+            fb.begin(spec("fine")).finish();
+        });
+        assert!(log.contains("version_install_error"), "{log}");
+        assert!(log.contains("access denied"), "{log}");
+        assert!(!log.contains("fine"), "a success is not logged: {log}");
     }
 
     #[test]
