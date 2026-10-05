@@ -55,6 +55,24 @@ pub struct PackHeld {
 }
 
 impl PackHeld {
+    /// The pack's file taken from another provider's copy of its mod (`found`): in the same
+    /// folder, under that copy's name.
+    pub fn alternative_file(&self, found: &InstallFile) -> PackFile {
+        let folder = self.path.rsplit_once('/').map_or("", |(folder, _)| folder);
+        let path =
+            if folder.is_empty() { found.filename.clone() } else { format!("{folder}/{}", found.filename) };
+        PackFile {
+            path,
+            url: found.url.clone(),
+            size: found.size,
+            hash: found.hash.clone(),
+            sha1: Some(found.hash.hex.clone()),
+            project: Some(self.project.to_string()),
+            credential: None,
+            local: None,
+        }
+    }
+
     /// The pack's file as `found` elsewhere.
     pub fn pack_file(&self, found: &InstallFile) -> PackFile {
         PackFile {
@@ -427,6 +445,7 @@ mod tests {
             [PackHeld {
                 held: Held {
                     title: "Held".into(),
+                    slug: String::new(),
                     file_name: "held.jar".into(),
                     page: Some("https://www.curseforge.com/minecraft/x/4/files/40".into()),
                     size: 5,

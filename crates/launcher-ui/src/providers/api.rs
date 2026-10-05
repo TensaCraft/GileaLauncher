@@ -70,6 +70,11 @@ struct Held<'a> {
 }
 
 /// Which of `files` are in the user's Downloads folder now.
+/// The folder the launcher looks in for files downloaded by hand.
+pub async fn downloads_folder() -> Result<Option<String>, AppError> {
+    ipc::call::<Option<String>>("downloads_folder").await
+}
+
 pub async fn held_found(files: &[HeldFile]) -> Result<Vec<bool>, AppError> {
     ipc::invoke("held_files_found", &Held { files }).await
 }

@@ -45,6 +45,8 @@ pub struct Data {
     pub blobs: HashMap<String, Vec<u8>>,
     /// Modrinth's files by SHA-1: (address, size).
     pub modrinth: HashMap<String, (String, u64)>,
+    /// Modrinth's projects: the search's hit and the project's versions, newest first.
+    pub modrinth_projects: Vec<(Value, Vec<Value>)>,
     pub seen: Vec<Seen>,
 }
 
@@ -268,6 +270,47 @@ async fn modrinth_files(State(data): State<Shared>, headers: HeaderMap, body: By
     axum::Json(Value::Object(answer)).into_response()
 }
 
+/// Records a Modrinth request (no key is wanted there).
+fn note_modrinth(data: &Shared, path: &str, query: &HashMap<String, String>, headers: &HeaderMap) {
+    let mut pairs: Vec<(String, String)> = query.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    pairs.sort();
+    data.lock().unwrap().seen.push(Seen {
+        method: "GET".into(),
+        path: path.into(),
+        query: pairs,
+        key: text(headers, "x-api-key"),
+        agent: text(headers, "user-agent"),
+        body: None,
+    });
+}
+
+/// Modrinth's `GET /v2/search`: every project the fake has (the caller picks).
+async fn modrinth_search(
+    State(data): State<Shared>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    note_modrinth(&data, "/v2/search", &query, &headers);
+    let hits: Vec<Value> =
+        data.lock().unwrap().modrinth_projects.iter().map(|(hit, _)| hit.clone()).collect();
+    axum::Json(json!({"hits": hits, "offset": 0, "limit": 10, "total_hits": hits.len()})).into_response()
+}
+
+/// Modrinth's `GET /v2/project/{id}/version`.
+async fn modrinth_versions(
+    State(data): State<Shared>,
+    Path(id): Path<String>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    note_modrinth(&data, &format!("/v2/project/{id}/version"), &query, &headers);
+    let guard = data.lock().unwrap();
+    match guard.modrinth_projects.iter().find(|(hit, _)| hit["project_id"] == json!(id)) {
+        Some((_, versions)) => axum::Json(Value::Array(versions.clone())).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 async fn blob(State(data): State<Shared>, Path(name): Path<String>, headers: HeaderMap) -> Response {
     let path = format!("/files/{name}");
     let mut guard = data.lock().unwrap();
@@ -300,6 +343,8 @@ impl FakeCurseForge {
             .route("/v1/fingerprints/432", post(fingerprints))
             .route("/files/{name}", get(blob))
             .route("/v2/version_files", post(modrinth_files))
+            .route("/v2/search", get(modrinth_search))
+            .route("/v2/project/{id}/version", get(modrinth_versions))
             .with_state(data.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -323,6 +368,21 @@ impl FakeCurseForge {
     pub fn on_modrinth(&self, name: &str, body: &[u8]) {
         let url = self.blob(&format!("mr-{name}"), body);
         self.data.lock().unwrap().modrinth.insert(sha1_hex(body), (url, body.len() as u64));
+    }
+
+    /// A Modrinth project `title` (`slug`) with one version, `version` of Minecraft 1.20.1 for
+    /// Forge, its file `file_name` of bytes `body`.
+    pub fn modrinth_project(&self, slug: &str, title: &str, version: &str, file_name: &str, body: &[u8]) {
+        let url = self.blob(&format!("mr-{file_name}"), body);
+        let id = format!("MR-{slug}");
+        let hit = json!({"project_id": id, "slug": slug, "title": title, "project_type": "mod", "author": "Someone"});
+        let versions = vec![json!({
+            "id": format!("{id}-v"), "project_id": id, "version_number": version,
+            "game_versions": ["1.20.1"], "loaders": ["forge"],
+            "files": [{"url": url, "filename": file_name, "size": body.len(), "primary": true,
+                       "hashes": {"sha1": sha1_hex(body), "sha512": "0"}}]
+        })];
+        self.data.lock().unwrap().modrinth_projects.push((hit, versions));
     }
 
     /// Publishes a mod and its files (newest first).

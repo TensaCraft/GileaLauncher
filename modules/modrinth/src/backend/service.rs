@@ -15,7 +15,7 @@ use launcher_core::launch::options::game_dir;
 use launcher_core::lock::Coordinator;
 use launcher_core::net::downloader::{DownloadProgress, DownloadTask, Downloader};
 use launcher_core::packs::engine::{PackDeps, PackKind, PackVersionMeta};
-use launcher_core::packs::flow::{self, Fetched, PackFuture, PackSource};
+use launcher_core::packs::flow::{self, Fetched, HeldChoice, PackFuture, PackSource};
 use launcher_core::providers::{ContentProvider, ProviderFuture};
 use launcher_core::storage::json::write_json_file;
 use launcher_core::storage::transaction::{ApplyHooks, FileTransaction, TransactionPlan};
@@ -649,7 +649,7 @@ impl ModrinthService {
             version_id: text(&version, "id"),
             version_number: text(&version, "version_number"),
         };
-        Ok(Fetched { pack, meta })
+        Ok(Fetched { pack, meta, skipped: Vec::new() })
     }
 }
 
@@ -661,6 +661,8 @@ impl PackSource for ModrinthService {
         _game: &'a Path,
         archive: &'a Path,
         op: &'a OperationHandle,
+        // Modrinth holds nothing back.
+        _held: &'a HeldChoice,
     ) -> PackFuture<'a, Fetched> {
         Box::pin(self.fetch_pack(project, version, archive, op))
     }

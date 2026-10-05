@@ -23,6 +23,7 @@ async fn installed(w: &World) -> (String, std::path::PathBuf) {
             version_id: "sp-1".into(),
             name: "Швидка".into(),
             icon_url: None,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -51,8 +52,11 @@ async fn an_update_swaps_the_pack_s_files_and_keeps_the_user_s() {
         (mine.version_id.as_str(), mine.newest.as_ref().map(|v| v.id.as_str())),
         ("sp-1", Some("sp-2"))
     );
-    let updated =
-        w.service.update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into() }).await.unwrap();
+    let updated = w
+        .service
+        .update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into(), ..Default::default() })
+        .await
+        .unwrap();
     assert_eq!(updated.version_number, "sp-2");
     assert_eq!(fs::read(game.join("mods/sodium-2.jar")).unwrap(), b"sodium 2");
     assert!(
@@ -112,7 +116,14 @@ async fn a_failed_update_leaves_the_build_as_it_was() {
         &mrpack_on(vec![broken], &[("overrides/config/a.txt", b"two")], "2.0", "1.21.1", "0.17.0"),
     );
     assert!(
-        w.service.update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into() }).await.is_err()
+        w.service
+            .update_pack(&PackUpdateArgs {
+                key: key.clone(),
+                version_id: "sp-2".into(),
+                ..Default::default()
+            })
+            .await
+            .is_err()
     );
     assert_eq!(fs::read(game.join("mods/sodium-1.jar")).unwrap(), b"sodium 1");
     assert_eq!(fs::read(game.join("config/a.txt")).unwrap(), b"one");
@@ -131,13 +142,20 @@ async fn a_running_game_takes_an_update_and_another_pack_is_refused() {
     let (key, game) = installed(&w).await;
     publish_pack(&w.server, "SPEEDY", "sp-2", &mrpack_of(vec![], &[], "2.0"));
     w.running.store(true, std::sync::atomic::Ordering::SeqCst);
-    let updated =
-        w.service.update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into() }).await.unwrap();
+    let updated = w
+        .service
+        .update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into(), ..Default::default() })
+        .await
+        .unwrap();
     assert_eq!(updated.version_number, "sp-2");
     assert!(!game.join("mods/sodium-1.jar").exists(), "the old version's files go");
     w.running.store(false, std::sync::atomic::Ordering::SeqCst);
     publish_pack(&w.server, "OTHER", "ot-1", &mrpack_of(vec![], &[], "1.0"));
-    let other = w.service.update_pack(&PackUpdateArgs { key, version_id: "ot-1".into() }).await.unwrap_err();
+    let other = w
+        .service
+        .update_pack(&PackUpdateArgs { key, version_id: "ot-1".into(), ..Default::default() })
+        .await
+        .unwrap_err();
     assert_eq!(other.code, ErrorCode::InvalidInput, "another project's version");
 }
 
@@ -159,7 +177,10 @@ async fn a_build_installed_with_a_first_record_updates_too() {
         "sp-2",
         &mrpack_on(vec![pack_mod(&w.server, "sodium-2.jar", b"s2")], &[], "2.0", "1.21.1", "0.17.0"),
     );
-    w.service.update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into() }).await.unwrap();
+    w.service
+        .update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into(), ..Default::default() })
+        .await
+        .unwrap();
     assert!(game.join("mods/sodium-2.jar").is_file() && !game.join("mods/old.jar").exists());
     assert_eq!(w.versions.get(&key).unwrap().loader_version.as_deref(), Some("0.17.0"));
 }
@@ -191,7 +212,14 @@ async fn an_interrupted_commit_is_finished_by_the_next_update() {
     broken["hashes"] = json!({"sha512": sha512(b"something else")});
     publish_pack(&w.server, "SPEEDY", "sp-3", &mrpack_of(vec![broken], &[], "3.0"));
     assert!(
-        w.service.update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-3".into() }).await.is_err()
+        w.service
+            .update_pack(&PackUpdateArgs {
+                key: key.clone(),
+                version_id: "sp-3".into(),
+                ..Default::default()
+            })
+            .await
+            .is_err()
     );
     assert_eq!(
         w.versions.get(&key).unwrap().options["modrinthVersionId"],
@@ -255,7 +283,10 @@ async fn a_swap_cut_short_is_undone_before_the_next_update_reads_the_record() {
     cut_short(&game, &key, "applying");
     let v3 = mrpack_of(vec![pack_mod(&w.server, "sodium-3.jar", b"s3")], &[], "3.0");
     publish_pack(&w.server, "SPEEDY", "sp-3", &v3);
-    w.service.update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-3".into() }).await.unwrap();
+    w.service
+        .update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-3".into(), ..Default::default() })
+        .await
+        .unwrap();
     assert!(game.join("mods/sodium-3.jar").is_file());
     for gone in ["mods/sodium-1.jar", "mods/old.jar", "mods/sodium-2.jar"] {
         assert!(!game.join(gone).exists(), "{gone}: sp-1's files go, as sp-2's swap was undone first");
@@ -271,11 +302,17 @@ async fn an_update_keeps_the_java_the_user_chose_while_minecraft_stays() {
     build.options.insert("executablePath".into(), json!("C:/my/java.exe"));
     w.versions.save(&mut build).unwrap();
     publish_pack(&w.server, "SPEEDY", "sp-2", &mrpack_on(vec![], &[], "2.0", "1.21.1", "0.17.0"));
-    w.service.update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into() }).await.unwrap();
+    w.service
+        .update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into(), ..Default::default() })
+        .await
+        .unwrap();
     assert_eq!(w.versions.get(&key).unwrap().options["executablePath"], json!("C:/my/java.exe"));
     // Another Minecraft may need another Java: the launcher's pick.
     publish_pack(&w.server, "SPEEDY", "sp-3", &mrpack_on(vec![], &[], "3.0", "1.21.4", "0.17.0"));
-    w.service.update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-3".into() }).await.unwrap();
+    w.service
+        .update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-3".into(), ..Default::default() })
+        .await
+        .unwrap();
     let build = w.versions.get(&key).unwrap();
     assert_eq!(build.version.as_deref(), Some("1.21.4"));
     assert_eq!(build.options["executablePath"], json!("java-for-1.21.4"));
@@ -290,7 +327,10 @@ async fn update_to(
     entries: &[(&str, &[u8])],
 ) -> launcher_shared::provider::PackUpdated {
     publish_pack(&w.server, "SPEEDY", vid, &mrpack_of(files, entries, vid));
-    w.service.update_pack(&PackUpdateArgs { key: key.into(), version_id: vid.into() }).await.unwrap()
+    w.service
+        .update_pack(&PackUpdateArgs { key: key.into(), version_id: vid.into(), ..Default::default() })
+        .await
+        .unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -357,6 +397,7 @@ async fn a_pack_update_never_touches_worlds() {
             version_id: "sp-1".into(),
             name: "Небо".into(),
             icon_url: None,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -435,7 +476,7 @@ async fn a_second_copy_found_by_its_mod_id_refuses_the_update() {
     publish_pack(&w.server, "SPEEDY", "sp-2", &mrpack_of(files, &[], "sp-2"));
     let err = w
         .service
-        .update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into() })
+        .update_pack(&PackUpdateArgs { key: key.clone(), version_id: "sp-2".into(), ..Default::default() })
         .await
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::ContentConflict);

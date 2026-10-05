@@ -12,7 +12,7 @@ use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{Button, Dialog, DialogFooter, Field, LatestRequest, Select, SelectOption, Variant, use_toasts};
 
-use super::held::HeldDialog;
+use super::held::{HeldDialog, HeldGoOn, use_skipped_held};
 use super::{api, describe, open_page};
 
 /// What the providers said of their modpack builds, by build key; and the builds updating now.
@@ -134,13 +134,22 @@ pub fn PackUpdateDialog(
     // Files to download by hand before the update can go on, and the update that waits on them.
     let held = RwSignal::new(Vec::<HeldFile>::new());
     let waiting = StoredValue::new(None::<(ProviderInfo, PackUpdateArgs)>);
+    let skipped = use_skipped_held();
+    let store = crate::store::use_store();
     let run = Callback::new(move |(provider, args): (ProviderInfo, PackUpdateArgs)| {
         updates().set_updating(&args.key, true);
         spawn_local(async move {
             let answer = api::update_modpack(&provider.id, &args).await;
             updates().set_updating(&args.key, false);
             match answer {
-                Ok(_) => load(std::slice::from_ref(&provider)),
+                Ok(done) => {
+                    let name = store
+                        .builds
+                        .with_untracked(|b| b.iter().find(|b| b.key == done.key).map(|b| b.name.clone()))
+                        .unwrap_or_default();
+                    skipped.note(provider.clone(), done.key, name, done.skipped);
+                    load(std::slice::from_ref(&provider))
+                }
                 Err(e) if !held_files(&e).is_empty() => {
                     let said = describe(i18n, &provider, &e);
                     waiting.try_set_value(Some((provider, args)));
@@ -153,9 +162,11 @@ pub fn PackUpdateDialog(
             }
         });
     });
-    let go_on = Callback::new(move |()| {
-        if let Some(waits) = waiting.try_update_value(Option::take).flatten() {
-            run.run(waits);
+    let go_on = Callback::new(move |how: HeldGoOn| {
+        if let Some((provider, mut args)) = waiting.try_update_value(Option::take).flatten() {
+            args.replace_held = how.replace;
+            args.skip_held = how.skip;
+            run.run((provider, args));
         }
     });
     let open_held = Callback::new(move |url: String| {
@@ -170,7 +181,11 @@ pub fn PackUpdateDialog(
     let update = move || {
         // Taken now: the page may be gone when the update ends.
         let Some((provider, build)) = target.get_untracked() else { return };
-        let args = PackUpdateArgs { key: build.key.clone(), version_id: picked.get_untracked() };
+        let args = PackUpdateArgs {
+            key: build.key.clone(),
+            version_id: picked.get_untracked(),
+            ..Default::default()
+        };
         open.set(false);
         run.run((provider, args));
     };

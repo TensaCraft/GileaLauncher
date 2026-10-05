@@ -206,6 +206,24 @@ pub struct HeldFile {
     pub url: Option<String>,
     pub size: u64,
     pub sha1: String,
+    /// The same mod on another provider, offered in its place (not the same bytes).
+    #[serde(default)]
+    pub alternative: Option<HeldAlternative>,
+    /// The build's folder it goes in (`mods`, `resourcepacks`…); empty when not known.
+    #[serde(default)]
+    pub folder: String,
+}
+
+/// A held file's mod as another provider has it, for the same game and loader.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeldAlternative {
+    /// The provider's name, as shown.
+    pub provider: String,
+    pub title: String,
+    pub version: String,
+    pub file_name: String,
+    /// Its page there.
+    pub url: Option<String>,
 }
 
 impl PlanDto {
@@ -599,13 +617,19 @@ pub fn newer_pack_version(
 }
 
 /// `install_modpack`: a new build from a modpack version.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackInstallArgs {
     pub project_id: String,
     pub version_id: String,
     pub name: String,
     #[serde(default)]
     pub icon_url: Option<String>,
+    /// Held files (by SHA-1) taken from their alternative instead.
+    #[serde(default)]
+    pub replace_held: Vec<String>,
+    /// Goes on without the held files still missing: the answer names them.
+    #[serde(default)]
+    pub skip_held: bool,
 }
 
 /// A build a provider installed from a modpack, with the newest version when it is newer.
@@ -620,10 +644,16 @@ pub struct ModpackBuild {
 }
 
 /// `update_modpack`: build `key` to modpack version `version_id`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackUpdateArgs {
     pub key: String,
     pub version_id: String,
+    /// Held files (by SHA-1) taken from their alternative instead.
+    #[serde(default)]
+    pub replace_held: Vec<String>,
+    /// Goes on without the held files still missing: the answer names them.
+    #[serde(default)]
+    pub skip_held: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -634,12 +664,18 @@ pub struct PackUpdated {
     /// build, under `.launcher/pack-backups/`).
     #[serde(default)]
     pub backups: Vec<String>,
+    /// Held files left out (`skip_held`): the player adds them by hand.
+    #[serde(default)]
+    pub skipped: Vec<HeldFile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackInstalled {
     pub key: String,
     pub name: String,
+    /// Held files left out (`skip_held`): the player adds them by hand.
+    #[serde(default)]
+    pub skipped: Vec<HeldFile>,
 }
 
 /// The build's mod loader as providers name it: the first of fabric, neoforge, forge and quilt in
@@ -1145,6 +1181,14 @@ mod tests {
             url: Some("https://www.curseforge.com/minecraft/mc-mods/held/files/7".into()),
             size: 5,
             sha1: "b".repeat(40),
+            alternative: Some(HeldAlternative {
+                provider: "Modrinth".into(),
+                title: "Held Mod".into(),
+                version: "2.0".into(),
+                file_name: "held-2.jar".into(),
+                url: Some("https://modrinth.com/mod/held".into()),
+            }),
+            folder: "mods".into(),
         }];
         let error = held_error(&held);
         assert_eq!(error.code, ErrorCode::ProviderFilesHeld);

@@ -105,7 +105,9 @@ impl MockModrinth {
     /// `held_files_found`: the user "downloads" the files after a few looks.
     pub fn held_found(&mut self, count: usize) -> Vec<bool> {
         self.looks += 1;
-        vec![self.downloaded(); count]
+        // `?held=wait`: never, so the dialog stays to look at.
+        let wait = crate::mock::query_value("held").as_deref() == Some("wait");
+        vec![self.downloaded() && !wait; count]
     }
 
     fn downloaded(&self) -> bool {
@@ -177,6 +179,8 @@ impl MockModrinth {
                         ),
                         size: 1,
                         sha1: "0".repeat(40),
+                        alternative: None,
+                        folder: "mods".into(),
                     }),
                 }),
                 "mock-reeses" => plan.blocking.push(PlanIssue {
@@ -266,15 +270,42 @@ impl MockModrinth {
     /// A new Fabric build for the version's newest game version, as the backend makes one.
     fn install_pack(&mut self, args: &PackInstallArgs) -> Result<PackInstalled, AppError> {
         // A pack with a file its author keeps from other apps, until the user downloads it by hand.
-        if args.project_id == "mock-adrenaline" && !self.downloaded() {
-            return Err(launcher_shared::provider::held_error(&[launcher_shared::provider::HeldFile {
+        let held = [
+            launcher_shared::provider::HeldFile {
                 title: "Entity Culling".into(),
                 file_name: "entityculling.jar".into(),
                 url: Some("https://www.curseforge.com/minecraft/mc-mods/entityculling/files/1".into()),
                 size: 1,
                 sha1: "0".repeat(40),
-            }]));
+                alternative: Some(launcher_shared::provider::HeldAlternative {
+                    provider: "Modrinth".into(),
+                    title: "Entity Culling".into(),
+                    version: "1.7.2".into(),
+                    file_name: "entityculling-fabric-1.7.2.jar".into(),
+                    url: Some("https://modrinth.com/mod/entityculling".into()),
+                }),
+                folder: "mods".into(),
+            },
+            launcher_shared::provider::HeldFile {
+                title: "Create: Industrialized Architecture".into(),
+                file_name: "i_architecture-0.1.1b.jar".into(),
+                url: Some(
+                    "https://www.curseforge.com/minecraft/mc-mods/industrialized-architecture/files/2".into(),
+                ),
+                size: 2,
+                sha1: "1".repeat(40),
+                alternative: None,
+                folder: "mods".into(),
+            },
+        ];
+        let missing: Vec<_> = held.iter().filter(|h| !args.replace_held.contains(&h.sha1)).cloned().collect();
+        // A pack with files their authors keep from other apps, until the user downloads them by
+        // hand (`?held=wait`: never), takes them from elsewhere or leaves them out.
+        let waits = !self.downloaded() || crate::mock::query_value("held").as_deref() == Some("wait");
+        if args.project_id == "mock-adrenaline" && waits && !missing.is_empty() && !args.skip_held {
+            return Err(launcher_shared::provider::held_error(&missing));
         }
+        let skipped = if args.project_id == "mock-adrenaline" && waits { missing } else { Vec::new() };
         let version = Self::pack_versions(&PackArgs { project_id: args.project_id.clone() })
             .into_iter()
             .find(|v| v.id == args.version_id)
@@ -286,7 +317,7 @@ impl MockModrinth {
         toast(Level::Success, Text::key("version_install_success").param("version", &build.name));
         drop(builds);
         self.packs.insert(build.key.clone(), (args.project_id.clone(), args.version_id.clone()));
-        Ok(PackInstalled { key: build.key, name: build.name })
+        Ok(PackInstalled { key: build.key, name: build.name, skipped })
     }
 
     /// The builds installed from a preview modpack, with the pack's newest version when newer.
@@ -331,7 +362,12 @@ impl MockModrinth {
                 .param("name", name.unwrap_or_default())
                 .param("version", &version.version_number),
         );
-        Ok(PackUpdated { key: args.key.clone(), version_number: version.version_number, backups: Vec::new() })
+        Ok(PackUpdated {
+            key: args.key.clone(),
+            version_number: version.version_number,
+            backups: Vec::new(),
+            skipped: Vec::new(),
+        })
     }
 
     /// The Installed mock's Modrinth files (see `mock_content`) — Sodium with a newer version — and

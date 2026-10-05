@@ -45,7 +45,7 @@ fn query_flag(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn query_value(name: &str) -> Option<String> {
+pub fn query_value(name: &str) -> Option<String> {
     let search = web_sys::window()?.location().search().ok()?;
     search.trim_start_matches('?').split('&').find_map(|pair| {
         let (k, v) = pair.split_once('=')?;
@@ -446,6 +446,7 @@ pub fn install() {
                 .with_param("available", "9"))
         }
         "open_path" | "open_url" => Ok(Value::Null),
+        "downloads_folder" => to_value(Some("C:\\Users\\Player\\Downloads")),
         "window_control" => Ok(Value::Bool(false)),
         "app_quit" => Ok(Value::Null),
         #[cfg(feature = "mod-modrinth")]

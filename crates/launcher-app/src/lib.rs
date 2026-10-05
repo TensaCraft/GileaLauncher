@@ -241,6 +241,7 @@ pub fn run() -> i32 {
             provider_commands::provider_modpack_builds,
             provider_commands::provider_update_modpack,
             provider_commands::held_files_found,
+            provider_commands::downloads_folder,
             commands::app_restart,
             commands::app_quit,
             commands::window_control,

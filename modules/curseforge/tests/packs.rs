@@ -4,7 +4,9 @@ use std::fs;
 
 use launcher_core::launch::options::game_dir;
 use launcher_shared::ErrorCode;
-use launcher_shared::provider::{HeldFile, PackArgs, PackInstallArgs, PackUpdateArgs, PacksArgs, held_files};
+use launcher_shared::provider::{
+    HeldAlternative, HeldFile, PackArgs, PackInstallArgs, PackUpdateArgs, PacksArgs, held_files,
+};
 use serde_json::{Value, json};
 use support::*;
 
@@ -44,6 +46,8 @@ fn args(version: u64) -> PackInstallArgs {
         version_id: version.to_string(),
         name: "Велика".into(),
         icon_url: None,
+        replace_held: Vec::new(),
+        skip_held: false,
     }
 }
 
@@ -129,6 +133,8 @@ async fn a_held_file_found_nowhere_is_named_to_download_by_hand_and_leaves_no_bu
             url: Some("https://www.curseforge.com/minecraft/mc-mods/held-mod/files/4001".into()),
             size: jar.len() as u64,
             sha1: sha1_hex(&jar),
+            alternative: None,
+            folder: "mods".into(),
         }]
     );
     assert_eq!(folders(&w), 0, "the claimed folder goes");
@@ -174,6 +180,78 @@ async fn a_held_file_modrinth_has_comes_from_modrinth_without_the_key() {
     assert_eq!(from_modrinth.key, None, "the key goes to CurseForge only");
     let asked = w.server.seen().into_iter().find(|s| s.path == "/v2/version_files").unwrap();
     assert_eq!(asked.body.unwrap(), json!({"hashes": [sha1_hex(&jar)], "algorithm": "sha1"}));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_file_names_the_same_mod_modrinth_has_for_the_pack_s_game() {
+    let w = world().await;
+    let jar = pack_with_a_held_file(&w);
+    w.server.modrinth_project("held-mod", "Held Mod", "2.0", "held-mr-2.jar", b"held from modrinth");
+    let e = w.service.install_pack(&args(3001)).await.unwrap_err();
+    let held = held_files(&e);
+    assert_eq!(held[0].sha1, sha1_hex(&jar));
+    assert_eq!(
+        held[0].alternative,
+        Some(HeldAlternative {
+            provider: "Modrinth".into(),
+            title: "Held Mod".into(),
+            version: "2.0".into(),
+            file_name: "held-mr-2.jar".into(),
+            url: Some("https://modrinth.com/mod/held-mod".into()),
+        })
+    );
+    let asked = w.server.seen().into_iter().find(|s| s.path == "/v2/search").unwrap();
+    let facets = asked.query.iter().find(|(k, _)| k == "facets").map(|(_, v)| v.clone()).unwrap();
+    assert!(
+        facets.contains("versions:1.20.1") && facets.contains("categories:forge"),
+        "for the pack's game and loader: {facets}"
+    );
+    let versions = w.server.seen().into_iter().find(|s| s.path == "/v2/project/MR-held-mod/version").unwrap();
+    assert!(versions.query.iter().any(|(k, v)| k == "game_versions" && v.contains("1.20.1")), "{versions:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_look_alike_name_is_no_alternative() {
+    let w = world().await;
+    pack_with_a_held_file(&w);
+    w.server.modrinth_project("held-mod-extras", "Held Mod Extras", "1.0", "extras.jar", b"other");
+    let e = w.service.install_pack(&args(3001)).await.unwrap_err();
+    assert_eq!(held_files(&e)[0].alternative, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_file_is_taken_from_its_alternative_when_asked() {
+    let w = world().await;
+    let jar = pack_with_a_held_file(&w);
+    w.server.modrinth_project("held-mod", "Held Mod", "2.0", "held-mr-2.jar", b"held from modrinth");
+    let mut with = args(3001);
+    with.replace_held = vec![sha1_hex(&jar)];
+    let done = w.service.install_pack(&with).await.unwrap();
+    assert!(done.skipped.is_empty());
+    let build = w.versions.get(&done.key).unwrap();
+    let game = game_dir(&build, w.versions.minecraft_dir());
+    assert_eq!(fs::read(game.join("mods/held-mr-2.jar")).unwrap(), b"held from modrinth");
+    assert!(!game.join("mods/held.jar").exists());
+    let from_modrinth = w.server.seen().into_iter().find(|s| s.path == "/files/mr-held-mr-2.jar").unwrap();
+    assert_eq!(from_modrinth.key, None, "the key goes to CurseForge only");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_skipped_held_file_leaves_the_build_without_it_and_is_named() {
+    let w = world().await;
+    let jar = pack_with_a_held_file(&w);
+    let mut without = args(3001);
+    without.skip_held = true;
+    let done = w.service.install_pack(&without).await.unwrap();
+    assert_eq!(done.skipped.len(), 1);
+    assert_eq!(
+        (done.skipped[0].file_name.as_str(), done.skipped[0].sha1.clone()),
+        ("held.jar", sha1_hex(&jar))
+    );
+    let build = w.versions.get(&done.key).unwrap();
+    let game = game_dir(&build, w.versions.minecraft_dir());
+    assert!(game.join("mods/create-1.jar").exists(), "the rest is installed");
+    assert!(!game.join("mods/held.jar").exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -235,8 +313,11 @@ async fn an_update_swaps_the_pack_s_files_and_keeps_the_player_s() {
         (mine.version_id.as_str(), mine.newest.as_ref().map(|v| v.id.as_str())),
         ("3001", Some("3002"))
     );
-    let updated =
-        w.service.update_pack(&PackUpdateArgs { key: key.clone(), version_id: "3002".into() }).await.unwrap();
+    let updated = w
+        .service
+        .update_pack(&PackUpdateArgs { key: key.clone(), version_id: "3002".into(), ..Default::default() })
+        .await
+        .unwrap();
     assert_eq!(updated.version_number, "3002");
     assert_eq!(fs::read(game.join("mods/create-2.jar")).unwrap(), mod_jar("create"));
     assert!(!game.join("mods/create-1.jar").exists() && !game.join("resourcepacks/faithful.zip").exists());
@@ -263,7 +344,10 @@ async fn a_pack_mod_the_player_has_from_curseforge_is_not_added_again() {
     let zip = pack_zip(&[(100, 1001), (200, 2001), (500, 5002)], &[], "2.0");
     let v1 = w.server.data.lock().unwrap().files[&PACK][0].clone();
     publish_pack(&w.server, PACK, vec![pack_file(&w.server, 3002, PACK, &zip, "1.20.1", "Forge"), v1]);
-    w.service.update_pack(&PackUpdateArgs { key, version_id: "3002".into() }).await.unwrap();
+    w.service
+        .update_pack(&PackUpdateArgs { key, version_id: "3002".into(), ..Default::default() })
+        .await
+        .unwrap();
     assert!(!game.join("mods/jei-2.jar").exists(), "the player has JEI already");
     assert_eq!(fs::read(game.join("mods/my-jei.jar")).unwrap(), jei_1);
 }
@@ -275,7 +359,11 @@ async fn a_build_of_another_provider_s_pack_is_not_curseforge_s() {
     fs::create_dir_all(game.join(".launcher")).unwrap();
     fs::write(game.join(".launcher/modrinth-pack.json"), b"{}").unwrap();
     assert!(w.service.modpack_builds().await.unwrap().is_empty());
-    let e = w.service.update_pack(&PackUpdateArgs { key, version_id: "3001".into() }).await.unwrap_err();
+    let e = w
+        .service
+        .update_pack(&PackUpdateArgs { key, version_id: "3001".into(), ..Default::default() })
+        .await
+        .unwrap_err();
     assert_eq!(e.code, ErrorCode::InvalidInput);
 }
 
@@ -291,7 +379,11 @@ async fn an_update_keeps_a_held_file_the_build_has_without_asking_for_it_again()
     let v1 = w.server.data.lock().unwrap().files[&PACK][0].clone();
     publish_pack(&w.server, PACK, vec![pack_file(&w.server, 3002, PACK, &zip, "1.20.1", "Forge"), v1]);
     w.service
-        .update_pack(&PackUpdateArgs { key: done.key.clone(), version_id: "3002".into() })
+        .update_pack(&PackUpdateArgs {
+            key: done.key.clone(),
+            version_id: "3002".into(),
+            ..Default::default()
+        })
         .await
         .unwrap();
     let game = game_dir(&w.versions.get(&done.key).unwrap(), w.versions.minecraft_dir());

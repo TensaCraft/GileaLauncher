@@ -59,6 +59,7 @@ Then open `http://127.0.0.1:1420`:
 - `?setup=1` — the first-run wizard;
 - `?media=http://127.0.0.1:8000` — the wizard's pictures from another folder (one not pushed yet);
 - `?lang=en_US`, `?recent=0`, `?cards=bar`, `?sidebar=full` — start from other settings;
+- `?held=wait` — a modpack's files to download by hand (Adrenaline) never turn up, so their dialog stays;
 - `?builds=none` — no builds.
 
 ## Profiles

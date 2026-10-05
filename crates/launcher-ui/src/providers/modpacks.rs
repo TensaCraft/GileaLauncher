@@ -20,7 +20,7 @@ use ui_kit::{
 };
 
 use super::cards::{ListSkeleton, Pager, ProjectRow};
-use super::held::HeldDialog;
+use super::held::{HeldDialog, HeldGoOn, use_skipped_held};
 use super::{api, describe, open_page};
 
 /// The original's pause after typing.
@@ -223,12 +223,14 @@ fn PackInstallDialog(
     // Files to download by hand before the install can go on, and the install that waits on them.
     let held = RwSignal::new(Vec::<HeldFile>::new());
     let waiting = StoredValue::new(None::<PackInstallArgs>);
+    let skipped = use_skipped_held();
     let run = Callback::new(move |args: PackInstallArgs| {
         // Taken now: the page may be gone when the install ends.
         let Some(provider) = info.try_get_value() else { return };
         spawn_local(async move {
             match api::install_modpack(&provider.id, &args).await {
-                Ok(_) => {
+                Ok(done) => {
+                    skipped.note(provider.clone(), done.key, done.name, done.skipped);
                     let _ = navigate.try_with_value(|go| go("/builds", Default::default()));
                 }
                 Err(e) if !held_files(&e).is_empty() => {
@@ -242,8 +244,10 @@ fn PackInstallDialog(
             }
         });
     });
-    let go_on = Callback::new(move |()| {
-        if let Some(args) = waiting.try_update_value(Option::take).flatten() {
+    let go_on = Callback::new(move |how: HeldGoOn| {
+        if let Some(mut args) = waiting.try_update_value(Option::take).flatten() {
+            args.replace_held = how.replace;
+            args.skip_held = how.skip;
             run.run(args);
         }
     });
@@ -264,6 +268,7 @@ fn PackInstallDialog(
                     version_id: picked.get_untracked(),
                     name,
                     icon_url: h.icon_url,
+                    ..Default::default()
                 });
             }
         }

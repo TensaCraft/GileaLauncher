@@ -137,6 +137,7 @@ async fn a_modrinth_pack_s_files_are_modrinth_s_own() {
             version_id: "sp-1".into(),
             name: "Швидка".into(),
             icon_url: None,
+            ..Default::default()
         })
         .await
         .unwrap();

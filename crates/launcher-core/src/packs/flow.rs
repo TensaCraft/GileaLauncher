@@ -10,7 +10,7 @@ use std::pin::Pin;
 
 use futures_util::stream::{self, StreamExt};
 use launcher_shared::provider::{
-    ModpackBuild, PackInstallArgs, PackInstalled, PackUpdateArgs, PackUpdated, PackVersion,
+    HeldFile, ModpackBuild, PackInstallArgs, PackInstalled, PackUpdateArgs, PackUpdated, PackVersion,
     newer_pack_version,
 };
 use launcher_shared::{AppError, AppResult, ErrorCode, Text};
@@ -29,6 +29,28 @@ pub type PackFuture<'a, T> = Pin<Box<dyn Future<Output = AppResult<T>> + Send + 
 pub struct Fetched {
     pub pack: Pack,
     pub meta: PackVersionMeta,
+    /// Held files left out, as `HeldChoice::skip` asked.
+    pub skipped: Vec<HeldFile>,
+}
+
+/// What to do with the files a provider holds back (`ErrorCode::ProviderFilesHeld`) that are
+/// not found: take some from their alternative elsewhere, leave the rest out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeldChoice {
+    /// Held files (by SHA-1) taken from their alternative.
+    pub replace: Vec<String>,
+    /// The ones still missing are left out rather than asked for.
+    pub skip: bool,
+}
+
+impl HeldChoice {
+    pub fn of_install(args: &PackInstallArgs) -> HeldChoice {
+        HeldChoice { replace: args.replace_held.clone(), skip: args.skip_held }
+    }
+
+    pub fn of_update(args: &PackUpdateArgs) -> HeldChoice {
+        HeldChoice { replace: args.replace_held.clone(), skip: args.skip_held }
+    }
 }
 
 /// What the engine asks of a provider's modpacks.
@@ -43,6 +65,7 @@ pub trait PackSource: Send + Sync {
         game: &'a Path,
         archive: &'a Path,
         op: &'a OperationHandle,
+        held: &'a HeldChoice,
     ) -> PackFuture<'a, Fetched>;
 
     /// The pack's versions, newest first.
@@ -75,10 +98,10 @@ pub async fn install_pack(
         .status(Text::key("modpack_installing").param("name", &name));
     let op = deps.feedback.begin(spec);
     match fill_new(deps, kind, source, &game, &id, &name, args, &op).await {
-        Ok(build) => {
+        Ok((build, skipped)) => {
             op.finish();
             deps.feedback.success(Text::key("version_install_success").param("version", &name));
-            Ok(PackInstalled { key: build.key, name })
+            Ok(PackInstalled { key: build.key, name, skipped })
         }
         Err(e) => {
             if let Err(gone) = fs::remove_dir_all(&game) {
@@ -105,12 +128,15 @@ async fn fill_new(
     name: &str,
     args: &PackInstallArgs,
     op: &OperationHandle,
-) -> AppResult<Build> {
+) -> AppResult<(Build, Vec<HeldFile>)> {
     let _lease = deps.instances.try_acquire(game, kind.lease)?;
     let archive = game.join(kind.archive);
-    let result = match source.fetch(&args.project_id, &args.version_id, game, &archive, op).await {
-        Ok(Fetched { pack, meta }) => {
-            engine::fill(deps, kind, game, id, name, &meta, args.icon_url.clone(), &archive, &pack, op).await
+    let held = HeldChoice::of_install(args);
+    let result = match source.fetch(&args.project_id, &args.version_id, game, &archive, op, &held).await {
+        Ok(Fetched { pack, meta, skipped }) => {
+            engine::fill(deps, kind, game, id, name, &meta, args.icon_url.clone(), &archive, &pack, op)
+                .await
+                .map(|build| (build, skipped))
         }
         Err(e) => Err(e),
     };
@@ -227,7 +253,7 @@ pub async fn update_pack(
         .status(Text::key("modpack_updating").param("name", &build.name));
     let op = deps.feedback.begin(spec);
     match refill(deps, kind, source, &build, &game, &record, args, &op).await {
-        Ok(Swapped { number, backups, folder }) => {
+        Ok((Swapped { number, backups, folder }, skipped)) => {
             op.finish();
             let said = if backups.is_empty() {
                 Text::key("modpack_updated")
@@ -237,7 +263,7 @@ pub async fn update_pack(
                     .param("folder", folder)
             };
             deps.feedback.success(said.param("name", &build.name).param("version", &number));
-            Ok(PackUpdated { key: build.key.clone(), version_number: number, backups })
+            Ok(PackUpdated { key: build.key.clone(), version_number: number, backups, skipped })
         }
         Err(e) => {
             op.fail(
@@ -261,13 +287,16 @@ async fn refill(
     record: &PackRecord,
     args: &PackUpdateArgs,
     op: &OperationHandle,
-) -> AppResult<Swapped> {
+) -> AppResult<(Swapped, Vec<HeldFile>)> {
     let archive = game.join(kind.archive);
+    let held = HeldChoice::of_update(args);
     let result = async {
-        let Fetched { pack, meta } =
-            source.fetch(&record.project_id, &args.version_id, game, &archive, op).await?;
+        let Fetched { pack, meta, skipped } =
+            source.fetch(&record.project_id, &args.version_id, game, &archive, op, &held).await?;
         let players = source.players(game, &record.managed_files).await?;
-        engine::update(deps, kind, build, game, record, &meta, &archive, &pack, players, op).await
+        engine::update(deps, kind, build, game, record, &meta, &archive, &pack, players, op)
+            .await
+            .map(|swapped| (swapped, skipped))
     }
     .await;
     let _ = fs::remove_file(&archive);
@@ -296,6 +325,7 @@ mod tests {
             _: &'a Path,
             _: &'a Path,
             _: &'a OperationHandle,
+            _: &'a HeldChoice,
         ) -> PackFuture<'a, Fetched> {
             unimplemented!()
         }

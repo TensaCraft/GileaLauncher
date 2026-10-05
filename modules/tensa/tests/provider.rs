@@ -91,6 +91,7 @@ async fn installing_a_modpack_makes_a_server_build() {
         version_id: "aero".into(),
         name: "My Aero".into(),
         icon_url: None,
+        ..Default::default()
     };
     let installed = provider.install_modpack(args).await.unwrap();
     assert_eq!(installed.name, "My Aero");

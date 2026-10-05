@@ -78,6 +78,7 @@ pub fn App() -> impl IntoView {
     provide_context_menu();
     provide_header();
     provide_support();
+    crate::providers::held::provide_skipped_held();
     let build_actions = use_build_actions();
     provide_launch_flow();
     crate::recent::provide_recent();
@@ -231,6 +232,7 @@ pub fn App() -> impl IntoView {
             <BrowserWaitDialog />
             <LaunchDialogs />
             <BuildDialogsHost />
+            <crate::providers::held::SkippedHeldDialog />
         </Router>
     }
 }

@@ -10,7 +10,7 @@ use launcher_core::feedback::OperationHandle;
 use launcher_core::net::downloader::{DownloadProgress, DownloadTask, HashKind, hash_file};
 use launcher_core::packs::Limits;
 use launcher_core::packs::engine::{PackKind, PackVersionMeta};
-use launcher_core::packs::flow::{self, Fetched, PackFuture, PackSource};
+use launcher_core::packs::flow::{self, Fetched, HeldChoice, PackFuture, PackSource};
 use launcher_core::storage::atomic::rename_retrying;
 use launcher_shared::provider::{
     ModpackBuild, PACKS_LIMIT, PackArgs, PackInstallArgs, PackInstalled, PackUpdateArgs, PackUpdated,
@@ -186,6 +186,7 @@ impl CurseForgeService {
         game: &Path,
         archive: &Path,
         op: &OperationHandle,
+        choice: &HeldChoice,
     ) -> AppResult<Fetched> {
         let (project, file_id) = (id_of(project_id)?, id_of(version_id)?);
         let wanted = [file_id];
@@ -240,11 +241,35 @@ impl CurseForgeService {
         if let Some(finder) = &self.finder {
             found.extend(finder.find(&rest).await);
         }
-        let mut by_hand = Vec::new();
+        // Those found nowhere: the same mod elsewhere is offered, and taken when asked; the rest
+        // are downloaded by hand, or left out when asked.
+        let missing: Vec<&Held> =
+            held.iter().filter(|h| !found.contains_key(&h.held.sha1)).map(|h| &h.held).collect();
+        let loader = pack.loader.as_ref().map(|(kind, _)| kind.display_name().to_lowercase());
+        let alternatives = match &self.finder {
+            Some(finder) if !missing.is_empty() => {
+                finder.alternatives(&missing, &pack.minecraft, loader.as_deref()).await
+            }
+            _ => HashMap::new(),
+        };
+        let (mut by_hand, mut skipped) = (Vec::new(), Vec::new());
         for h in &held {
-            match found.get(&h.held.sha1) {
-                Some(file) => pack.files.push(h.pack_file(file)),
-                None => by_hand.push(h.held.to_dto()),
+            if let Some(file) = found.get(&h.held.sha1) {
+                pack.files.push(h.pack_file(file));
+                continue;
+            }
+            let alternative = alternatives.get(&h.held.sha1);
+            match alternative {
+                Some(other) if choice.replace.contains(&h.held.sha1) => {
+                    pack.files.push(h.alternative_file(&other.file));
+                }
+                _ => {
+                    let mut file = h.held.to_dto();
+                    file.alternative = alternative.map(|a| a.dto.clone());
+                    file.folder =
+                        h.path.rsplit_once('/').map(|(folder, _)| folder.to_string()).unwrap_or_default();
+                    if choice.skip { skipped.push(file) } else { by_hand.push(file) }
+                }
             }
         }
         if !by_hand.is_empty() {
@@ -259,7 +284,7 @@ impl CurseForgeService {
             version_id: file_id.to_string(),
             version_number: version_label(&text(&info, "name"), &text(&file, "displayName")),
         };
-        Ok(Fetched { pack, meta })
+        Ok(Fetched { pack, meta, skipped })
     }
 
     /// The CurseForge projects of the enabled mods the player put in `game` (none of the pack's
@@ -292,8 +317,9 @@ impl PackSource for CurseForgeService {
         game: &'a Path,
         archive: &'a Path,
         op: &'a OperationHandle,
+        held: &'a HeldChoice,
     ) -> PackFuture<'a, Fetched> {
-        Box::pin(self.fetch_pack(project, version, game, archive, op))
+        Box::pin(self.fetch_pack(project, version, game, archive, op, held))
     }
 
     fn versions<'a>(&'a self, project: &'a str) -> PackFuture<'a, Vec<PackVersion>> {

@@ -10,7 +10,7 @@ use launcher_core::content::held::{Wanted, find_copies};
 use launcher_core::net::api_client;
 use launcher_core::net::downloader::ExpectedHash;
 use launcher_shared::AppResult;
-use launcher_shared::provider::HeldFile;
+use launcher_shared::provider::{HeldAlternative, HeldFile};
 use reqwest::Client;
 use reqwest::header::CONTENT_TYPE;
 use serde_json::{Value, json};
@@ -36,6 +36,8 @@ pub struct Elsewhere {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Held {
     pub title: String,
+    /// Its project's slug: another provider often names the mod the same.
+    pub slug: String,
     pub file_name: String,
     pub page: Option<String>,
     pub size: u64,
@@ -59,6 +61,7 @@ impl Held {
             Some(text(project, "name")).filter(|n| !n.is_empty()).unwrap_or_else(|| text(file, "fileName"));
         Some(Held {
             title,
+            slug: text(project, "slug"),
             file_name: text(file, "fileName"),
             page: site
                 .starts_with("https://")
@@ -76,6 +79,8 @@ impl Held {
             url: self.page.clone(),
             size: self.size,
             sha1: self.sha1.clone(),
+            alternative: None,
+            folder: String::new(),
         }
     }
 
@@ -89,6 +94,25 @@ impl Held {
             from,
         }
     }
+}
+
+/// A held file's mod as Modrinth has it for the same game and loader: not the same bytes, so it
+/// is only offered, and taken when the player says so.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alternative {
+    pub dto: HeldAlternative,
+    pub file: InstallFile,
+}
+
+/// A name as names are compared: its letters and digits, lower-case.
+fn same_name(name: &str) -> String {
+    name.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// A SHA-1 as Modrinth gives it, when it is one.
+fn sha1_of(value: &Value) -> Option<String> {
+    let hex = value.as_str()?.trim().to_ascii_lowercase();
+    (hex.len() == 40 && hex.bytes().all(|b| b.is_ascii_hexdigit())).then_some(hex)
 }
 
 pub struct Finder {
@@ -141,6 +165,113 @@ impl Finder {
             }
         }
         found
+    }
+
+    /// The same mod on Modrinth for each of `held`, for Minecraft `minecraft` and loader `loader`
+    /// (Modrinth's name: `forge`, `neoforge`…), by its held file's SHA-1. Only a project of the
+    /// held one's slug or name counts; its newest version for that game.
+    pub async fn alternatives(
+        &self,
+        held: &[&Held],
+        minecraft: &str,
+        loader: Option<&str>,
+    ) -> HashMap<String, Alternative> {
+        let mut found = HashMap::new();
+        let Some(base) = self.elsewhere.modrinth.as_deref() else { return found };
+        for h in held {
+            match self.alternative(base, h, minecraft, loader).await {
+                Ok(Some(alternative)) => {
+                    found.insert(h.sha1.clone(), alternative);
+                }
+                Ok(None) => {}
+                Err(e) => tracing::warn!("Modrinth cannot be asked for {} now: {e}", h.title),
+            }
+        }
+        found
+    }
+
+    async fn alternative(
+        &self,
+        base: &str,
+        held: &Held,
+        minecraft: &str,
+        loader: Option<&str>,
+    ) -> Result<Option<Alternative>, String> {
+        let base = base.trim_end_matches('/');
+        let mut facets = vec![vec!["project_type:mod".to_string()], vec![format!("versions:{minecraft}")]];
+        if let Some(loader) = loader {
+            facets.push(vec![format!("categories:{loader}")]);
+        }
+        let facets = serde_json::to_string(&facets).map_err(|e| e.to_string())?;
+        let search = self
+            .get_json(
+                &format!("{base}/v2/search"),
+                &[("query", held.title.as_str()), ("facets", &facets), ("limit", "10")],
+            )
+            .await?;
+        let wanted = same_name(&held.title);
+        let hit = search["hits"].as_array().into_iter().flatten().find(|hit| {
+            (!held.slug.is_empty() && text(hit, "slug").eq_ignore_ascii_case(&held.slug))
+                || (!wanted.is_empty() && same_name(&text(hit, "title")) == wanted)
+        });
+        let Some(hit) = hit else { return Ok(None) };
+        let (id, slug) = (text(hit, "project_id"), text(hit, "slug"));
+        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+            return Ok(None);
+        }
+        let games = serde_json::to_string(&[minecraft]).map_err(|e| e.to_string())?;
+        let loaders = loader.map(|l| serde_json::to_string(&[l])).transpose().map_err(|e| e.to_string())?;
+        let mut query = vec![("game_versions", games.as_str())];
+        if let Some(loaders) = &loaders {
+            query.push(("loaders", loaders.as_str()));
+        }
+        let versions = self.get_json(&format!("{base}/v2/project/{id}/version"), &query).await?;
+        // Newest first: the first whose file is complete and safe.
+        for version in versions.as_array().into_iter().flatten() {
+            let fits = version["game_versions"]
+                .as_array()
+                .is_none_or(|g| g.iter().any(|v| v.as_str() == Some(minecraft)));
+            let files = version["files"].as_array().map(Vec::as_slice).unwrap_or_default();
+            let file = files.iter().find(|f| f["primary"].as_bool() == Some(true)).or(files.first());
+            let Some(file) = file.filter(|_| fits) else { continue };
+            let (url, name) = (text(file, "url"), text(file, "filename"));
+            let size = file["size"].as_u64().filter(|s| *s > 0);
+            let sha1 = sha1_of(&file["hashes"]["sha1"]);
+            let (Some(size), Some(sha1)) = (size, sha1) else { continue };
+            if !secure_url(&url)
+                || name.is_empty()
+                || name.contains(['/', '\\', '\0'])
+                || name.starts_with('.')
+            {
+                continue;
+            }
+            return Ok(Some(Alternative {
+                dto: HeldAlternative {
+                    provider: "Modrinth".into(),
+                    title: text(hit, "title"),
+                    version: text(version, "version_number"),
+                    file_name: name.clone(),
+                    url: (!slug.is_empty()).then(|| format!("https://modrinth.com/mod/{slug}")),
+                },
+                file: InstallFile {
+                    url,
+                    filename: name,
+                    size,
+                    hash: ExpectedHash::sha1(&sha1),
+                    from: Source::Elsewhere,
+                },
+            }));
+        }
+        Ok(None)
+    }
+
+    async fn get_json(&self, url: &str, query: &[(&str, &str)]) -> Result<Value, String> {
+        let url = reqwest::Url::parse_with_params(url, query).map_err(|e| e.to_string())?;
+        let response = self.client.get(url).send().await.map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("HTTP {}", response.status()));
+        }
+        serde_json::from_slice(&response.bytes().await.map_err(|e| e.to_string())?).map_err(|e| e.to_string())
     }
 
     /// Modrinth's address of each of `held` it has, by SHA-1 (`POST /v2/version_files`).

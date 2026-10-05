@@ -118,7 +118,7 @@ impl ContentProvider for ServerBuilds {
     fn install_modpack(&self, args: PackInstallArgs) -> ProviderFuture<'_, PackInstalled> {
         Box::pin(async move {
             let build = install(&self.deps, &args.project_id, &args.name).await?;
-            Ok(PackInstalled { key: build.key, name: build.name })
+            Ok(PackInstalled { key: build.key, name: build.name, skipped: Vec::new() })
         })
     }
 }

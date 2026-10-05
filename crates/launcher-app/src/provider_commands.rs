@@ -115,6 +115,12 @@ pub async fn provider_install_modpack(
     Ok(installed)
 }
 
+/// The folder the launcher looks in for files downloaded by hand (the user's Downloads).
+#[tauri::command]
+pub fn downloads_folder() -> Option<String> {
+    downloads_dir().map(|dir| dir.to_string_lossy().into_owned())
+}
+
 /// Which of `files` — downloaded by hand from their pages — are in the user's Downloads folder
 /// now (by size and SHA-1, whatever their names).
 #[tauri::command]

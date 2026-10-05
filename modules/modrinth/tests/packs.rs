@@ -38,6 +38,7 @@ fn args(name: &str) -> PackInstallArgs {
         version_id: "sp-1".into(),
         name: name.into(),
         icon_url: None,
+        ..Default::default()
     }
 }
 
