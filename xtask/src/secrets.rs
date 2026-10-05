@@ -98,6 +98,7 @@ mod tests {
                     | "xtask/src/secrets.rs"
                     | ".github/workflows/release.yml"
                     | "README.md"
+                    | "README.uk.md"
             ) || f.starts_with("docs/")
         };
         let stray: Vec<String> =

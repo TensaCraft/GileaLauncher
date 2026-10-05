@@ -1,3 +1,5 @@
+<p align="right"><b>English</b> · <a href="../uk/releasing.md">Українська</a></p>
+
 # Releasing
 
 ## Version and tag
@@ -81,4 +83,4 @@ While a release's files are uploading, the updater does not offer that release: 
 
 ## Signing
 
-The files are not signed or notarized yet. What players do on Windows (SmartScreen) and macOS (Gatekeeper) is in the [README](../README.md#installation).
+The files are not signed or notarized yet. What players do on Windows (SmartScreen) and macOS (Gatekeeper) is in the [README](../../README.md#installation).

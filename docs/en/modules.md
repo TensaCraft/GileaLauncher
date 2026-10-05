@@ -1,3 +1,5 @@
+<p align="right"><b>English</b> · <a href="../uk/modules.md">Українська</a></p>
+
 # Modules
 
 A module is an optional part of the launcher: a build includes it only when its profile asks for it. The core does not know about any particular module; it talks to all of them through two contracts. The backend implements `launcher_core::modules::Module`, the interface `ui_kit::module::UiModule`.

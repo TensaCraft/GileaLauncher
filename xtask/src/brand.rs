@@ -16,7 +16,7 @@ const ALLOWED: [&str; 8] = [
     "xtask/src/brand.rs",
     "docs/",
     "README.md",
-    "PRIVACY.md",
+    "README.uk.md",
 ];
 
 /// Whether `line` names the brand: `ualauncher` in any case, `ua://`, `--ua-`, a word that

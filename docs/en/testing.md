@@ -1,3 +1,5 @@
+<p align="right"><b>English</b> · <a href="../uk/testing.md">Українська</a></p>
+
 # Tests
 
 ```bash

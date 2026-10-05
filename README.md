@@ -1,3 +1,5 @@
+<p align="right"><b>English</b> · <a href="README.uk.md">Українська</a></p>
+
 <p align="center">
   <img src="docs/screenshots/hero.jpg" alt="GileaLauncher — a modern Minecraft launcher">
 </p>
@@ -107,9 +109,9 @@ On first launch, the setup wizard shows where settings and games will be kept, a
 - If the game crashes, click "Send report" in the error window.
 - Bugs and suggestions: [Issues](https://github.com/TensaCraft/GileaLauncher/issues).
 
-What the launcher keeps and sends: [PRIVACY.md](PRIVACY.md).
+What the launcher keeps and sends: [docs/en/privacy.md](docs/en/privacy.md).
 
-For developers: [docs/](docs/README.md).
+For developers: [docs/](docs/en/README.md).
 
 ## License
 

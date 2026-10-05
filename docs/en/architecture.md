@@ -1,3 +1,5 @@
+<p align="right"><b>English</b> · <a href="../uk/architecture.md">Українська</a></p>
+
 # Architecture
 
 ## Crates

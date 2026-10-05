@@ -1,3 +1,5 @@
+<p align="right"><b>English</b> · <a href="../uk/development.md">Українська</a></p>
+
 # Development
 
 ## Requirements
@@ -90,7 +92,7 @@ The wizard shows what a choice looks like (Home, the Play button, the sidebar) w
 
 - **Brand.** The name and brand live only in the profiles, `tauri.conf.json`, the icons, `launcher-shared/src/branding.rs` and the docs. An `xtask` test (the brand guard) checks every file of the repository.
 - **Downloads.** Every download goes through the core's one downloader, `launcher_core::net::downloader`. An `xtask` test makes sure no other code downloads by itself.
-- **Language.** Interface texts live in `assets/langs/{uk_UA,en_US}.json` and in the modules' `locales/`. Code, comments, docs and commit messages are in English.
+- **Language.** Interface texts live in `assets/langs/{uk_UA,en_US}.json` and in the modules' `locales/`. Code, comments and commit messages are in English; the docs are in English (`README.md`, `docs/en/`), with a Ukrainian copy of each (`README.uk.md`, `docs/uk/`) kept in step.
 
 ## Commits and hooks
 

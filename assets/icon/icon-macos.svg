@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- The launcher's icon, with no brand: a cube of blocks. Rendered to PNG as a 1024 x 1024
        headless Chromium screenshot with a transparent background, then turned into the app's
-       icons by `cargo xtask icons` (see docs/development.md). -->
+       icons by `cargo xtask icons` (see docs/en/development.md). -->
   <defs>
     <radialGradient id="tile" cx="0.5" cy="0.42" r="0.75"><stop offset="0" stop-color="#1c2622"/><stop offset="0.65" stop-color="#111614"/><stop offset="1" stop-color="#0a0d0c"/></radialGradient>
     <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#3fe08a" stop-opacity="0.32"/><stop offset="1" stop-color="#3fe08a" stop-opacity="0"/></radialGradient>

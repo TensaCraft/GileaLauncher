@@ -1,10 +1,12 @@
+<p align="right"><b>English</b> · <a href="../uk/privacy.md">Українська</a></p>
+
 # Privacy
 
 GileaLauncher is a Minecraft launcher that runs on your computer. It has no accounts of its own, no ads, no analytics and no tracking. This page says what it keeps, what it sends and where.
 
 ## What stays on your computer
 
-- **Settings, builds, worlds and mods** are kept in the launcher's folders (see "Where data is kept" in the [README](README.md#where-data-is-kept)).
+- **Settings, builds, worlds and mods** are kept in the launcher's folders (see "Where data is kept" in the [README](../../README.md#where-data-is-kept)).
 - **Accounts.** For a Microsoft account the launcher keeps your player name, UUID and the sign-in tokens Microsoft gives it. The tokens are encrypted, and the key sits in the same folder. This keeps them unreadable in a copied or shared file, not from someone who can use your computer account. Offline profiles keep only a name.
 - **Logs** of the launcher and of the game stay in those folders until you delete them.
 
