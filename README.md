@@ -8,6 +8,12 @@
   <a href="https://discord.com/invite/mftAjQA4Pp">Discord</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/TensaCraft/GileaLauncher/releases"><img src="https://img.shields.io/github/downloads/TensaCraft/GileaLauncher/total?label=downloads&color=2ea44f" alt="Downloads"></a>
+  <a href="https://github.com/TensaCraft/GileaLauncher/releases/latest"><img src="https://img.shields.io/github/v/release/TensaCraft/GileaLauncher?label=version" alt="Latest version"></a>
+  <a href="https://github.com/TensaCraft/GileaLauncher/stargazers"><img src="https://img.shields.io/github/stars/TensaCraft/GileaLauncher?style=flat&color=yellow" alt="Stars"></a>
+</p>
+
 ## Features
 
 - Installs any Minecraft version, plus Forge, NeoForge, Fabric and Quilt.
