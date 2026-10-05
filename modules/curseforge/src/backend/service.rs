@@ -326,7 +326,7 @@ impl CurseForgeService {
             finder: self.finder.as_ref(),
         };
         let exact = args.version_id.as_deref().and_then(|id| id.parse().ok());
-        resolver::plan(&self.api, &scope, id_of(&args.project_id)?, exact, &args.optional).await
+        resolver::plan(&self.api, &scope, id_of(&args.project_id)?, exact, &args.optional, args.alone).await
     }
 
     /// What installing `args`' project takes.

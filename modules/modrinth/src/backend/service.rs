@@ -214,7 +214,7 @@ impl ModrinthService {
         };
         let scope =
             resolver::Target { kind: args.kind, loader: target.loader, game_version, inventory: &inventory };
-        resolver::plan(&self.api, &scope, project, exact, &args.optional).await
+        resolver::plan(&self.api, &scope, project, exact, &args.optional, args.alone).await
     }
 
     /// What installing `args`' project takes.

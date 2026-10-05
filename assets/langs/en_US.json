@@ -611,6 +611,8 @@
   "installed": "Installed",
   "update_modrinth_content": "Update",
   "modrinth_dependencies_install": "Install selected",
+  "provider_install_alone": "Without dependencies",
+  "provider_install_alone_hint": "Install only this mod, regardless of its dependencies",
   "modrinth_dependencies_to_install": "Will install",
   "modrinth_dependencies_to_replace": "Will replace",
   "modrinth_dependencies_satisfied": "Already installed",

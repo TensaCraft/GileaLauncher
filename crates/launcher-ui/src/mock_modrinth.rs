@@ -154,8 +154,10 @@ impl MockModrinth {
         let mut add = |i: PlanItem| {
             if i.action == Action::Satisfied { plan.satisfied.push(i) } else { plan.install.push(i) }
         };
+        // Installed alone, its dependencies are not looked at: its own held file still is.
         if args.kind == ContentKind::Mods {
             match args.project_id.as_str() {
+                _ if args.alone && args.project_id != "mock-entityculling" => {}
                 "mock-sodium-extra" => {
                     add(item("mock-sodium", "Sodium"));
                     add(item("mock-fabric-api", "Fabric API"));
@@ -173,7 +175,7 @@ impl MockModrinth {
                     blocking: true,
                     held: Some(launcher_shared::provider::HeldFile {
                         title: "Entity Culling".into(),
-                        file_name: "entityculling.jar".into(),
+                        file_name: format!("{}.jar", args.project_id),
                         url: Some(
                             "https://www.curseforge.com/minecraft/mc-mods/entityculling/files/1".into(),
                         ),
@@ -564,6 +566,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(packs.updates.map(|u| u.status), Some(UpdatesStatus::NoEnabled), "packs are checked too");
+    }
+
+    #[test]
+    fn the_mock_installs_a_mod_alone() {
+        let mut mock = mock();
+        let alone = json!({"key": "aero", "kind": "mods", "project_id": "mock-sodium-extra", "slug": "s",
+                           "title": "Sodium Extra", "alone": true});
+        let plan: PlanDto =
+            serde_json::from_value(mock.handle("provider_plan", &call(alone.clone())).unwrap()).unwrap();
+        assert!(plan.install.is_empty() && !plan.requires_confirmation() && !plan.offers_alone());
+        let mut approved = alone;
+        approved["approved"] = serde_json::to_value(plan.changes(&[])).unwrap();
+        let done: InstallAnswer =
+            serde_json::from_value(mock.handle("provider_install", &call(approved)).unwrap()).unwrap();
+        assert!(matches!(done, InstallAnswer::Installed(_)));
+        // Its own file to download by hand is needed alone too: no way around it is offered.
+        let held = json!({"key": "aero", "kind": "mods", "project_id": "mock-entityculling", "slug": "e",
+                          "title": "Entity Culling"});
+        let plan: PlanDto =
+            serde_json::from_value(mock.handle("provider_plan", &call(held)).unwrap()).unwrap();
+        assert!(!plan.can_install() && !plan.offers_alone());
     }
 
     #[test]

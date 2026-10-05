@@ -564,3 +564,32 @@ async fn the_service_answers_as_a_content_provider() {
     let packs = provider.modpacks(PacksArgs { query: String::new(), offset: 0 }).await.unwrap();
     assert_eq!(packs.limit, PACKS_LIMIT);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mod_installed_alone_leaves_every_dependency_out() {
+    let w = world().await;
+    let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
+    let s = &w.server;
+    // One dependency it can have, one no one can: with them, the install cannot go ahead.
+    let deps = json!([
+        {"project_id": "sodium", "dependency_type": "required"},
+        {"project_id": "gone", "dependency_type": "required"},
+        {"project_id": "optifine", "dependency_type": "incompatible"}
+    ]);
+    s.publish(project_json("main", "Main"), vec![release(s, "main", "main-1", &["fabric"], 5, deps)]);
+    s.publish(
+        project_json("sodium", "Sodium"),
+        vec![release(s, "sodium", "sodium-1", &["fabric"], 4, json!([]))],
+    );
+    let with_them = InstallArgs::new(&key, ContentKind::Mods, "main", "main", "Main");
+    assert!(!w.service.plan(&with_them).await.unwrap().can_install());
+
+    let alone = InstallArgs { alone: true, ..with_them };
+    let plan = w.service.plan(&alone).await.unwrap();
+    assert_eq!(plan.main.as_ref().map(|m| m.version_id.as_str()), Some("main-1"));
+    assert!(plan.install.is_empty() && plan.replace.is_empty() && plan.satisfied.is_empty());
+    assert!(plan.optional.is_empty() && plan.blocking.is_empty() && plan.embedded.is_empty());
+    assert!(plan.can_install() && !plan.requires_confirmation());
+    install(&w, alone).await.unwrap();
+    assert_eq!(mods(&dir), ["main-1.jar"], "the mod alone, no Fabric API either");
+}

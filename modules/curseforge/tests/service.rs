@@ -434,3 +434,27 @@ async fn files_curseforge_installed_are_its_own_and_ones_found_by_fingerprint_ar
     marks.sort();
     assert_eq!(marks, [("create.jar".to_string(), true), ("flywheel-copy.jar.disabled".to_string(), false)]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mod_installed_alone_leaves_its_dependencies_out() {
+    let w = world().await;
+    let (key, dir) = build(&w, "Aero", "Fabric", FABRIC_LOADER);
+    // Create needs Flywheel and a mod with no file for this build: with them it cannot go ahead.
+    let required = json!([{"modId": 2, "relationType": 3}, {"modId": 3, "relationType": 3}]);
+    let create = file_json(&w.server, 10, 1, "create.jar", &mod_jar("create"), FABRIC, required, false);
+    w.server.publish(mod_json(1, "Create", MODS, 9), vec![create]);
+    let flywheel =
+        file_json(&w.server, 20, 2, "flywheel.jar", &mod_jar("flywheel"), FABRIC, json!([]), false);
+    w.server.publish(mod_json(2, "Flywheel", MODS, 5), vec![flywheel]);
+    w.server.publish(mod_json(3, "Gone", MODS, 1), vec![]);
+    let with_them = args(&key, ContentKind::Mods, 1, "Create");
+    assert!(!w.service.plan(&with_them).await.unwrap().can_install());
+
+    let alone = InstallArgs { alone: true, ..with_them };
+    let plan = w.service.plan(&alone).await.unwrap();
+    assert_eq!(plan.main.as_ref().map(|m| m.version_id.as_str()), Some("10"));
+    assert!(plan.install.is_empty() && plan.satisfied.is_empty() && plan.blocking.is_empty());
+    assert!(plan.can_install() && !plan.requires_confirmation());
+    install(&w, alone).await.unwrap();
+    assert_eq!(files(&dir, "mods"), ["create.jar"]);
+}

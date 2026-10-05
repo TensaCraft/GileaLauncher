@@ -607,6 +607,8 @@
   "installed": "Встановлено",
   "update_modrinth_content": "Оновити",
   "modrinth_dependencies_install": "Встановити вибране",
+  "provider_install_alone": "Без залежностей",
+  "provider_install_alone_hint": "Встановити лише цей мод, не дивлячись на його залежності",
   "modrinth_dependencies_to_install": "Буде встановлено",
   "modrinth_dependencies_to_replace": "Буде замінено",
   "modrinth_dependencies_satisfied": "Уже встановлено",

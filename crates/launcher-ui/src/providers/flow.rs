@@ -159,6 +159,19 @@ impl InstallFlow {
             }
             spawn_local(self.finish(provider, base.approve(&plan, &picks)));
         });
+        // The user chose the project's file alone, its dependencies left out.
+        let alone = Callback::new(move |()| {
+            let (Some(base), Some(plan), Some(provider)) =
+                (self.args.get_value(), self.plan.get_untracked(), self.provider.try_get_value())
+            else {
+                return;
+            };
+            if !installs().start(&provider.id, &base.key, &base.project_id) {
+                toasts.show(Level::Info, i18n.t("installation_already_running"), None);
+                return;
+            }
+            spawn_local(self.finish(provider, base.alone(&plan)));
+        });
         let provider = self.provider.get_value();
         let open_page = {
             let provider = provider.clone();
@@ -201,7 +214,14 @@ impl InstallFlow {
             });
         });
         view! {
-            <DependencyDialog provider=provider open=self.open plan=self.plan on_install=approve on_open=open_page />
+            <DependencyDialog
+                provider=provider
+                open=self.open
+                plan=self.plan
+                on_install=approve
+                on_install_alone=alone
+                on_open=open_page
+            />
         }
     }
 }

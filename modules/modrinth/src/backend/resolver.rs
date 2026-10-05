@@ -234,13 +234,14 @@ fn newest(versions: Vec<&Value>) -> Option<Value> {
 }
 
 /// The plan of installing `project` — `exact` when the user saw a version, else its newest
-/// compatible one — with the optional dependencies they `picked`.
+/// compatible one — with the optional dependencies they `picked`; `alone`, its file only.
 pub async fn plan(
     api: &ModrinthApi,
     target: &Target<'_>,
     project: Project,
     exact: Option<Value>,
     picked: &[Pick],
+    alone: bool,
 ) -> AppResult<Plan> {
     let (version, is_exact) = match exact {
         Some(version) => (version, true),
@@ -270,7 +271,7 @@ pub async fn plan(
         Ok(main) => main,
         Err(issue) => return Ok(Plan { blocking: vec![*issue], ..Plan::default() }),
     };
-    if target.kind != ContentKind::Mods {
+    if target.kind != ContentKind::Mods || alone {
         return Ok(Plan { main: Some(main), ..Plan::default() });
     }
     Ok(resolver.dependencies(main, picked).await)

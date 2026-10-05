@@ -45,7 +45,7 @@ fn publish(server: &FakeCurseForge, id: u64, name: &str, dependencies: &[(u64, u
 }
 
 async fn plan(server: &FakeCurseForge, target: &Target<'_>, id: u64, picks: &[Pick]) -> PlanDto {
-    resolver::plan(&api(server), target, id, None, picks).await.unwrap().to_dto()
+    resolver::plan(&api(server), target, id, None, picks, false).await.unwrap().to_dto()
 }
 
 fn titles(items: &[launcher_shared::provider::PlanItem]) -> Vec<&str> {
@@ -197,7 +197,8 @@ async fn a_blocked_project_shows_its_page_and_a_project_without_a_file_is_an_err
     assert!(!dto.can_install());
     let forge_only = file_json(&server, 20, 2, "f.jar", b"f", &["1.21.1", "Forge"], json!([]), false);
     server.publish(mod_json(2, "Forge Only", MODS, 1), vec![forge_only]);
-    let none = resolver::plan(&api(&server), &mods_target(&installed), 2, None, &[]).await.unwrap_err();
+    let none =
+        resolver::plan(&api(&server), &mods_target(&installed), 2, None, &[], false).await.unwrap_err();
     assert_eq!((none.code, none.params["name"].as_str()), (ErrorCode::NoCompatibleVersion, "Forge Only"));
 }
 
@@ -208,8 +209,10 @@ async fn the_file_the_user_saw_is_kept_and_packs_need_no_loader() {
     let older = file_json(&server, 11, 1, "old.jar", b"old", FABRIC, json!([]), false);
     server.publish(mod_json(1, "Create", MODS, 1), vec![newer, older]);
     let installed = Installed::default();
-    let exact =
-        resolver::plan(&api(&server), &mods_target(&installed), 1, Some(11), &[]).await.unwrap().to_dto();
+    let exact = resolver::plan(&api(&server), &mods_target(&installed), 1, Some(11), &[], false)
+        .await
+        .unwrap()
+        .to_dto();
     assert_eq!(exact.main.unwrap().version_id, "11");
     let pack = file_json(&server, 50, 5, "faithful.zip", b"pack", &["1.21.1"], json!([]), false);
     server.publish(mod_json(5, "Faithful", RESOURCE_PACKS, 1), vec![pack]);

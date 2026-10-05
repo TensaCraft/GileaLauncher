@@ -24,6 +24,8 @@ pub fn DependencyDialog(
     plan: RwSignal<Option<PlanDto>>,
     /// Installs the plan with the picked optional dependencies.
     on_install: Callback<Vec<PlanItem>>,
+    /// Installs the project alone, its dependencies left out.
+    on_install_alone: Callback<()>,
     /// Opens a project's page.
     on_open: Callback<String>,
 ) -> impl IntoView {
@@ -36,6 +38,7 @@ pub fn DependencyDialog(
         picked.set(HashSet::new());
     });
     let can_install = Signal::derive(move || plan.with(|p| p.as_ref().is_some_and(PlanDto::can_install)));
+    let offers_alone = Signal::derive(move || plan.with(|p| p.as_ref().is_some_and(PlanDto::offers_alone)));
     let item_line = move |item: &PlanItem| {
         let (key, params) = item_text(item);
         i18n.tp(key, &params)
@@ -161,6 +164,19 @@ pub fn DependencyDialog(
                 <Button variant=Variant::Ghost on_click=move |_| open.set(false)>
                     {move || if can_install.get() { i18n.t("cancel") } else { i18n.t("close") }}
                 </Button>
+                <Show when=move || offers_alone.get()>
+                    <Button
+                        variant=Variant::Secondary
+                        icon="link_off"
+                        title=t("provider_install_alone_hint")
+                        on_click=move |_| {
+                            open.set(false);
+                            on_install_alone.run(());
+                        }
+                    >
+                        {move || i18n.t("provider_install_alone")}
+                    </Button>
+                </Show>
                 <Show when=move || can_install.get()>
                     <Button variant=Variant::Primary icon="download" on_click=confirm>
                         {move || i18n.t("modrinth_dependencies_install")}

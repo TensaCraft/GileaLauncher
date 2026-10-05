@@ -288,13 +288,14 @@ fn main_candidate(project: &Value, file: Value, exact: Option<u64>, installed: &
 }
 
 /// The plan of installing project `project_id` (its file `exact` when that still fits) into the
-/// target, with the optional dependencies the user `picks`.
+/// target, with the optional dependencies the user `picks`; `alone`, its file only.
 pub async fn plan(
     api: &CurseForgeApi,
     target: &Target<'_>,
     project_id: u64,
     exact: Option<u64>,
     picks: &[Pick],
+    alone: bool,
 ) -> AppResult<Plan> {
     let installed = target.installed;
     let mut resolver = Resolver { api, target, projects: HashMap::new(), found: HashMap::new() };
@@ -319,6 +320,10 @@ pub async fn plan(
     };
     if plan.main.action != Action::Satisfied && resolver.held(&project, &file).await {
         plan.blocking.push(blocked_issue(&project, &file, true));
+    }
+    if alone {
+        plan.found = resolver.found;
+        return Ok(plan);
     }
     let picked: HashMap<u64, Option<u64>> =
         picks.iter().filter_map(|p| Some((p.project_id.parse().ok()?, p.version_id.parse().ok()))).collect();

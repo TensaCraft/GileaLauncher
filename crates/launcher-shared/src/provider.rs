@@ -94,6 +94,10 @@ pub struct InstallArgs {
     /// The changes the user agreed to; an install that would make others answers with the new plan.
     #[serde(default)]
     pub approved: Vec<Change>,
+    /// The project's own file only: its dependencies — required, optional or incompatible — are
+    /// not looked at.
+    #[serde(default)]
+    pub alone: bool,
 }
 
 impl InstallArgs {
@@ -114,6 +118,28 @@ impl InstallArgs {
             version_id: None,
             optional: Vec::new(),
             approved: Vec::new(),
+            alone: false,
+        }
+    }
+
+    /// This install (the one the dialog showed) of the project's own file, its dependencies left
+    /// out: the plan's version, and its change alone approved.
+    pub fn alone(&self, plan: &PlanDto) -> InstallArgs {
+        let main = plan.main.as_ref();
+        InstallArgs {
+            version_id: main.map(|m| m.version_id.clone()),
+            optional: Vec::new(),
+            approved: main
+                .filter(|m| m.action != Action::Satisfied)
+                .map(|m| Change {
+                    project_id: m.project_id.clone(),
+                    version_id: m.version_id.clone(),
+                    action: m.action,
+                })
+                .into_iter()
+                .collect(),
+            alone: true,
+            ..self.clone()
         }
     }
 
@@ -294,6 +320,18 @@ impl PlanDto {
             || !self.replace.is_empty()
             || self.optional.iter().any(|i| i.action != Action::Satisfied)
             || !self.blocking.is_empty()
+    }
+
+    /// Its dependencies — to install, offered or in the way — leave something out when the project
+    /// is installed alone; its own file to download by hand is needed all the same.
+    pub fn offers_alone(&self) -> bool {
+        let Some(main) = &self.main else { return false };
+        let own = |issue: &PlanIssue| issue.held.as_ref().is_some_and(|h| h.file_name == main.filename);
+        !self.install.is_empty()
+            || !self.replace.is_empty()
+            || !self.optional.is_empty()
+            || !self.optional_issues.is_empty()
+            || self.blocking.iter().any(|issue| !own(issue))
     }
 
     /// What installing the plan with the `selected` optional dependencies changes, in order (the
@@ -1056,6 +1094,71 @@ mod tests {
     }
 
     #[test]
+    fn installing_alone_is_offered_while_dependencies_are_in_the_plan() {
+        let bare = PlanDto { main: Some(item("main", Action::Install)), ..PlanDto::default() };
+        assert!(!bare.offers_alone(), "nothing to leave out");
+        assert!(PlanDto { install: vec![item("lib", Action::Install)], ..bare.clone() }.offers_alone());
+        assert!(PlanDto { optional: vec![item("extra", Action::Install)], ..bare.clone() }.offers_alone());
+        let stop = |held: Option<HeldFile>| PlanIssue {
+            code: "file_blocked".into(),
+            name: None,
+            file_name: None,
+            url: None,
+            blocking: true,
+            held,
+        };
+        let held = |file: &str| HeldFile {
+            title: "T".into(),
+            file_name: file.into(),
+            url: None,
+            size: 1,
+            sha1: "0".repeat(40),
+            alternative: None,
+            folder: "mods".into(),
+        };
+        let stopped = PlanDto { blocking: vec![stop(Some(held("lib.jar")))], ..bare.clone() };
+        assert!(stopped.offers_alone(), "a dependency that stops it");
+        // The project's own file, downloaded by hand: installing it alone needs it all the same.
+        let own = PlanDto { blocking: vec![stop(Some(held("main.jar")))], ..bare.clone() };
+        assert!(!own.offers_alone());
+        let none = PlanDto { install: vec![item("lib", Action::Install)], ..PlanDto::default() };
+        assert!(!none.offers_alone(), "no project to install");
+    }
+
+    #[test]
+    fn installing_alone_approves_the_project_s_file_only() {
+        let first = InstallArgs::new("aero", ContentKind::Mods, "main", "main", "Main");
+        let earlier = first.approve(
+            &PlanDto { optional: vec![item("extra", Action::Install)], ..PlanDto::default() },
+            &[item("extra", Action::Install)],
+        );
+        let plan = PlanDto {
+            main: Some(item("main", Action::Replace)),
+            install: vec![item("lib", Action::Install)],
+            replace: vec![item("api", Action::Replace)],
+            blocking: vec![PlanIssue {
+                code: "dependency_no_file".into(),
+                name: Some("Gone".into()),
+                file_name: None,
+                url: None,
+                blocking: true,
+                held: None,
+            }],
+            ..PlanDto::default()
+        };
+        let alone = earlier.alone(&plan);
+        assert!(alone.alone && alone.optional.is_empty(), "no pick goes along");
+        assert_eq!(alone.version_id.as_deref(), Some("main-2"));
+        assert_eq!(
+            alone.approved,
+            [Change { project_id: "main".into(), version_id: "main-2".into(), action: Action::Replace }]
+        );
+        // What is there already changes nothing.
+        let there = PlanDto { main: Some(item("main", Action::Satisfied)), ..plan };
+        assert!(first.alone(&there).approved.is_empty());
+    }
+
+    #[test]
     fn approving_again_keeps_the_earlier_picks() {
         let first = InstallArgs::new("aero", ContentKind::Mods, "main", "main", "Main");
         let offered = PlanDto {
@@ -1204,7 +1307,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&args).unwrap(),
             serde_json::json!({"key": "aero", "kind": "shaderpacks", "project_id": "p", "slug": "s", "title": "T",
-                               "version_id": null, "optional": [], "approved": []})
+                               "version_id": null, "optional": [], "approved": [], "alone": false})
         );
         let old: InstallArgs = serde_json::from_value(
             serde_json::json!({"key": "aero", "kind": "mods", "project_id": "p", "slug": "s", "title": "T"}),
