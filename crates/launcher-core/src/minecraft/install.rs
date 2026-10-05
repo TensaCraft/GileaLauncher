@@ -23,8 +23,9 @@ use super::{InstallProgress, InstallProgressFn};
 use crate::builds::ids::validate_component_id;
 use crate::java::runtime::{JavaRuntimes, LEGACY_COMPONENT};
 use crate::lock::{Coordinator, Lease};
-use crate::net::downloader::{DownloadTask, Downloader, ExpectedHash};
+use crate::net::downloader::{DownloadTask, Downloader, ExpectedHash, HashKind, hash_file};
 use crate::net::meta::MetaClient;
+use crate::storage::atomic::rename_retrying;
 
 pub const INSTALL_ATTEMPTS: u32 = 4;
 pub const INSTALL_RETRY_DELAY: Duration = Duration::from_millis(750);
@@ -59,6 +60,36 @@ fn file_task(file: &FileRef, dest: PathBuf) -> DownloadTask {
         task = task.hash(ExpectedHash::sha1(sha1));
     }
     task
+}
+
+/// A child version's client is its parent's (`parent_jar`, installed just before): copied from
+/// there instead of fetched again, when it is the same file. The copy is checked like a download
+/// that was already there.
+fn seed_from_parent(parent_jar: &Path, dest: &Path, client: &FileRef) {
+    if dest.exists() {
+        return;
+    }
+    let Ok(meta) = fs::metadata(parent_jar) else { return };
+    if !meta.is_file() || client.size.is_some_and(|size| size != meta.len()) {
+        return;
+    }
+    let same = client.sha1.as_deref().is_none_or(|sha1| {
+        hash_file(parent_jar, HashKind::Sha1).is_ok_and(|actual| actual.eq_ignore_ascii_case(sha1))
+    });
+    if !same {
+        return;
+    }
+    let part = dest.with_file_name(format!(
+        "{}.seed",
+        dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    ));
+    let copied = fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")))
+        .and_then(|()| fs::copy(parent_jar, &part))
+        .and_then(|_| rename_retrying(&part, dest));
+    if let Err(e) = copied {
+        let _ = fs::remove_file(&part);
+        tracing::debug!("The client of {} is fetched instead of copied: {e}", dest.display());
+    }
 }
 
 /// Worth another whole attempt: the network failed, not the metadata or the disk, and it is not
@@ -183,6 +214,12 @@ impl MinecraftInstaller {
         }
     }
 
+    /// Version `id` as it is, its `check` passed: nothing to install.
+    pub(crate) fn checked_out(&self, id: &str, check: &VersionCheck) -> InstalledVersion {
+        let java = check.java_component.as_deref().and_then(|c| self.java.executable(c));
+        InstalledVersion { id: id.to_string(), java }
+    }
+
     /// Before a launch: nothing to do when the version checks out, otherwise an install that
     /// fetches what is missing (a folder that merely exists is not enough; files of the right size
     /// are trusted, as the check did). `force_check` hashes every file and repairs anyway.
@@ -195,8 +232,7 @@ impl MinecraftInstaller {
         validate_component_id(id)?;
         let check = self.check_async(id).await;
         if check.valid && !force_check {
-            let java = check.java_component.as_deref().and_then(|c| self.java.executable(c));
-            return Ok(InstalledVersion { id: id.to_string(), java });
+            return Ok(self.checked_out(id, &check));
         }
         if !check.valid {
             tracing::warn!("Minecraft {id} needs repair: {}", check.issues.join("; "));
@@ -220,7 +256,8 @@ impl MinecraftInstaller {
             let status = Text::key(key).param("version", id);
             progress(InstallProgress::status(status.clone()));
             let json = self.version_json(id).await?;
-            if let Some(parent) = json.get("inheritsFrom").and_then(Value::as_str) {
+            let inherits = json.get("inheritsFrom").and_then(Value::as_str).map(str::to_string);
+            if let Some(parent) = inherits.as_deref() {
                 validate_component_id(parent)?;
                 if parent == id
                     || children.iter().any(|child| child == parent)
@@ -250,7 +287,18 @@ impl MinecraftInstaller {
             )?;
             let mut tasks = libraries.tasks;
             if let Some(client) = &info.client {
-                tasks.push(file_task(client, dir.join(format!("{id}.jar"))));
+                let dest = dir.join(format!("{id}.jar"));
+                if let Some(parent) = &inherits {
+                    let (parent_jar, at, file) = (
+                        version_dir(&self.mc_dir, parent).join(format!("{parent}.jar")),
+                        dest.clone(),
+                        client.clone(),
+                    );
+                    tokio::task::spawn_blocking(move || seed_from_parent(&parent_jar, &at, &file))
+                        .await
+                        .map_err(|e| AppError::internal(e.to_string()))?;
+                }
+                tasks.push(file_task(client, dest));
             }
             if let Some(log) = &info.log_config
                 && let Some(name) = &log.id

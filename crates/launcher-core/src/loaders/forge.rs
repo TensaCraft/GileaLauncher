@@ -109,13 +109,16 @@ impl ForgeMeta {
     async fn forge_games(&self) -> AppResult<BTreeMap<String, GameBuilds>> {
         let base = self.endpoints.forge.trim_end_matches('/');
         let url = format!("{base}/net/minecraftforge/forge/maven-metadata.xml");
-        let xml = String::from_utf8_lossy(&self.meta.get_bytes(&url).await?).into_owned();
+        // The builds and the recommendations live on two hosts: both are asked at once.
+        let (xml, promotions) =
+            tokio::join!(self.meta.get_bytes(&url), self.meta.get_json(&self.endpoints.forge_promotions));
+        let xml = String::from_utf8_lossy(&xml?).into_owned();
         let mut games: BTreeMap<String, GameBuilds> = BTreeMap::new();
         for (mc, lv) in forge_versions(&xml) {
             games.entry(mc).or_default().builds.push(lv);
         }
         // Recommendations are a nicety: without them the newest build is the default.
-        match self.meta.get_json(&self.endpoints.forge_promotions).await {
+        match promotions {
             Ok(promotions) => {
                 for (mc, game) in games.iter_mut() {
                     game.recommended = promotions

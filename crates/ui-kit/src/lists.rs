@@ -1,6 +1,8 @@
 //! Lists that reload in place: an answer replaces what is shown, and a reload that fails while a
 //! list is shown keeps it (the page does not collapse and jump back to the top).
 
+use std::time::Duration;
+
 use leptos::prelude::*;
 
 use crate::LatestRequest;
@@ -15,6 +17,43 @@ pub fn settle<T>(
         (Some(Ok(shown)), Err(error)) => (Some(Ok(shown)), Some(error)),
         (_, Err(error)) => (Some(Err(error)), None),
     }
+}
+
+/// The pause after typing before a list follows its search.
+pub const SEARCH_PAUSE: Duration = Duration::from_millis(150);
+
+/// Makes `search` say `text`; its readers wake only when that is a change.
+fn follow(search: RwSignal<String>, text: String) {
+    search.try_maybe_update(|shown| {
+        let changed = *shown != text;
+        if changed {
+            *shown = text;
+        }
+        (changed, ())
+    });
+}
+
+/// What a list follows instead of each keystroke of `typed`: its text once typing pauses for
+/// `pause`, and at once when it is blank.
+pub fn debounced(typed: RwSignal<String>, pause: Duration) -> RwSignal<String> {
+    let search = RwSignal::new(typed.get_untracked());
+    let timer = StoredValue::new(None::<TimeoutHandle>);
+    let cancel = move || {
+        if let Some(handle) = timer.try_get_value().flatten() {
+            handle.clear();
+        }
+    };
+    Effect::new(move |_| {
+        let text = typed.get();
+        cancel();
+        if text.trim().is_empty() {
+            follow(search, String::new());
+        } else {
+            timer.set_value(set_timeout_with_handle(move || follow(search, text), pause).ok());
+        }
+    });
+    on_cleanup(cancel);
+    search
 }
 
 /// A list the backend answers: `None` only before its first answer, and each reload keeps what
@@ -165,5 +204,40 @@ mod tests {
         let list = owner.with(Reloadable::<Vec<u32>>::new);
         drop(owner);
         assert_eq!(list.begin(), None);
+    }
+
+    #[test]
+    fn a_search_that_stays_the_same_wakes_nobody() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let owner = Owner::new();
+        owner.with(|| {
+            let search = RwSignal::new(String::new());
+            // Reads the search again each time it announces a change.
+            let reads = Arc::new(AtomicUsize::new(0));
+            let watcher = {
+                let reads = reads.clone();
+                Memo::new_with_compare(
+                    move |_| {
+                        reads.fetch_add(1, Ordering::SeqCst);
+                        search.get()
+                    },
+                    |_, _| true,
+                )
+            };
+            let _ = watcher.get();
+            follow(search, String::new());
+            let _ = watcher.get();
+            assert_eq!(reads.load(Ordering::SeqCst), 1, "still empty");
+            follow(search, "sod".into());
+            let _ = watcher.get();
+            assert_eq!(reads.load(Ordering::SeqCst), 2);
+            assert_eq!(search.get_untracked(), "sod");
+            follow(search, "sod".into());
+            let _ = watcher.get();
+            assert_eq!(reads.load(Ordering::SeqCst), 2, "the same text again");
+        });
+        owner.cleanup();
     }
 }

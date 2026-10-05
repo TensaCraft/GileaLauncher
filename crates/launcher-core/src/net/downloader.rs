@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -145,6 +145,9 @@ pub struct DownloadTask {
     pub origin: Option<Origin>,
     /// A secret header for the hosts it names.
     pub credential: Option<Credential>,
+    /// Whether the file waits for the disk before it counts as written (the default). A file read
+    /// once and removed (an archive to unpack) does not: its next reader checks it anyway.
+    pub durable: bool,
 }
 
 impl DownloadTask {
@@ -156,7 +159,14 @@ impl DownloadTask {
             hash: None,
             origin: None,
             credential: None,
+            durable: true,
         }
+    }
+
+    /// A file read once and removed right after (an archive to unpack): not waited for on disk.
+    pub fn transient(mut self) -> Self {
+        self.durable = false;
+        self
     }
 
     pub fn credential(mut self, credential: Credential) -> Self {
@@ -222,6 +232,8 @@ const OUTAGE_AFTER: usize = 6;
 const NAMED_FAILURES: usize = 5;
 /// The longest a server's `Retry-After` is waited for.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
+/// What a streamed download gathers before it writes to the disk.
+const STREAM_BUFFER: usize = 256 * 1024;
 
 impl DownloadReport {
     /// `DownloadFailed` naming the first failures when anything failed; `Network` (with the param
@@ -424,8 +436,8 @@ pub fn hash_reader(reader: &mut dyn Read, kind: HashKind) -> io::Result<String> 
 }
 
 /// Writes `body` beside `dest` and swaps it in, so `dest` never holds part of a file; the
-/// folder is made only when it is missing.
-fn write_whole(part: &Path, dest: &Path, body: &[u8]) -> io::Result<()> {
+/// folder is made only when it is missing. `durable`: on the disk before the swap.
+fn write_whole(part: &Path, dest: &Path, body: &[u8], durable: bool) -> io::Result<()> {
     let mut file = match File::create(part) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             fs::create_dir_all(part.parent().unwrap_or(Path::new(".")))?;
@@ -433,7 +445,7 @@ fn write_whole(part: &Path, dest: &Path, body: &[u8]) -> io::Result<()> {
         }
         other => other?,
     };
-    let written = file.write_all(body).and_then(|()| file.sync_all());
+    let written = file.write_all(body).and_then(|()| if durable { file.sync_all() } else { Ok(()) });
     drop(file);
     if let Err(e) = written.and_then(|()| rename_retrying(part, dest)) {
         let _ = fs::remove_file(part);
@@ -929,9 +941,9 @@ impl Downloader {
                 return Err(Failure::Mismatch(mismatch(expected, &actual)));
             }
         }
-        let (partial, dest) = (partial.clone(), task.dest.clone());
+        let (partial, dest, durable) = (partial.clone(), task.dest.clone(), task.durable);
         tokio::task::spawn_blocking(move || {
-            write_whole(&partial.whole(), &dest, &body)?;
+            write_whole(&partial.whole(), &dest, &body, durable)?;
             partial.forget_older();
             Ok::<_, io::Error>(())
         })
@@ -969,7 +981,7 @@ impl Downloader {
         }
         let status = response.status();
         let limit = task.size.unwrap_or(self.cfg.max_size);
-        let (mut file, mut written) = match (status, resume) {
+        let (file, mut written) = match (status, resume) {
             (StatusCode::PARTIAL_CONTENT, Some((offset, validator)))
                 if range_matches(response.headers(), offset, task.size, limit)
                     && same_version(response.headers(), &validator) =>
@@ -995,6 +1007,9 @@ impl Downloader {
         };
         counters.set_file_bytes(reported, written);
         progress(counters.snapshot());
+        // The network's chunks are small: written to the disk a quarter of a megabyte at a time.
+        // A cut connection's bytes still reach the part file (the buffer is written as it drops).
+        let mut file = BufWriter::with_capacity(STREAM_BUFFER, file);
         loop {
             let chunk = match response.chunk().await {
                 Ok(Some(chunk)) => chunk,
@@ -1012,11 +1027,16 @@ impl Downloader {
             counters.set_file_bytes(reported, written);
             progress(counters.snapshot());
         }
-        let file = tokio::task::spawn_blocking(move || file.sync_all().map(|()| file))
-            .await
-            .map_err(fatal)?
-            .map_err(fatal)?;
-        drop(file);
+        let file = file.into_inner().map_err(|e| fatal(e.into_error()))?;
+        if task.durable {
+            let file = tokio::task::spawn_blocking(move || file.sync_all().map(|()| file))
+                .await
+                .map_err(fatal)?
+                .map_err(fatal)?;
+            drop(file);
+        } else {
+            drop(file);
+        }
         if let Some(size) = task.size
             && written < size
         {

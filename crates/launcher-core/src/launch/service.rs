@@ -342,7 +342,6 @@ impl LaunchService {
         };
         // The account picked at Play, else the build's own while the launcher has it, else the default.
         let assigned = assigned_profile(&build.options).filter(|key| d.auth.has_profile(key));
-        let identity = d.auth.launch_identity(request.profile_key.as_deref().or(assigned)).await?;
         let failed =
             |why: String| AppError::new(ErrorCode::LaunchFailed, why).with_param("version", &build.name);
         let component = component_id(build)
@@ -353,15 +352,22 @@ impl LaunchService {
             op.update(Some(p.status), bytes.map(|b| b.0), bytes.map(|b| b.1));
         };
         let spec = ComponentSpec::from_build(build);
-        let installed =
-            d.components.ensure(&component, spec.as_ref(), false, &progress).await.map_err(|e| {
-                match e.code {
-                    // Only a version that cannot be found or read is an integrity problem ("reinstall");
-                    // the network, Java, the disk and busy folders keep their own messages.
-                    ErrorCode::VersionNotFound | ErrorCode::InvalidInput => failed(e.detail),
-                    _ => e,
-                }
-            })?;
+        // The account's sign-in (a refresh asks Microsoft several times) and the check of the
+        // game's files wait on different things: side by side. Both run to the end, so a check
+        // that downloads is never cut short; the account's answer is told first.
+        let (identity, installed) = tokio::join!(
+            d.auth.launch_identity(request.profile_key.as_deref().or(assigned)),
+            d.components.ensure(&component, spec.as_ref(), false, &progress)
+        );
+        let identity = identity?;
+        let installed = installed.map_err(|e| {
+            match e.code {
+                // Only a version that cannot be found or read is an integrity problem ("reinstall");
+                // the network, Java, the disk and busy folders keep their own messages.
+                ErrorCode::VersionNotFound | ErrorCode::InvalidInput => failed(e.detail),
+                _ => e,
+            }
+        })?;
         let json = load_merged(&d.mc_dir, &component).map_err(|e| failed(e.detail))?;
         let info = VersionInfo::from_json(&json).map_err(|e| failed(e.detail))?;
         let java = resolve_java(build, installed.java, &d.mc_dir);

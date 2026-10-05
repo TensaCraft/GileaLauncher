@@ -194,7 +194,8 @@ pub fn Catalog(
         }
         current
     });
-    let busy = move || store.ops.with(|o| o.busy);
+    // One for every row: only its own change wakes their buttons, not each tick of an operation.
+    let busy = Memo::new(move |_| store.ops.with(|o| o.busy));
 
     let row = move |row: CreateRow| {
         let title = row_title(&row);
@@ -242,7 +243,7 @@ pub fn Catalog(
                             <Button
                                 variant=Variant::Primary
                                 icon="download"
-                                disabled=Signal::derive(busy)
+                                disabled=busy
                                 on_click=move |_| on_pick.run(picked.clone())
                             >
                                 {move || i18n.t("minecraft_components_install_action")}

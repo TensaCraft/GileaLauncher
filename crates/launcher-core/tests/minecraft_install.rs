@@ -282,6 +282,7 @@ async fn a_child_version_installs_its_parent_first() {
         v.client,
         "the client jar lands in the child too"
     );
+    assert_eq!(fake.server.seen("clients/1.21.1.jar").len(), 1, "copied from the parent, not fetched again");
     assert_eq!(fs::read(s.mc.join("libraries/net/example/loader/1.0/loader-1.0.jar")).unwrap(), loader);
     assert!(s.installer.check("loader-1.0-1.21.1").valid);
 }

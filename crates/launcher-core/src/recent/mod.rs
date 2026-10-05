@@ -36,14 +36,16 @@ fn opens_worlds(minecraft: Option<&str>) -> bool {
     minecraft.and_then(release_number).is_some_and(|number| number >= (1, 20, 0))
 }
 
-fn world_activity(world: &World, quick_play: bool) -> Activity {
+/// `world` of the game folder `game` as Home shows it, with its icon.
+fn world_activity(world: &World, game: &Path, quick_play: bool) -> Activity {
+    let world = world.clone().with_icon(game);
     Activity::World {
         folder: world.folder.clone(),
         name: world.name.clone(),
         mode: world.mode.clone(),
         difficulty: world.difficulty.clone(),
         hardcore: world.hardcore,
-        icon: world.icon.clone(),
+        icon: world.icon,
         quick_play,
     }
 }
@@ -69,10 +71,10 @@ fn recent_of(markers: &LogMarkers, key: &str, minecraft: Option<&str>, game: &Pa
     let activity = match markers.last(game) {
         // A world played after that session ended is the later one.
         Some((Marker::Server { host, port }, ended)) => match newest_world {
-            Some(world) if world.last_played_ms > ended => Some(world_activity(world, quick_play)),
+            Some(world) if world.last_played_ms > ended => Some(world_activity(world, game, quick_play)),
             _ => Some(Activity::Server { host, port }),
         },
-        Some((Marker::Singleplayer, _)) | None => newest_world.map(|w| world_activity(w, quick_play)),
+        Some((Marker::Singleplayer, _)) | None => newest_world.map(|w| world_activity(w, game, quick_play)),
     };
     Some(RecentBuild { key: key.to_string(), played_ms, activity })
 }

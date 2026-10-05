@@ -1,5 +1,5 @@
 //! The server builds' API: the catalog, a build's files and its force-update
-//! manifest. Plain GETs, asked three times before giving up.
+//! manifest. Plain GETs, asked three times before giving up (an address the server refuses, once).
 
 use std::time::Duration;
 
@@ -21,6 +21,15 @@ const RETRY_DELAY: Duration = Duration::from_millis(500);
 
 fn network(e: impl std::fmt::Display) -> AppError {
     AppError::new(ErrorCode::Network, format!("server builds: {e}"))
+}
+
+/// A request worth sending again: anything but an address the server refuses (a 4xx other than
+/// 408 and 429), which a second ask will not change.
+fn worth_asking_again(e: &AppError) -> bool {
+    match e.params.get("status").and_then(|status| status.parse::<u16>().ok()) {
+        Some(status) if (400..500).contains(&status) => matches!(status, 408 | 429),
+        _ => true,
+    }
 }
 
 /// The objects of `value` when it is an array; nothing otherwise.
@@ -76,7 +85,7 @@ impl TensaApi {
         loop {
             match self.try_get(url).await {
                 Ok(value) => return Ok(value),
-                Err(e) if attempt < ATTEMPTS => {
+                Err(e) if attempt < ATTEMPTS && worth_asking_again(&e) => {
                     tracing::warn!(
                         "A server builds request failed, retrying ({attempt}/{ATTEMPTS}) {url}: {}",
                         e.detail

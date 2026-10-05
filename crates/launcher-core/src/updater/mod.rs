@@ -77,6 +77,15 @@ struct Inner {
     busy: bool,
 }
 
+/// The service held busy by a check, a download or the helper's start.
+struct Busy<'a>(&'a UpdateService);
+
+impl Drop for Busy<'_> {
+    fn drop(&mut self) {
+        self.0.lock().busy = false;
+    }
+}
+
 pub struct UpdateService {
     cfg: UpdateConfig,
     client: Option<GithubClient>,
@@ -146,30 +155,25 @@ impl UpdateService {
         snapshot
     }
 
-    /// Only one check/download at a time; a second request just gets the current status.
-    fn try_begin(&self) -> bool {
+    /// Only one check/download at a time; a second request just gets the current status. The
+    /// service stays busy while the guard lives: one cut short (its future dropped) frees it too.
+    fn try_begin(&self) -> Option<Busy<'_>> {
         let mut inner = self.lock();
         if inner.busy {
-            false
+            None
         } else {
             inner.busy = true;
-            true
+            Some(Busy(self))
         }
-    }
-
-    fn end(&self) {
-        self.lock().busy = false;
     }
 
     pub async fn check(&self, include_beta: bool, manual: bool) -> UpdateStatus {
         let Some(client) = self.client.as_ref() else { return self.status() };
-        if !self.try_begin() {
-            return self.status();
-        }
+        let Some(_busy) = self.try_begin() else { return self.status() };
         self.set_state(UpdateState::Checking);
         let result = self.find_update(client, include_beta).await;
         self.lock().status.last_checked_ms = Some(now_ms());
-        let status = match result {
+        match result {
             Ok(Some(selected)) => {
                 let info = selected.info.clone();
                 self.lock().selected = Some(selected);
@@ -190,9 +194,7 @@ impl UpdateService {
                 }
                 self.set_state(UpdateState::Failed { error })
             }
-        };
-        self.end();
-        status
+        }
     }
 
     async fn find_update(&self, client: &GithubClient, include_beta: bool) -> AppResult<Option<Selected>> {
@@ -214,9 +216,7 @@ impl UpdateService {
     pub async fn download_and_prepare(&self) -> UpdateStatus {
         let Some(client) = self.client.as_ref() else { return self.status() };
         let Some(selected) = self.lock().selected.clone() else { return self.status() };
-        if !self.try_begin() {
-            return self.status();
-        }
+        let Some(_busy) = self.try_begin() else { return self.status() };
         let info = selected.info.clone();
         self.set_state(UpdateState::Downloading { info: info.clone() });
         let title = Text::key("update_downloading_version").param("version", &info.version);
@@ -238,7 +238,7 @@ impl UpdateService {
                 .map_err(|e| (Text::key("update_prepare_failed"), prepare_message(&e), e)),
             Err(e) => Err((Text::key("update_download_failed"), error_text(&e), e)),
         };
-        let status = match result {
+        match result {
             Ok(()) => {
                 op.finish();
                 self.set_state(UpdateState::Ready { info })
@@ -249,9 +249,7 @@ impl UpdateService {
                 self.feedback.toast(Level::Error, title, Some(message), None);
                 self.set_state(UpdateState::Failed { error })
             }
-        };
-        self.end();
-        status
+        }
     }
 
     fn prepare(&self, payload: &Path, version: &str, sha256: &str) -> AppResult<()> {
@@ -287,12 +285,13 @@ impl UpdateService {
             .exec
             .as_ref()
             .ok_or_else(|| AppError::new(ErrorCode::Unsupported, "unknown executable"))?;
-        if !self.try_begin() {
+        let Some(busy) = self.try_begin() else {
             return Err(AppError::new(ErrorCode::Busy, "the update is already being installed"));
-        }
+        };
         let result = self.start_helper(exec, selected.as_ref());
-        if result.is_err() {
-            self.end();
+        if result.is_ok() {
+            // The helper runs: the service stays busy until the launcher exits.
+            std::mem::forget(busy);
         }
         result
     }

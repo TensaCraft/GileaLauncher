@@ -16,7 +16,7 @@ use launcher_shared::{
 };
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::AppState;
+use crate::commands::{AppState, blocking};
 
 fn builds_snapshot(core: &CoreApp) -> BuildsSnapshot {
     core.builds.snapshot(|build| core.launcher.runs(build))
@@ -38,20 +38,25 @@ fn dto(core: &CoreApp, build: &Build) -> BuildDto {
     build_dto(build, &core.paths.minecraft_dir, core.launcher.runs(build))
 }
 
-#[tauri::command(async)]
-pub fn builds_list(state: State<'_, AppState>) -> BuildsSnapshot {
-    builds_snapshot(&state.core)
+#[tauri::command]
+pub async fn builds_list(state: State<'_, AppState>) -> AppResult<BuildsSnapshot> {
+    let core = state.core.clone();
+    blocking(move || Ok(builds_snapshot(&core))).await
 }
 
 /// Puts the builds in the order of `keys` (dragged on Home or in Builds).
-#[tauri::command(async)]
-pub fn builds_reorder(
+#[tauri::command]
+pub async fn builds_reorder(
     app: AppHandle,
     state: State<'_, AppState>,
     keys: Vec<String>,
 ) -> AppResult<BuildsSnapshot> {
-    state.core.builds.reorder(&keys)?;
-    Ok(announce_builds(&app, &state.core))
+    let core = state.core.clone();
+    blocking(move || {
+        core.builds.reorder(&keys)?;
+        Ok(announce_builds(&app, &core))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -82,22 +87,26 @@ pub async fn build_create_loader(
     Ok(dto(&core, &build))
 }
 
-#[tauri::command(async)]
-pub fn build_settings_get(state: State<'_, AppState>, key: String) -> AppResult<BuildSettingsDto> {
-    state.core.builds.settings(&key)
+#[tauri::command]
+pub async fn build_settings_get(state: State<'_, AppState>, key: String) -> AppResult<BuildSettingsDto> {
+    let core = state.core.clone();
+    blocking(move || core.builds.settings(&key)).await
 }
 
-#[tauri::command(async)]
-pub fn build_settings_save(
+#[tauri::command]
+pub async fn build_settings_save(
     app: AppHandle,
     state: State<'_, AppState>,
     key: String,
     update: BuildSettingsUpdate,
 ) -> AppResult<BuildSettingsDto> {
-    let core = &state.core;
-    let result = core.builds.update_settings(&key, update);
-    announce_builds(&app, core);
-    result
+    let core = state.core.clone();
+    blocking(move || {
+        let result = core.builds.update_settings(&key, update);
+        announce_builds(&app, &core);
+        result
+    })
+    .await
 }
 
 #[tauri::command]
@@ -128,17 +137,20 @@ pub async fn build_copy(
     Ok(dto(&core, &build))
 }
 
-#[tauri::command(async)]
-pub fn build_delete(
+#[tauri::command]
+pub async fn build_delete(
     app: AppHandle,
     state: State<'_, AppState>,
     key: String,
     delete_files: bool,
 ) -> AppResult<BuildsSnapshot> {
-    let core = &state.core;
-    let result = core.builds.delete(&key, delete_files, || core.launcher.is_running(&key));
-    let snapshot = announce_builds(&app, core);
-    result.map(|()| snapshot)
+    let core = state.core.clone();
+    blocking(move || {
+        let result = core.builds.delete(&key, delete_files, || core.launcher.is_running(&key));
+        let snapshot = announce_builds(&app, &core);
+        result.map(|()| snapshot)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -178,9 +190,10 @@ pub async fn server_status(host: String, port: u16) -> Option<ServerStatus> {
     launcher_core::net::server_ping::status(&host, port).await
 }
 
-#[tauri::command(async)]
-pub fn build_stop(state: State<'_, AppState>, key: String) -> usize {
-    state.core.launcher.terminate(&key)
+#[tauri::command]
+pub async fn build_stop(state: State<'_, AppState>, key: String) -> AppResult<usize> {
+    let core = state.core.clone();
+    blocking(move || Ok(core.launcher.terminate(&key))).await
 }
 
 #[tauri::command(async)]

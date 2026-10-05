@@ -19,8 +19,22 @@ pub struct World {
     /// `peaceful`, `easy`, `normal` or `hard`; empty when the world does not say.
     pub difficulty: String,
     pub hardcore: bool,
-    /// Its `icon.png` as a `data:` URL.
+    /// Its `icon.png` as a `data:` URL, once asked for (`with_icon`).
     pub icon: Option<String>,
+}
+
+impl World {
+    /// The world with its icon, read from the game folder `game`.
+    pub fn with_icon(mut self, game: &Path) -> World {
+        let path = game.join("saves").join(&self.folder).join("icon.png");
+        self.icon = fs::metadata(&path)
+            .ok()
+            .filter(|m| m.is_file() && m.len() <= ICON_MAX)
+            .and_then(|_| fs::read(&path).ok())
+            .filter(|png| png.starts_with(b"\x89PNG"))
+            .map(|png| format!("data:image/png;base64,{}", STANDARD.encode(png)));
+        self
+    }
 }
 
 #[derive(Deserialize)]
@@ -45,6 +59,8 @@ struct LevelData {
 
 /// The largest `level.dat` read (a world's is a few kilobytes) and the largest icon shown.
 const LEVEL_MAX: u64 = 16 * 1024 * 1024;
+/// The most a `level.dat` may unpack to.
+const LEVEL_UNPACKED_MAX: u64 = 64 * 1024 * 1024;
 const ICON_MAX: u64 = 512 * 1024;
 
 fn mode(game_type: i32) -> &'static str {
@@ -66,23 +82,22 @@ fn difficulty(level: Option<i8>) -> &'static str {
     }
 }
 
-/// The world in `dir`, when its `level.dat` reads.
+/// The world in `dir`, when its `level.dat` reads (without its icon).
 pub fn world(dir: &Path) -> Option<World> {
     let level = dir.join("level.dat");
     if fs::metadata(&level).ok()?.len() > LEVEL_MAX {
         return None;
     }
     let mut bytes = Vec::new();
-    flate2::read::GzDecoder::new(File::open(&level).ok()?).read_to_end(&mut bytes).ok()?;
+    flate2::read::GzDecoder::new(File::open(&level).ok()?)
+        .take(LEVEL_UNPACKED_MAX + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > LEVEL_UNPACKED_MAX {
+        return None;
+    }
     let data = fastnbt::from_bytes::<Level>(&bytes).ok()?.data;
     let folder = dir.file_name()?.to_string_lossy().into_owned();
-    let icon_path = dir.join("icon.png");
-    let icon = fs::metadata(&icon_path)
-        .ok()
-        .filter(|m| m.is_file() && m.len() <= ICON_MAX)
-        .and_then(|_| fs::read(&icon_path).ok())
-        .filter(|png| png.starts_with(b"\x89PNG"))
-        .map(|png| format!("data:image/png;base64,{}", STANDARD.encode(png)));
     Some(World {
         name: if data.name.trim().is_empty() { folder.clone() } else { data.name },
         folder,
@@ -90,7 +105,7 @@ pub fn world(dir: &Path) -> Option<World> {
         mode: mode(data.game_type).to_string(),
         difficulty: difficulty(data.difficulty).to_string(),
         hardcore: data.hardcore != 0,
-        icon,
+        icon: None,
     })
 }
 
@@ -168,11 +183,28 @@ pub(crate) mod tests {
             ),
             ("Build", "Будівництво", "creative", "hard")
         );
-        assert!(found[0].icon.as_deref().is_some_and(|i| i.starts_with("data:image/png;base64,")));
-        assert_eq!(
-            (found[1].folder.as_str(), found[1].last_played_ms, found[1].icon.is_none()),
-            ("Old", 1_000, true)
-        );
+        assert!(found.iter().all(|w| w.icon.is_none()), "an icon is read for the world shown only");
+        assert_eq!((found[1].folder.as_str(), found[1].last_played_ms), ("Old", 1_000));
         assert!(worlds(&game.path().join("none")).is_empty());
+        let shown = found[0].clone().with_icon(game.path());
+        assert!(shown.icon.as_deref().is_some_and(|i| i.starts_with("data:image/png;base64,")));
+        assert!(found[1].clone().with_icon(game.path()).icon.is_none(), "it has none");
+    }
+
+    #[test]
+    fn a_level_that_unpacks_past_its_limit_is_no_world() {
+        let game = tempfile::tempdir().unwrap();
+        let dir = game.path().join("saves/Huge");
+        fs::create_dir_all(&dir).unwrap();
+        let mut gz = flate2::write::GzEncoder::new(
+            File::create(dir.join("level.dat")).unwrap(),
+            flate2::Compression::best(),
+        );
+        let zeros = vec![0u8; 1024 * 1024];
+        for _ in 0..(LEVEL_UNPACKED_MAX / zeros.len() as u64 + 1) {
+            gz.write_all(&zeros).unwrap();
+        }
+        gz.finish().unwrap();
+        assert!(world(&dir).is_none());
     }
 }

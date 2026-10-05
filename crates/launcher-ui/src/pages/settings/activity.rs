@@ -1,9 +1,9 @@
 use launcher_shared::{ActivityEntry, Level, OperationDto};
 use leptos::prelude::*;
-use ui_kit::i18n::use_i18n;
+use ui_kit::i18n::{I18nCtx, use_i18n};
 use ui_kit::{Icon, ProgressBar, Section, progress_percent};
 
-use crate::store::use_store;
+use crate::store::{AppStore, use_store};
 
 pub const ACTIVITY_LIMIT: usize = 100;
 
@@ -54,8 +54,37 @@ pub fn kind_key(kind: &str) -> Option<&'static str> {
 }
 
 /// The operations the section lists: the ones the player is meant to see.
-pub fn listed(ops: Vec<OperationDto>) -> Vec<OperationDto> {
-    ops.into_iter().filter(|op| op.visible).collect()
+pub fn listed(ops: &[OperationDto]) -> Vec<OperationDto> {
+    ops.iter().filter(|op| op.visible).cloned().collect()
+}
+
+/// The operations listed, as the store has them now.
+pub fn listed_ops(store: AppStore) -> Memo<Vec<OperationDto>> {
+    Memo::new(move |_| store.ops.with(|o| listed(&o.operations)))
+}
+
+/// What a row shows of one operation, read as the operation moves: a row stays while its
+/// operation's progress ticks (the operation's own words, and its place, stay).
+#[derive(Clone, Copy)]
+pub struct LiveOp {
+    pub title: Memo<String>,
+    pub status: Memo<Option<String>>,
+    /// Percent done; `None` without a total.
+    pub percent: Memo<Option<f64>>,
+}
+
+/// Operation `id` among the `listed` ones.
+pub fn live_op(i18n: I18nCtx, listed: Memo<Vec<OperationDto>>, id: u64) -> LiveOp {
+    let now = Memo::new(move |_| listed.with(|l| l.iter().find(|o| o.id == id).cloned()));
+    LiveOp {
+        title: Memo::new(move |_| now.with(|o| o.as_ref().map(|o| i18n.text(&o.title))).unwrap_or_default()),
+        status: Memo::new(move |_| {
+            now.with(|o| o.as_ref().and_then(|o| o.status.as_ref()).map(|s| i18n.text(s)))
+        }),
+        percent: Memo::new(move |_| {
+            now.with(|o| o.as_ref().and_then(|o| progress_percent(o.progress, o.total)))
+        }),
+    }
 }
 
 #[component]
@@ -63,23 +92,33 @@ pub fn ActivitySection() -> impl IntoView {
     let i18n = use_i18n();
     let store = use_store();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
+    let ops = listed_ops(store);
+    let none = Memo::new(move |_| ops.with(Vec::is_empty));
     view! {
         <Section icon="pending_actions" title=t("activity_active_operations") desc=t("activity_active_operations_desc")>
             {move || {
-                let ops = listed(store.ops.get().operations);
-                if ops.is_empty() {
+                if none.get() {
                     view! { <div class="activity__empty">{i18n.t("activity_no_active_operations")}</div> }.into_any()
                 } else {
-                    ops.into_iter().map(|op| {
-                        let pct = progress_percent(op.progress, op.total);
-                        view! {
-                            <div class="activity__op">
-                                <div class="activity__op-head"><b>{i18n.text(&op.title)}</b><span>{kind_key(&op.kind).map(|k| i18n.t(k))}</span></div>
-                                {op.status.as_ref().map(|s| view! { <div class="activity__meta">{i18n.text(s)}</div> })}
-                                <ProgressBar value=Signal::derive(move || pct) />
-                            </div>
-                        }
-                    }).collect_view().into_any()
+                    view! {
+                        <For
+                            each=move || ops.get()
+                            key=|op| op.id
+                            children=move |op| {
+                                let live = live_op(i18n, ops, op.id);
+                                view! {
+                                    <div class="activity__op">
+                                        <div class="activity__op-head"><b>{move || live.title.get()}</b><span>{kind_key(&op.kind).map(|k| i18n.t(k))}</span></div>
+                                        <Show when=move || live.status.with(Option::is_some)>
+                                            <div class="activity__meta">{move || live.status.get()}</div>
+                                        </Show>
+                                        <ProgressBar value=live.percent />
+                                    </div>
+                                }
+                            }
+                        />
+                    }
+                    .into_any()
                 }
             }}
         </Section>
@@ -148,7 +187,7 @@ mod kind_tests {
             total: None,
             visible,
         };
-        let ids: Vec<u64> = listed(vec![op(1, true), op(2, false)]).iter().map(|o| o.id).collect();
+        let ids: Vec<u64> = listed(&[op(1, true), op(2, false)]).iter().map(|o| o.id).collect();
         assert_eq!(ids, [1]);
     }
 }

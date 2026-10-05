@@ -57,6 +57,18 @@ impl AppStore {
         });
     }
 
+    /// Shows `arrived` when it differs from the list shown: a game's start, run and exit each
+    /// announce the same list again.
+    pub fn show_builds(&self, arrived: Vec<BuildDto>) {
+        self.builds.maybe_update(|shown| {
+            let changed = *shown != arrived;
+            if changed {
+                *shown = arrived;
+            }
+            changed
+        });
+    }
+
     /// Shows `arrived` unless a later snapshot is shown already (answers and the backend's
     /// announcements of changes saved side by side may arrive in any order).
     pub fn show_settings(&self, arrived: SettingsSnapshot) {
@@ -131,4 +143,61 @@ impl SettingsWriter {
 
 pub fn use_settings_writer() -> SettingsWriter {
     SettingsWriter { store: use_store(), toasts: use_toasts(), i18n: use_i18n() }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    fn build(key: &str, running: bool) -> BuildDto {
+        BuildDto {
+            key: key.into(),
+            version_id: key.into(),
+            name: key.into(),
+            version: None,
+            loader: None,
+            client: None,
+            loader_version: None,
+            game_dir: String::new(),
+            image: None,
+            description: String::new(),
+            running,
+            profile: None,
+        }
+    }
+
+    #[test]
+    fn a_list_equal_to_the_shown_one_wakes_nobody() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let store = provide_store();
+            // Reads the list again each time the list announces a change.
+            let reads = Arc::new(AtomicUsize::new(0));
+            let watcher = {
+                let reads = reads.clone();
+                Memo::new_with_compare(
+                    move |_| {
+                        reads.fetch_add(1, Ordering::SeqCst);
+                        store.builds.get()
+                    },
+                    |_, _| true,
+                )
+            };
+            let list = vec![build("aero", false), build("zeta", false)];
+            store.show_builds(list.clone());
+            let _ = watcher.get();
+            let heard = reads.load(Ordering::SeqCst);
+            store.show_builds(list.clone());
+            let _ = watcher.get();
+            assert_eq!(reads.load(Ordering::SeqCst), heard, "the same list is not announced again");
+            store.show_builds(vec![build("aero", true), build("zeta", false)]);
+            let _ = watcher.get();
+            assert_eq!(reads.load(Ordering::SeqCst), heard + 1, "a changed one is");
+            assert!(store.builds.get_untracked()[0].running);
+        });
+        owner.cleanup();
+    }
 }

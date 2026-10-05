@@ -88,6 +88,7 @@ async fn run_while(
         components: w.deps.components.as_ref(),
         downloader: &w.deps.downloader,
         running,
+        ask_within: None,
     };
     sync(&deps, build, force, &op(w)).await
 }
@@ -164,6 +165,38 @@ async fn a_failed_download_leaves_files_and_build_as_they_were() {
     let saved = w.deps.versions.get(&build.key).unwrap();
     assert!(!saved.options.contains_key("jvmArguments"), "the build is kept as it was");
     assert_eq!(SyncJournal::new(&dir, JOURNAL).status().as_deref(), Some("rolled_back"));
+}
+
+/// A server that takes connections and never answers.
+async fn silent() -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            held.push(socket);
+        }
+    });
+    (origin, task)
+}
+
+#[tokio::test]
+async fn a_server_that_does_not_answer_is_waited_for_only_so_long_before_play() {
+    let w = World::start().await;
+    let build = installed(&w);
+    let (origin, _server) = silent().await;
+    let api = module_tensa::backend::api::TensaApi::new(&format!("{origin}/api/mods")).unwrap();
+    let deps = SyncDeps {
+        api: &api,
+        versions: &w.deps.versions,
+        components: w.deps.components.as_ref(),
+        downloader: &w.deps.downloader,
+        running: false,
+        ask_within: Some(std::time::Duration::from_millis(300)),
+    };
+    let started = std::time::Instant::now();
+    assert_eq!(sync(&deps, &build, false, &op(&w)).await.unwrap(), Synced::Skipped);
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
 }
 
 #[tokio::test]

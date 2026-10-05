@@ -189,6 +189,11 @@ impl CoreApp {
         if moved > 0 {
             tracing::info!("Windows chooses the GPU of {moved} builds now (nothing goes to the registry)");
         }
+        // Folders of installs a closed launcher cut short: removed in the background, they may be large.
+        let sweeping = versions.clone();
+        let _ = std::thread::Builder::new()
+            .name("abandoned-claims".into())
+            .spawn(move || sweeping.clear_abandoned_claims());
         let shared = Arc::new(Coordinator::shared());
         let platform = GamePlatform::current();
         let endpoints = MojangEndpoints::default();

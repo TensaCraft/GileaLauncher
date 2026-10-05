@@ -13,6 +13,7 @@ use launcher_shared::{AppError, AppResult, ErrorCode};
 use sha1::{Digest, Sha1};
 
 use super::screenshots::ScreenshotFile;
+use crate::storage::atomic::rename_retrying;
 
 /// A thumbnail's width; its height follows the picture.
 pub const THUMB_WIDTH: u32 = 480;
@@ -94,7 +95,7 @@ impl Thumbs {
                 .map_err(|e| failed(shot, e))?;
             out.flush().map_err(|e| failed(shot, e))
         });
-        match written.and_then(|()| fs::rename(&part, &path).map_err(|e| failed(shot, e))) {
+        match written.and_then(|()| rename_retrying(&part, &path).map_err(|e| failed(shot, e))) {
             Ok(()) => Ok(path),
             Err(e) => {
                 let _ = fs::remove_file(&part);

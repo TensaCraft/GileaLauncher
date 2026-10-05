@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde_json::{Map, Value, json};
 
+use super::atomic::rename_retrying;
 use super::json::write_json_file;
 
 /// The default journal in a build's folder.
@@ -138,7 +139,7 @@ fn restore_copy(backup: &Path, destination: &Path) -> AppResult<()> {
     }
     let name = destination.file_name().unwrap_or_default().to_string_lossy();
     let temp = destination.with_file_name(format!(".{name}.rollback.{}.tmp", uuid::Uuid::new_v4().simple()));
-    let result = fs::copy(backup, &temp).and_then(|_| fs::rename(&temp, destination));
+    let result = fs::copy(backup, &temp).and_then(|_| rename_retrying(&temp, destination));
     if result.is_err() {
         let _ = fs::remove_file(&temp);
     }
@@ -390,7 +391,7 @@ impl SyncJournal {
             if let Some(parent) = step.backup.parent() {
                 fs::create_dir_all(parent).map_err(|e| io_error(parent, e))?;
             }
-            fs::rename(&step.destination, &step.backup).map_err(|e| io_error(&step.destination, e))?;
+            rename_retrying(&step.destination, &step.backup).map_err(|e| io_error(&step.destination, e))?;
         }
         for step in &steps {
             set_entry(payload, step.index, "state", json!("backed_up"));
@@ -401,7 +402,7 @@ impl SyncJournal {
             if let Some(parent) = step.destination.parent() {
                 fs::create_dir_all(parent).map_err(|e| io_error(parent, e))?;
             }
-            fs::rename(&step.staged, &step.destination).map_err(|e| io_error(&step.destination, e))?;
+            rename_retrying(&step.staged, &step.destination).map_err(|e| io_error(&step.destination, e))?;
         }
         for step in &steps {
             set_entry(payload, step.index, "state", json!("applied"));

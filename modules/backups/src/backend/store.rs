@@ -353,18 +353,26 @@ fn backup_of(meta: &Value, build: &Build, folder: &str, zip_name: &str) -> bool 
         && text("world_folder").is_some_and(|world| safe_name(world) == folder)
 }
 
-/// `files` of `source` into a zip at `target` (deflate, level 1); temporary files stay out.
+/// The game's own compressed files: region chunks (zlib) and NBT data (gzip). Deflating them
+/// again costs the time of a backup and saves next to nothing.
+const COMPRESSED_BY_THE_GAME: &[&str] = &[".mca", ".mcc", ".mcr", ".dat", ".dat_old"];
+
+/// `files` of `source` into a zip at `target` (deflate, level 1; the game's compressed files
+/// stored as they are); temporary files stay out.
 fn write_zip(source: &Path, files: &[(String, u64)], target: &Path) -> AppResult<()> {
     let out = File::create(target).map_err(|e| io_err(target, e))?;
     let mut zip = zip::ZipWriter::new(io::BufWriter::new(out));
-    let options = SimpleFileOptions::default()
+    let deflated = SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
         .compression_level(Some(1))
         .large_file(true);
+    let stored = deflated.compression_method(zip::CompressionMethod::Stored).compression_level(None);
     let mut buf = vec![0u8; 256 * 1024];
     for (rel, _) in files.iter().filter(|(rel, _)| !rel.ends_with(".tmp")) {
         let path = source.join(rel);
         let mut file = File::open(&path).map_err(|e| io_err(&path, e))?;
+        let options =
+            if COMPRESSED_BY_THE_GAME.iter().any(|ext| rel.ends_with(ext)) { stored } else { deflated };
         zip.start_file(rel.as_str(), options).map_err(|e| io_err(target, io::Error::other(e)))?;
         loop {
             let n = file.read(&mut buf).map_err(|e| io_err(&path, e))?;
@@ -445,6 +453,24 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 9, 29, 10, 20, 30).unwrap();
         store.create(&build("my_build"), &game, "World", Kind::Manual, now).unwrap();
         assert!(!dir.join("2026-01-01_00-00-00.zip.tmp").exists());
+    }
+
+    #[test]
+    fn files_the_game_compressed_are_stored_and_the_rest_deflated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        let source = world(&game, "World");
+        fs::write(source.join("stats.json"), "{}".repeat(500)).unwrap();
+        let store = Store::new(tmp.path().join("backups"));
+        let now = Utc.with_ymd_and_hms(2026, 9, 29, 10, 20, 30).unwrap();
+        let made = store.create(&build("my_build"), &game, "World", Kind::Manual, now).unwrap();
+        let dir = store.world_dir("my_build", "World");
+        let mut zip = zip::ZipArchive::new(fs::File::open(dir.join(&made.zip_name)).unwrap()).unwrap();
+        let method =
+            |zip: &mut zip::ZipArchive<fs::File>, name: &str| zip.by_name(name).unwrap().compression();
+        assert_eq!(method(&mut zip, "region/r.0.0.mca"), zip::CompressionMethod::Stored);
+        assert_eq!(method(&mut zip, "level.dat"), zip::CompressionMethod::Stored);
+        assert_eq!(method(&mut zip, "stats.json"), zip::CompressionMethod::Deflated);
     }
 
     #[test]

@@ -186,8 +186,9 @@ impl ComponentInstaller {
 
     /// Forge and NeoForge: every Minecraft version has builds of its own.
     async fn installer_catalog(&self, kind: LoaderKind, unstable: bool) -> AppResult<Vec<LoaderOption>> {
-        let games = self.installer_meta(kind)?.games().await?;
-        let vanilla = self.minecraft.catalog(true).await?;
+        // Asked side by side: each is a request of its own (often to another host).
+        let (games, vanilla) =
+            tokio::try_join!(self.installer_meta(kind)?.games(), self.minecraft.catalog(true))?;
         Ok(vanilla
             .into_iter()
             .filter(|v| unstable || v.kind != "snapshot")
@@ -202,10 +203,10 @@ impl ComponentInstaller {
 
     async fn meta_catalog(&self, kind: LoaderKind, unstable: bool) -> AppResult<Vec<LoaderOption>> {
         let meta = self.meta_of(kind)?;
-        let games = meta.games().await?;
-        let builds = offered_builds(&meta.loaders().await?, unstable);
+        let (games, loaders, vanilla) =
+            tokio::try_join!(meta.games(), meta.loaders(), self.minecraft.catalog(true))?;
+        let builds = offered_builds(&loaders, unstable);
         let Some(default) = builds.first().map(|b| b.version.clone()) else { return Ok(Vec::new()) };
-        let vanilla = self.minecraft.catalog(true).await?;
         Ok(vanilla
             .into_iter()
             .filter(|v| games.iter().any(|(id, stable)| id == &v.id && (*stable || unstable)))
@@ -311,13 +312,12 @@ impl ComponentInstaller {
                     }
                 }
                 LoaderKind::Forge | LoaderKind::NeoForge => {
-                    if force || !self.installer_ready(component).await {
-                        tracing::warn!(
-                            "Running the {} installer of {component} again",
-                            spec.kind.display_name()
-                        );
-                        return self.install_with_installer(spec, force, progress).await;
+                    let ready = if force { None } else { self.installer_ready(component).await };
+                    if let Some(ready) = ready {
+                        return Ok(ready);
                     }
+                    tracing::warn!("Running the {} installer of {component} again", spec.kind.display_name());
+                    return self.install_with_installer(spec, force, progress).await;
                 }
                 LoaderKind::Minecraft => {}
             }

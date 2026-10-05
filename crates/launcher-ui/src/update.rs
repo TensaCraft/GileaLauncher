@@ -1,6 +1,6 @@
 //! Launcher self-update UI: status line for Settings → Launcher and the two dialogs.
 
-use launcher_shared::{Level, Text, UpdateChannel, UpdateInfo, UpdateState, UpdateStatus};
+use launcher_shared::{ErrorCode, Level, Text, UpdateChannel, UpdateInfo, UpdateState, UpdateStatus};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::{I18nCtx, use_i18n};
@@ -82,7 +82,10 @@ impl UpdateActions {
         spawn_local(async move {
             if let Err(e) = ipc::call::<()>("update_apply").await {
                 starting.set(false);
-                crate::shell::failure::failure_toast(toasts, i18n, i18n.error(&e), &e);
+                // Held while work is under way: the close dialog asks instead.
+                if e.code != ErrorCode::Cancelled {
+                    crate::shell::failure::failure_toast(toasts, i18n, i18n.error(&e), &e);
+                }
             }
         });
     }

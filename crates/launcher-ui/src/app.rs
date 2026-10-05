@@ -99,7 +99,7 @@ pub fn App() -> impl IntoView {
             leptos::task::spawn_local(async move {
                 if let Ok(snapshot) = ipc::call::<BuildsSnapshot>("builds_list").await {
                     let build = snapshot.builds.iter().find(|b| b.key == key).cloned();
-                    store.builds.set(snapshot.builds);
+                    store.show_builds(snapshot.builds);
                     if let Some(build) = build {
                         flow.start(build);
                     }
@@ -138,7 +138,7 @@ pub fn App() -> impl IntoView {
         store.profiles_loaded.set(true);
     });
     ipc::listen::<BuildsSnapshot>(names::BUILDS, move |s| {
-        store.builds.set(s.builds);
+        store.show_builds(s.builds);
         store.builds_loaded.set(true);
     });
     // Game events only change `running`; the backend itself alerts about crashes.
@@ -193,7 +193,7 @@ pub fn App() -> impl IntoView {
             store.profiles_loaded.set(true);
         }
         if let Ok(snapshot) = ipc::call::<BuildsSnapshot>("builds_list").await {
-            store.builds.set(snapshot.builds);
+            store.show_builds(snapshot.builds);
             store.builds_loaded.set(true);
         }
         if let Ok(state) = ipc::call::<AuthState>("auth_state").await {

@@ -3,10 +3,11 @@
 
 use std::collections::BTreeSet;
 
-use launcher_shared::{BuildDto, BuildShots, ShotRef};
+use launcher_shared::{BuildDto, BuildShots, ScreenshotDto, ShotRef};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
+use ui_kit::lists::{SEARCH_PAUSE, debounced};
 use ui_kit::{
     ActionGroup, Button, ConfirmDialog, EmptyState, Icon, IconAction, Select, SelectOption, Skeleton,
     TextInput, Variant, ipc, use_context_menu,
@@ -32,6 +33,28 @@ fn cover(build: Option<&BuildDto>) -> AnyView {
             view! { <Icon name=loader_icon(loader) /> }.into_any()
         }
     }
+}
+
+/// What the page's body shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Listing {
+    Loading,
+    Failed(String),
+    /// No build has a screenshot.
+    Empty,
+    /// The search or the build filter leaves none.
+    NoMatch,
+    Groups,
+}
+
+/// The group of build `key` among those shown.
+fn group_of<'a>(groups: &'a [BuildShots], key: &str) -> Option<&'a BuildShots> {
+    groups.iter().find(|g| g.key == key)
+}
+
+/// What identifies a thumbnail: it is rebuilt when its name, date or picture changes.
+fn tile_key(shot: &ScreenshotDto) -> (String, Option<u64>, String) {
+    (shot.name.clone(), shot.modified_ms, shot.thumb.clone())
 }
 
 #[component]
@@ -65,25 +88,35 @@ pub fn ScreenshotsPage() -> impl IntoView {
     });
 
     let query = RwSignal::new(String::new());
+    // The search the list follows: the typed text after a pause.
+    let search = debounced(query, SEARCH_PAUSE);
     let only = RwSignal::new(String::new());
     let sort = RwSignal::new(ShotSort::Newest.id().to_string());
     let build_name = Callback::new(move |key: String| {
         store.builds.with(|b| b.iter().find(|b| b.key == key).map(|b| b.name.clone())).unwrap_or(key)
     });
+    let order =
+        Memo::new(move |_| store.builds.with(|b| b.iter().map(|b| b.key.clone()).collect::<Vec<_>>()));
     let groups = Memo::new(move |_| {
-        let order: Vec<String> = store.builds.with(|b| b.iter().map(|b| b.key.clone()).collect());
+        let sort = sort.with(|s| ShotSort::from_id(s));
         all.with(|a| match a {
-            Some(Ok(all)) => {
-                let only = only.get();
-                shown_groups(
-                    all,
-                    &order,
-                    &query.get(),
-                    (!only.is_empty()).then_some(only.as_str()),
-                    ShotSort::from_id(&sort.get()),
-                )
-            }
+            Some(Ok(all)) => order.with(|order| {
+                only.with(|only| {
+                    search.with(|query| {
+                        shown_groups(all, order, query, (!only.is_empty()).then_some(only.as_str()), sort)
+                    })
+                })
+            }),
             _ => Vec::new(),
+        })
+    });
+    let listing = Memo::new(move |_| {
+        all.with(|a| match a {
+            None => Listing::Loading,
+            Some(Err(message)) => Listing::Failed(message.clone()),
+            Some(Ok(all)) if all.is_empty() => Listing::Empty,
+            Some(Ok(_)) if groups.with(Vec::is_empty) => Listing::NoMatch,
+            Some(Ok(_)) => Listing::Groups,
         })
     });
     let shown = Memo::new(move |_| groups.with(|g| flat(g)));
@@ -116,7 +149,7 @@ pub fn ScreenshotsPage() -> impl IntoView {
     let changed = Callback::new(move |()| load());
     // Another search or build starts the selection over: what is selected is always shown.
     Effect::new(move |_| {
-        query.track();
+        search.track();
         only.track();
         selected.set(BTreeSet::new());
     });
@@ -163,42 +196,57 @@ pub fn ScreenshotsPage() -> impl IntoView {
         });
     };
 
-    let group_view = move |group: BuildShots| {
-        let key = group.key.clone();
+    // A section follows its build and its screenshots, and stays while the others around it change.
+    let group_view = move |key: String| {
         let folded = fold_state(format!("shots.fold.{key}"));
-        let build = store.builds.with_untracked(|b| b.iter().find(|b| b.key == key).cloned());
-        let name = build.as_ref().map_or_else(|| key.clone(), |b| b.name.clone());
-        let (count, bytes) = totals(&group.shots);
-        let meta = format!("{count} · {}", launcher_shared::units::size(bytes, &i18n.lang()));
+        let build = {
+            let key = key.clone();
+            Memo::new(move |_| store.builds.with(|b| b.iter().find(|b| b.key == key).cloned()))
+        };
+        let name = {
+            let key = key.clone();
+            move || build.with(|b| b.as_ref().map_or_else(|| key.clone(), |b| b.name.clone()))
+        };
+        let sums = {
+            let key = key.clone();
+            Memo::new(move |_| groups.with(|g| group_of(g, &key).map(|g| totals(&g.shots))))
+        };
+        let meta = move || {
+            sums.get()
+                .map(|(count, bytes)| {
+                    format!("{count} · {}", launcher_shared::units::size(bytes, &i18n.lang()))
+                })
+                .unwrap_or_default()
+        };
         let for_dir = key.clone();
-        let tiles = group
-            .shots
-            .into_iter()
-            .map(|shot| {
-                let id = (key.clone(), shot.name.clone());
-                let (for_click, for_check, for_menu) = (id.clone(), id.clone(), id);
-                view! {
-                    <ShotTile
-                        shot=shot
-                        selecting=selecting
-                        selected=Signal::derive(move || selected.with(|s| s.contains(&for_check)))
-                        on_click=Callback::new(move |()| {
-                            if selecting.get_untracked() {
-                                let id = for_click.clone();
-                                selected.update(|s| {
-                                    if !s.remove(&id) {
-                                        s.insert(id);
-                                    }
-                                });
-                            } else {
-                                show(&for_click.0, &for_click.1, false);
-                            }
-                        })
-                        on_menu=Callback::new(move |pos| tile_menu(for_menu.0.clone(), for_menu.1.clone(), pos))
-                    />
-                }
-            })
-            .collect_view();
+        let shots_of = {
+            let key = key.clone();
+            move || groups.with(|g| group_of(g, &key).map(|g| g.shots.clone()).unwrap_or_default())
+        };
+        let tile = move |shot: ScreenshotDto| {
+            let id = (key.clone(), shot.name.clone());
+            let (for_click, for_check, for_menu) = (id.clone(), id.clone(), id);
+            view! {
+                <ShotTile
+                    shot=shot
+                    selecting=selecting
+                    selected=Signal::derive(move || selected.with(|s| s.contains(&for_check)))
+                    on_click=Callback::new(move |()| {
+                        if selecting.get_untracked() {
+                            let id = for_click.clone();
+                            selected.update(|s| {
+                                if !s.remove(&id) {
+                                    s.insert(id);
+                                }
+                            });
+                        } else {
+                            show(&for_click.0, &for_click.1, false);
+                        }
+                    })
+                    on_menu=Callback::new(move |pos| tile_menu(for_menu.0.clone(), for_menu.1.clone(), pos))
+                />
+            }
+        };
         view! {
             <section class="shot-group">
                 <div class="shot-group__head">
@@ -212,7 +260,7 @@ pub fn ScreenshotsPage() -> impl IntoView {
                             folded.update(|f| *f = !*f);
                         }
                     >
-                        <span class="shot-group__cover">{cover(build.as_ref())}</span>
+                        <span class="shot-group__cover">{move || build.with(|b| cover(b.as_ref()))}</span>
                         <span class="shot-group__name">{name}</span>
                         <span class="shot-group__meta">{meta}</span>
                         <Icon name="expand_more" class="fold-head__chevron" />
@@ -223,31 +271,40 @@ pub fn ScreenshotsPage() -> impl IntoView {
                         on_click=Callback::new(move |()| actions.open_dir(for_dir.clone()))
                     />
                 </div>
-                <div class="shot-grid" class:is-hidden=folded>{tiles}</div>
+                <div class="shot-grid" class:is-hidden=folded>
+                    <For each=shots_of key=tile_key children=tile />
+                </div>
             </section>
         }
     };
 
     let body = move || {
-        match all.get() {
-        None => view! {
-            <div class="shot-grid">{(0..8).map(|_| view! { <div class="shot-tile is-skeleton"><Skeleton width=120 /></div> }).collect_view()}</div>
+        match listing.get() {
+            Listing::Loading => view! {
+                <div class="shot-grid">{(0..8).map(|_| view! { <div class="shot-tile is-skeleton"><Skeleton width=120 /></div> }).collect_view()}</div>
+            }
+            .into_any(),
+            Listing::Failed(message) => view! {
+                <EmptyState icon="error_outline" title=t("unknown_error") desc=message>
+                    <Button icon="refresh" on_click=move |_| load()>{move || i18n.t("refresh")}</Button>
+                </EmptyState>
+            }
+            .into_any(),
+            Listing::Empty => {
+                view! { <EmptyState icon="photo_library" title=t("shots_none_title") desc=t("shots_none_desc") /> }.into_any()
+            }
+            Listing::NoMatch => {
+                view! { <EmptyState icon="search_off" title=t("shots_nothing_found") /> }.into_any()
+            }
+            Listing::Groups => view! {
+                <For
+                    each=move || groups.with(|g| g.iter().map(|g| g.key.clone()).collect::<Vec<_>>())
+                    key=|key| key.clone()
+                    children=group_view
+                />
+            }
+            .into_any(),
         }
-        .into_any(),
-        Some(Err(message)) => view! {
-            <EmptyState icon="error_outline" title=t("unknown_error") desc=message>
-                <Button icon="refresh" on_click=move |_| load()>{move || i18n.t("refresh")}</Button>
-            </EmptyState>
-        }
-        .into_any(),
-        Some(Ok(all)) if all.is_empty() => {
-            view! { <EmptyState icon="photo_library" title=t("shots_none_title") desc=t("shots_none_desc") /> }.into_any()
-        }
-        Some(Ok(_)) if groups.with(Vec::is_empty) => {
-            view! { <EmptyState icon="search_off" title=t("shots_nothing_found") /> }.into_any()
-        }
-        Some(Ok(_)) => groups.get().into_iter().map(group_view).collect_view().into_any(),
-    }
     };
 
     let select_all = move || {

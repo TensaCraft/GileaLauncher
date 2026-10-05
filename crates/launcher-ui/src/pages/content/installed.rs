@@ -13,7 +13,7 @@ use ui_kit::{
     use_toasts,
 };
 
-use super::{display_name, matches, subtitle, texts};
+use super::{display_name, matches, search_text, subtitle, texts};
 use crate::builds::LatestRequest;
 use crate::providers::installed::{ContentIcon, ProviderRowActions, ProviderTools, updates_badge};
 use crate::providers::store::store;
@@ -254,8 +254,9 @@ pub fn InstalledPanel(
     };
     // The rows the search leaves; a row is rebuilt only when its file changes (the rest stay put).
     let visible = Memo::new(move |_| {
+        let wanted = query.with(|q| search_text(q));
         list.with(|l| match l {
-            Some(Ok(l)) => l.items.iter().filter(|i| matches(i, &query.get())).cloned().collect::<Vec<_>>(),
+            Some(Ok(l)) => l.items.iter().filter(|i| matches(i, &wanted)).cloned().collect::<Vec<_>>(),
             _ => Vec::new(),
         })
     });

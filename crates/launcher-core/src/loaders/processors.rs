@@ -7,7 +7,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde_json::{Value, json};
@@ -24,6 +25,12 @@ use crate::storage::json::write_json_file;
 pub const LOADER_MARKER: &str = ".launcher-loader.json";
 /// Lines of processor output kept for an error message.
 const OUTPUT_TAIL: usize = 20;
+/// The longest one processor may run: a JVM stuck on a network that stopped answering would hold
+/// the shared Minecraft files, and every other install with them, for good.
+const PROCESSOR_DEADLINE: Duration = Duration::from_secs(10 * 60);
+/// The JVM's own network timeouts (ms) for a processor that downloads (Mojang's mappings).
+const JAVA_NET_TIMEOUTS: [&str; 2] =
+    ["-Dsun.net.client.defaultConnectTimeout=30000", "-Dsun.net.client.defaultReadTimeout=120000"];
 
 /// Where a processor plan is resolved.
 pub struct ProcessorContext<'a> {
@@ -210,6 +217,7 @@ impl ProcessorRunner for JavaProcessorRunner {
         let classpath = call.classpath.iter().map(|path| text(path)).collect::<Vec<_>>().join(separator);
         let mut command = Command::new(java);
         command
+            .args(JAVA_NET_TIMEOUTS)
             .arg("-cp")
             .arg(classpath)
             .arg(&call.main_class)
@@ -226,7 +234,16 @@ impl ProcessorRunner for JavaProcessorRunner {
             // CREATE_NO_WINDOW: no console window for java.exe.
             command.creation_flags(0x0800_0000);
         }
-        let output = command.output().map_err(|e| format!("{} could not start: {e}", java.display()))?;
+        let output = output_within(&mut command, PROCESSOR_DEADLINE)
+            .map_err(|e| format!("{} could not start: {e}", java.display()))?
+            .ok_or_else(|| {
+                format!(
+                    "{} ({}) did not finish in {} minutes and was stopped",
+                    call.jar,
+                    call.main_class,
+                    PROCESSOR_DEADLINE.as_secs() / 60
+                )
+            })?;
         let printed =
             format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
         tracing::debug!("Processor {} said:\n{printed}", call.jar);
@@ -237,6 +254,37 @@ impl ProcessorRunner for JavaProcessorRunner {
         let tail = lines[lines.len().saturating_sub(OUTPUT_TAIL)..].join("\n");
         Err(format!("{} ({}) ended with {}: {tail}", call.jar, call.main_class, output.status))
     }
+}
+
+/// `command`'s output once it ends; past `deadline` it is killed, and there is none.
+fn output_within(command: &mut Command, deadline: Duration) -> std::io::Result<Option<Output>> {
+    fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    }
+    let mut child = command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let (stdout, stderr) = (drain(child.stdout.take()), drain(child.stderr.take()));
+    let started = Instant::now();
+    let mut pause = Duration::from_millis(5);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break Some(status);
+        }
+        if started.elapsed() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(pause);
+        pause = (pause * 2).min(Duration::from_millis(100));
+    };
+    let (stdout, stderr) = (stdout.join().unwrap_or_default(), stderr.join().unwrap_or_default());
+    Ok(status.map(|status| Output { status, stdout, stderr }))
 }
 
 /// Remembers what the installer made — the jars it shipped and what its processors wrote: every
@@ -291,6 +339,35 @@ mod tests {
     use std::io::{Cursor, Write};
 
     use super::*;
+
+    fn sleeper() -> Command {
+        if cfg!(windows) {
+            let mut c = Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.arg("30");
+            c
+        }
+    }
+
+    #[test]
+    fn a_processor_that_hangs_is_stopped_at_its_deadline() {
+        let started = std::time::Instant::now();
+        let output = output_within(&mut sleeper(), std::time::Duration::from_millis(300)).unwrap();
+        assert!(output.is_none(), "past the deadline");
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn a_processor_that_ends_gives_its_output() {
+        let mut echo = if cfg!(windows) { Command::new("cmd") } else { Command::new("sh") };
+        echo.args(if cfg!(windows) { ["/C", "echo said"] } else { ["-c", "echo said"] });
+        let output = output_within(&mut echo, std::time::Duration::from_secs(30)).unwrap().unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "said");
+    }
     use crate::loaders::installer::Processor;
 
     /// `root` joined with the `/`-separated `parts`.

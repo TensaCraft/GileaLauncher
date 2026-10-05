@@ -14,6 +14,14 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
+/// `work` on the blocking pool: a command that reads or removes many files must not hold one of the
+/// async workers that downloads and the other commands run on.
+pub(crate) async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> AppResult<T> + Send + 'static,
+) -> AppResult<T> {
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|e| AppError::internal(e.to_string()))?
+}
+
 pub struct AppState {
     pub core: Arc<CoreApp>,
     pub pending_launch: Mutex<Option<String>>,
@@ -41,7 +49,8 @@ pub fn take_pending_launch(state: State<'_, AppState>) -> Option<String> {
     state.pending_launch.lock().ok().and_then(|mut p| p.take())
 }
 
-#[tauri::command]
+/// Off the main thread: it waits for the settings' lock, which a write holds through the disk.
+#[tauri::command(async)]
 pub fn settings_get(state: State<'_, AppState>) -> SettingsSnapshot {
     state.core.settings.snapshot()
 }
@@ -292,8 +301,13 @@ pub fn app_quit(app: AppHandle) {
     crate::quit_anyway(&app);
 }
 
+/// Restarts the launcher; while work is under way, asks first as a close does.
 #[tauri::command]
 pub fn app_restart(app: AppHandle) {
+    if crate::hold_quit(&app) {
+        tracing::info!("Restart held: work is under way");
+        return;
+    }
     tracing::info!("Restart requested by the UI");
     app.restart();
 }
@@ -336,16 +350,21 @@ pub async fn update_download(state: State<'_, AppState>) -> AppResult<UpdateStat
 }
 
 /// Starts the update helper and exits so it can replace the program. Hashes the staged files,
-/// so it runs off the main thread.
+/// so it runs off the main thread. While work is under way it asks first, as a close does
+/// (`Cancelled`): quitting anyway leaves the update to the next start.
 #[tauri::command(async)]
 pub fn update_apply(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    if crate::hold_quit(&app) {
+        return Err(AppError::new(ErrorCode::Cancelled, "work is under way"));
+    }
     state.core.updater.apply()?;
     tracing::info!("Launcher update helper started; exiting");
     app.exit(0);
     Ok(())
 }
 
-#[tauri::command]
+/// Off the main thread: it waits for the profiles' lock, which a write holds through the disk.
+#[tauri::command(async)]
 pub fn profiles_list(state: State<'_, AppState>) -> ProfilesSnapshot {
     state.core.auth.snapshot()
 }

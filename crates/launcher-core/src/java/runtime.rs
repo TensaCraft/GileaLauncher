@@ -23,7 +23,7 @@ use crate::minecraft::{InstallProgress, InstallProgressFn};
 use crate::net::downloader::{DownloadTask, Downloader, ExpectedHash, HashKind, hash_file};
 use crate::net::meta::MetaClient;
 use crate::safe_path::safe_relative;
-use crate::storage::atomic::{atomic_write, atomic_write_text};
+use crate::storage::atomic::{atomic_write, atomic_write_text, rename_retrying};
 
 /// The runtime for versions whose JSON names none.
 pub const LEGACY_COMPONENT: &str = "jre-legacy";
@@ -273,7 +273,8 @@ fn plan_files(
                     Some(_) if unpacked(&path, &downloads.raw, verify) => {}
                     Some(lzma) => {
                         let packed = sibling(&path, ".launcher.lzma");
-                        tasks.push(remote_task(lzma, packed.clone()));
+                        // Unpacked and removed right after, its result checked by SHA-1.
+                        tasks.push(remote_task(lzma, packed.clone()).transient());
                         after.unpack.push((packed, path, sha1));
                     }
                     None => tasks.push(remote_task(&downloads.raw, path)),
@@ -299,7 +300,7 @@ fn unpack(packed: &Path, dest: &Path, sha1: &str) -> io::Result<()> {
         let _ = fs::remove_file(&temp);
         return Err(io::Error::other(format!("{}: sha1 {actual}, expected {sha1}", dest.display())));
     }
-    if let Err(e) = fs::rename(&temp, dest) {
+    if let Err(e) = rename_retrying(&temp, dest) {
         let _ = fs::remove_file(&temp);
         return Err(e);
     }

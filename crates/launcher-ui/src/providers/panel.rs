@@ -118,11 +118,7 @@ pub fn ProviderPanel(
         let project = hit.project_id.clone();
         let is_installed = {
             let project = project.clone();
-            Signal::derive(move || {
-                store()
-                    .overview(&id.get_value(), &key.get_value(), kind)
-                    .is_some_and(|o| o.notes.iter().any(|n| n.project_id == project))
-            })
+            Signal::derive(move || store().knows_project(&id.get_value(), &key.get_value(), kind, &project))
         };
         let newer = {
             let project = project.clone();

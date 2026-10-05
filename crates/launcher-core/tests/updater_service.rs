@@ -179,6 +179,19 @@ async fn finds_downloads_and_stages_an_update() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_download_cut_short_leaves_the_service_free() {
+    let w = world();
+    publish(&w, "0.2.0");
+    let srv = serve(&w, Scenario::Slow).await;
+    let (svc, _) = service(&w, &srv.base_url, mock_github::REPO, false);
+    assert_eq!(kind(&svc.check(false, false).await), "available");
+    let cut = tokio::time::timeout(std::time::Duration::from_millis(200), svc.download_and_prepare()).await;
+    assert!(cut.is_err(), "the slow download is still running when it is dropped");
+    assert_eq!(kind(&svc.check(false, false).await), "available", "a new check runs");
+    srv.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn development_mode_stops_after_the_verified_download() {
     let w = world();
     publish(&w, "0.2.0");

@@ -83,7 +83,7 @@ impl BuildActions {
         let store = self.store;
         spawn_local(async move {
             if let Ok(snapshot) = ipc::call::<BuildsSnapshot>("builds_list").await {
-                store.builds.set(snapshot.builds);
+                store.show_builds(snapshot.builds);
                 store.builds_loaded.set(true);
             }
         });
@@ -101,7 +101,7 @@ impl BuildActions {
         let this = *self;
         spawn_local(async move {
             match ipc::invoke::<_, BuildsSnapshot>("builds_reorder", &ReorderArgs { keys }).await {
-                Ok(snapshot) => this.store.builds.set(snapshot.builds),
+                Ok(snapshot) => this.store.show_builds(snapshot.builds),
                 Err(e) => {
                     this.warn(this.i18n.error(&e), &e);
                     this.refresh();
@@ -179,7 +179,7 @@ impl BuildActions {
         let this = *self;
         spawn_local(async move {
             match ipc::invoke::<_, BuildsSnapshot>("build_delete", &DeleteArgs { key, delete_files }).await {
-                Ok(snapshot) => this.store.builds.set(snapshot.builds),
+                Ok(snapshot) => this.store.show_builds(snapshot.builds),
                 Err(e) => this.warn(this.i18n.error(&e), &e),
             }
         });

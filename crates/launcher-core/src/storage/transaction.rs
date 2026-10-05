@@ -408,6 +408,34 @@ mod tests {
         assert!(!dir.path().join(SYNC_JOURNAL).exists());
     }
 
+    /// An antivirus scans a staged file just written and holds it for a moment: the swap waits.
+    #[cfg(windows)]
+    #[test]
+    fn a_staged_file_held_for_a_moment_still_takes_its_place() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put(root, "mods/a.jar", b"old");
+        execute(
+            root,
+            SYNC_JOURNAL,
+            plan(&["mods/a.jar"], &[]),
+            |tx| {
+                let staged = tx.stage_path("mods/a.jar")?;
+                fs::write(&staged, b"new").unwrap();
+                let held = fs::OpenOptions::new().read(true).share_mode(0x1).open(&staged).unwrap();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                    drop(held);
+                });
+                Ok(())
+            },
+            ApplyHooks::default(),
+        )
+        .unwrap();
+        assert_eq!(fs::read(root.join("mods/a.jar")).unwrap(), b"new");
+    }
+
     #[test]
     fn a_crash_is_cleared_by_the_next_transaction() {
         let dir = tempfile::tempdir().unwrap();

@@ -102,9 +102,14 @@ impl ComponentInstaller {
         Ok(installed)
     }
 
-    /// Everything the installer made for `id` is in place and the version checks out.
-    pub(super) async fn installer_ready(&self, id: &str) -> bool {
-        marker_ready(&self.mc_dir, id, false) && self.minecraft.check_async(id).await.valid
+    /// `id` as it is, when everything the installer made is in place and the version checks
+    /// out (checked once: a launch needs nothing more).
+    pub(super) async fn installer_ready(&self, id: &str) -> Option<InstalledVersion> {
+        if !marker_ready(&self.mc_dir, id, false) {
+            return None;
+        }
+        let check = self.minecraft.check_async(id).await;
+        check.valid.then(|| self.minecraft.checked_out(id, &check))
     }
 
     /// The installer jar, kept at its Maven path in `libraries/` (repairs reuse it) and checked

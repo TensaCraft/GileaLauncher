@@ -2,6 +2,8 @@
 //! players and ping, as the game's list shows them) or world, «Грати» straight into it and a cube
 //! for the build alone.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use launcher_shared::BuildDto;
 use launcher_shared::SettingUpdate;
 use launcher_shared::recent::RECENT_MOST;
@@ -292,6 +294,24 @@ fn RecentRow(dto: BuildDto, recent: RecentBuild) -> impl IntoView {
     }
 }
 
+/// The first `take` builds played, each with its build as the list has it; those no longer in
+/// the list have no row.
+fn rows_of(found: &[RecentBuild], builds: &[BuildDto], take: usize) -> Vec<(BuildDto, RecentBuild)> {
+    found
+        .iter()
+        .take(take)
+        .filter_map(|r| builds.iter().find(|b| b.key == r.key).map(|b| (b.clone(), r.clone())))
+        .collect()
+}
+
+/// What a row stands for: it holds its build and record as they were made, so it is kept only
+/// while neither changes (the build's key keeps the rows of two builds apart, the rest is a hash).
+fn row_key(build: &BuildDto, recent: &RecentBuild) -> (String, u64) {
+    let mut hasher = DefaultHasher::new();
+    format!("{build:?}{recent:?}").hash(&mut hasher);
+    (build.key.clone(), hasher.finish())
+}
+
 /// What «Продовжити гру» shows: how many builds, and its history cleared or given back.
 #[component]
 fn RecentSettings(open: RwSignal<bool>) -> impl IntoView {
@@ -380,17 +400,15 @@ pub fn ContinuePlaying(
             recent.refresh(visit.is_none());
         }
     });
-    let rows = move || {
-        let found = recent.builds.get().unwrap_or_default();
-        store.builds.with(|builds| {
-            found
-                .into_iter()
-                .take(usize::from(count.get()))
-                .filter_map(|r| builds.iter().find(|b| b.key == r.key).cloned().map(|b| (b, r)))
-                .collect::<Vec<_>>()
+    // The rows follow by key: one whose build and record stay as they are is kept.
+    let rows = Memo::new(move |_| {
+        let take = usize::from(count.get());
+        recent.builds.with(|found| {
+            store.builds.with(|builds| rows_of(found.as_deref().unwrap_or_default(), builds, take))
         })
-    };
-    Effect::new(move |_| shown.set(count.get() > 0 && (!rows().is_empty() || cleared.get().is_some())));
+    });
+    let empty = Memo::new(move |_| rows.with(Vec::is_empty));
+    Effect::new(move |_| shown.set(count.get() > 0 && (!empty.get() || cleared.get().is_some())));
     view! {
         <Show when=move || shown.get()>
             <section class="recent">
@@ -403,16 +421,83 @@ pub fn ContinuePlaying(
                 </FoldHead>
                 <div class="recent__rows" class:is-hidden=folded>
                     {move || {
-                        let rows = rows();
-                        if rows.is_empty() {
+                        if empty.get() {
                             view! { <div class="recent__cleared">{i18n.t("recent_cleared_empty")}</div> }.into_any()
                         } else {
-                            rows.into_iter().map(|(build, recent)| view! { <RecentRow dto=build recent=recent /> }).collect_view().into_any()
+                            view! {
+                                <For
+                                    each=move || rows.get()
+                                    key=|(build, recent)| row_key(build, recent)
+                                    children=|(build, recent)| view! { <RecentRow dto=build recent=recent /> }
+                                />
+                            }
+                            .into_any()
                         }
                     }}
                 </div>
             </section>
         </Show>
         <RecentSettings open=settings_open />
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build(key: &str, running: bool) -> BuildDto {
+        BuildDto {
+            key: key.into(),
+            version_id: key.into(),
+            name: key.into(),
+            version: None,
+            loader: None,
+            client: None,
+            loader_version: None,
+            game_dir: String::new(),
+            image: None,
+            description: String::new(),
+            running,
+            profile: None,
+        }
+    }
+
+    fn played(key: &str, played_ms: u64) -> RecentBuild {
+        RecentBuild { key: key.into(), played_ms, activity: None }
+    }
+
+    #[test]
+    fn rows_are_the_recent_builds_that_still_exist_in_the_order_played() {
+        let builds = [build("aero", false), build("zeta", true)];
+        let found = [played("zeta", 30), played("gone", 20), played("aero", 10)];
+        let keys = |take| -> Vec<String> {
+            rows_of(&found, &builds, take)
+                .into_iter()
+                .map(|(b, r)| format!("{}@{}", b.key, r.played_ms))
+                .collect()
+        };
+        assert_eq!(keys(3), ["zeta@30", "aero@10"], "a build that is gone has no row");
+        assert_eq!(keys(2), ["zeta@30"], "the count is of the builds played, gone ones included");
+        assert!(keys(0).is_empty());
+        assert!(rows_of(&[], &builds, 3).is_empty());
+        assert!(rows_of(&found, &builds, 3)[0].0.running, "the row holds the build as it is");
+    }
+
+    #[test]
+    fn a_row_is_kept_while_what_it_shows_stays() {
+        let (aero, last) = (build("aero", false), played("aero", 100));
+        let same = row_key(&aero, &last);
+        assert_eq!(same, row_key(&aero.clone(), &last.clone()));
+        assert_eq!(same.0, "aero");
+        let started = BuildDto { running: true, ..aero.clone() };
+        assert_ne!(same, row_key(&started, &last), "a game started");
+        assert_ne!(same, row_key(&aero, &played("aero", 200)), "played again");
+        let renamed = BuildDto { name: "Aeronautics".into(), ..aero.clone() };
+        assert_ne!(same, row_key(&renamed, &last), "renamed");
+        let at_server = RecentBuild {
+            activity: Some(Activity::Server { host: "play.example.net".into(), port: 25565 }),
+            ..last.clone()
+        };
+        assert_ne!(same, row_key(&aero, &at_server), "played somewhere else");
     }
 }

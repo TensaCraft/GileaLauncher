@@ -3,6 +3,7 @@
 //! launch.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use launcher_core::launch::hooks::{HookFuture, LaunchContext, LaunchHook, PrepareContext};
 use launcher_shared::Text;
@@ -10,6 +11,9 @@ use launcher_shared::Text;
 use super::api::TensaApi;
 use super::identity;
 use super::sync::{SyncDeps, Synced, sync};
+
+/// How long Play waits for the server builds' API before it starts the build as it is.
+const QUIET_SYNC_ASK: Duration = Duration::from_secs(15);
 
 pub struct ServerSync {
     api: Arc<TensaApi>,
@@ -37,6 +41,7 @@ impl LaunchHook for ServerSync {
                 components: ctx.components,
                 downloader: ctx.downloader,
                 running: ctx.running,
+                ask_within: Some(QUIET_SYNC_ASK),
             };
             if sync(&deps, ctx.build, false, ctx.op).await? == Synced::Updated {
                 ctx.feedback.success(Text::key("syncing_files_complete"));

@@ -6,6 +6,7 @@ use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
+use ui_kit::lists::{SEARCH_PAUSE, debounced};
 use ui_kit::{
     Button, ChipDef, ChipTabs, Dialog, DialogFooter, IconAction, Tag, TagTone, TextInput, Variant, ipc,
     use_toasts,
@@ -147,9 +148,6 @@ pub fn as_text<'a>(entries: impl IntoIterator<Item = &'a LogEntry>) -> String {
         .join("\n")
 }
 
-/// The pause after typing before the list follows the search.
-const SEARCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(150);
-
 #[derive(Clone)]
 enum Load {
     Loading,
@@ -181,8 +179,7 @@ pub fn LogViewer(open: RwSignal<bool>) -> impl IntoView {
     let filter = RwSignal::new("all");
     let query = RwSignal::new(String::new());
     // The search the list follows: the typed text after a pause.
-    let search = RwSignal::new(String::new());
-    let timer = StoredValue::new(None::<TimeoutHandle>);
+    let search = debounced(query, SEARCH_PAUSE);
     let list = NodeRef::<html::Div>::new();
 
     let load = move || {
@@ -203,21 +200,6 @@ pub fn LogViewer(open: RwSignal<bool>) -> impl IntoView {
             load();
         }
     });
-    let cancel_timer = move || {
-        if let Some(handle) = timer.try_get_value().flatten() {
-            handle.clear();
-        }
-    };
-    Effect::new(move |_| {
-        let text = query.get();
-        cancel_timer();
-        if text.trim().is_empty() {
-            search.set(String::new());
-        } else {
-            timer.set_value(set_timeout_with_handle(move || search.set(text), SEARCH_PAUSE).ok());
-        }
-    });
-    on_cleanup(cancel_timer);
 
     let shown = Memo::new(move |_| {
         let filter = LevelFilter::from_id(filter.get());

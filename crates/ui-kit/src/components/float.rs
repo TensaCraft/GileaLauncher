@@ -109,6 +109,12 @@ pub fn tip_place(host: Rect, side: TipSide, size: (f64, f64), viewport: (f64, f6
 /// The pause before a tooltip shows.
 const TIP_DELAY: Duration = Duration::from_millis(300);
 
+/// Empties `shown`; its readers wake only when something was in it (every wheel turn and press
+/// asks the tooltip to hide).
+fn empty<T: Send + Sync + 'static>(shown: RwSignal<Option<T>>) {
+    shown.try_maybe_update(|s| (s.take().is_some(), ()));
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct Tip {
     text: String,
@@ -132,7 +138,7 @@ pub fn TipLayer() -> impl IntoView {
         }
         timer.try_set_value(None);
         host.try_set_value(None);
-        tip.try_set(None);
+        empty(tip);
     };
     let over = window_event_listener(ev::mouseover, move |event| {
         let found = event
@@ -267,5 +273,37 @@ mod tests {
         );
         // Wider than the window: from the left edge (CSS wraps its text first).
         assert_eq!(tip_place(rect(600.0, 300.0, 40.0, 20.0), TipSide::Top, (2000.0, 30.0), VIEW).0, 8.0);
+    }
+
+    #[test]
+    fn emptying_what_is_empty_wakes_nobody() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let owner = Owner::new();
+        owner.with(|| {
+            let shown = RwSignal::new(Some(1));
+            // Reads the signal again each time it announces a change.
+            let reads = Arc::new(AtomicUsize::new(0));
+            let watcher = {
+                let reads = reads.clone();
+                Memo::new_with_compare(
+                    move |_| {
+                        reads.fetch_add(1, Ordering::SeqCst);
+                        shown.get()
+                    },
+                    |_, _| true,
+                )
+            };
+            let _ = watcher.get();
+            empty(shown);
+            let _ = watcher.get();
+            assert_eq!(reads.load(Ordering::SeqCst), 2, "what was shown is announced gone");
+            assert_eq!(shown.get_untracked(), None);
+            empty(shown);
+            let _ = watcher.get();
+            assert_eq!(reads.load(Ordering::SeqCst), 2, "nothing shown, nothing announced");
+        });
+        owner.cleanup();
     }
 }

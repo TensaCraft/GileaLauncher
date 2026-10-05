@@ -10,12 +10,8 @@ use launcher_shared::{
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::commands::AppState;
+use crate::commands::{AppState, blocking};
 use crate::screenshot_protocol::{screenshot_url, thumbnail_url};
-
-async fn blocking<T: Send + 'static>(work: impl FnOnce() -> AppResult<T> + Send + 'static) -> AppResult<T> {
-    tauri::async_runtime::spawn_blocking(work).await.map_err(|e| AppError::internal(e.to_string()))?
-}
 
 #[tauri::command]
 pub async fn content_list(

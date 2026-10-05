@@ -35,6 +35,32 @@ pub const IMPORTED_SUFFIX: &str = ".imported";
 /// The folder of build folders inside the Minecraft folder.
 pub const GAMES_DIR: &str = "games";
 const CREATE_ATTEMPTS: usize = 8;
+/// In a new build's folder while its files are put in place: the launcher that claimed it (`pid`,
+/// and when that process started), so a folder an install that never finished left is told apart.
+pub const CLAIM_FILE: &str = ".launcher-claim.json";
+/// A folder being removed is first renamed with this prefix: hidden from the list at once.
+const REMOVING_PREFIX: &str = ".removing-";
+
+/// Marks `folder` as claimed by this launcher.
+fn write_claim(folder: &Path) {
+    let me = std::process::id();
+    let claim = json!({"pid": me, "started": crate::launch::ledger::process_started(me)});
+    if let Err(e) = fs::write(folder.join(CLAIM_FILE), claim.to_string()) {
+        tracing::warn!("Cannot mark {} as claimed: {e}", folder.display());
+    }
+}
+
+/// The claim in `folder` was made by a launcher that runs no more (its process gone, or the id
+/// now another process's). A folder with no claim, or one being written, is nobody's to clear.
+fn claim_abandoned(folder: &Path) -> bool {
+    let Ok(raw) = fs::read(folder.join(CLAIM_FILE)) else { return false };
+    let Ok(claim) = serde_json::from_slice::<Value>(&raw) else { return false };
+    let Some(pid) = claim["pid"].as_u64().and_then(|pid| u32::try_from(pid).ok()) else { return false };
+    match crate::launch::ledger::process_started(pid) {
+        None => true,
+        Some(started) => claim["started"].as_str().is_some_and(|claimed| claimed != started),
+    }
+}
 
 fn truthy(value: &Value) -> bool {
     match value {
@@ -368,6 +394,7 @@ impl VersionStore {
             let id = new_build_id(&name, taken);
             match fs::create_dir(self.games_dir.join(&id)) {
                 Ok(()) => {
+                    write_claim(&self.games_dir.join(&id));
                     claimed = Some(id);
                     break;
                 }
@@ -394,7 +421,47 @@ impl VersionStore {
         build.id = id.to_string();
         build.path = Some(self.games_dir.join(id).to_string_lossy().into_owned());
         build.snapshot = Snapshot(None);
-        self.save_locked(build)
+        self.save_locked(build)?;
+        let _ = fs::remove_file(self.games_dir.join(id).join(CLAIM_FILE));
+        Ok(())
+    }
+
+    /// Removes the folders installs claimed and never finished (the launcher ended first): no
+    /// record, and a claim no running launcher holds; and what an earlier removal left. How many
+    /// claimed folders went.
+    pub fn clear_abandoned_claims(&self) -> usize {
+        let Ok(entries) = fs::read_dir(&self.games_dir) else { return 0 };
+        let mut cleared = 0;
+        for entry in entries.flatten() {
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let folder = entry.path();
+            if name.starts_with(REMOVING_PREFIX) {
+                let _ = fs::remove_dir_all(&folder);
+                continue;
+            }
+            if name.starts_with('.') {
+                continue;
+            }
+            // Renamed aside while no build can be created: the slow removal runs without the lock.
+            let aside = {
+                let _writes = self.write_lock();
+                let abandoned = matches!(read_record(&folder.join(RECORD_FILE)), RecordRead::Missing)
+                    && claim_abandoned(&folder);
+                let aside = self.games_dir.join(format!("{REMOVING_PREFIX}{name}"));
+                (abandoned && fs::rename(&folder, &aside).is_ok()).then_some(aside)
+            };
+            if let Some(aside) = aside {
+                tracing::info!("Removing the folder {name} an unfinished install left");
+                if let Err(e) = fs::remove_dir_all(&aside) {
+                    tracing::warn!("The folder {name} an unfinished install left stays for now: {e}");
+                }
+                cleared += 1;
+            }
+        }
+        cleared
     }
 
     /// Writes one build: the fields this copy changed since it was read are merged into whatever
@@ -850,5 +917,30 @@ mod tests {
         assert_eq!(store.create_in(&mut same, "kopija_2").unwrap_err().code, ErrorCode::VersionExists);
         assert_eq!(store.claim_folder("  ").unwrap_err().code, ErrorCode::VersionNameEmpty);
         assert_eq!(store.claim_folder("КОПІЯ").unwrap_err().code, ErrorCode::VersionExists);
+    }
+
+    #[test]
+    fn a_folder_an_install_that_ended_left_behind_is_cleared() {
+        let d = dirs();
+        let store = VersionStore::open(&d.state, &d.mc);
+        let left = store.claim_folder("Left").unwrap();
+        fs::write(d.games.join(&left).join("big.jar"), b"jar").unwrap();
+        // The launcher that claimed it is gone.
+        fs::write(d.games.join(&left).join(CLAIM_FILE), r#"{"pid": 0, "started": "1"}"#).unwrap();
+        let filling = store.claim_folder("Filling").unwrap();
+        let mut done = Build::new("Done");
+        store.create(&mut done).unwrap();
+        assert!(!d.games.join(&done.key).join(CLAIM_FILE).exists(), "a build's folder is no claim");
+        fs::create_dir_all(d.games.join("mine")).unwrap();
+        fs::create_dir_all(d.games.join("broken_record")).unwrap();
+        fs::write(d.games.join("broken_record/version.json"), b"{ broken").unwrap();
+        fs::write(d.games.join("broken_record").join(CLAIM_FILE), r#"{"pid": 0}"#).unwrap();
+
+        assert_eq!(store.clear_abandoned_claims(), 1);
+        assert!(!d.games.join(&left).exists(), "its install ended with the launcher");
+        assert!(d.games.join(&filling).is_dir(), "this launcher is filling it");
+        assert!(d.games.join(&done.key).is_dir());
+        assert!(d.games.join("mine").is_dir(), "a folder the launcher did not claim is left alone");
+        assert!(d.games.join("broken_record").is_dir(), "an unreadable record is still a build");
     }
 }

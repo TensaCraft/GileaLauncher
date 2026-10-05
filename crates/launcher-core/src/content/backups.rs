@@ -12,6 +12,7 @@ use launcher_shared::{AppError, AppResult, ErrorCode, LoaderKind};
 
 use super::inventory::MetadataCache;
 use super::jar::inspect_mod_jar;
+use crate::storage::atomic::rename_retrying;
 
 pub const BACKUPS: &str = ".backups";
 const SUFFIX: &str = ".backup";
@@ -32,7 +33,7 @@ pub fn back_up(game: &Path, relative: &str, filename: &str) -> AppResult<()> {
     fs::create_dir_all(&dir).map_err(|e| io_error(ErrorCode::BackupFailed, &dir, e))?;
     let target = dir.join(format!("{filename}{SUFFIX}"));
     let part = dir.join(format!("{filename}{SUFFIX}.part"));
-    fs::copy(game.join(relative), &part).and_then(|_| fs::rename(&part, &target)).map_err(|e| {
+    fs::copy(game.join(relative), &part).and_then(|_| rename_retrying(&part, &target)).map_err(|e| {
         let _ = fs::remove_file(&part);
         io_error(ErrorCode::BackupFailed, &target, e)
     })?;
@@ -151,7 +152,7 @@ pub fn restore(game: &Path, backup: &Backup, current: &Path, enabled: bool) -> A
         }
     }
     let part = backups_dir(game).join(format!("{}.restore.part", backup.filename));
-    fs::copy(&backup.path, &part).and_then(|_| fs::rename(&part, &target)).map_err(|e| {
+    fs::copy(&backup.path, &part).and_then(|_| rename_retrying(&part, &target)).map_err(|e| {
         let _ = fs::remove_file(&part);
         io_error(ErrorCode::of_io(&e), &target, e)
     })?;

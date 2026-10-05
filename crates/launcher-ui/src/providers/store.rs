@@ -23,9 +23,30 @@ pub struct UpdateAsk {
     pub name: String,
 }
 
+/// A provider's overview of a tab, with its notes found by file and its projects: every row asks
+/// of its own file on every answer, so a lookup must not walk the whole list.
+struct Known {
+    overview: Overview,
+    /// The index in `overview.notes` of each file's note.
+    files: HashMap<String, usize>,
+    projects: HashSet<String>,
+}
+
+impl Known {
+    fn new(overview: Overview) -> Known {
+        let files = overview.notes.iter().enumerate().map(|(i, n)| (n.file.clone(), i)).collect();
+        let projects = overview.notes.iter().map(|n| n.project_id.clone()).collect();
+        Known { overview, files, projects }
+    }
+
+    fn note(&self, file: &str) -> Option<&FileNote> {
+        self.files.get(file).map(|&i| &self.overview.notes[i])
+    }
+}
+
 #[derive(Clone)]
 pub struct Store {
-    overviews: ArcRwSignal<HashMap<Tab, Overview>>,
+    overviews: ArcRwSignal<HashMap<Tab, Known>>,
     checking: ArcRwSignal<HashSet<Tab>>,
     /// Tabs asked for again while their look ran: one more look follows it.
     again: ArcRwSignal<HashSet<Tab>>,
@@ -51,19 +72,23 @@ fn tab(provider: &str, key: &str, kind: ContentKind) -> Tab {
 impl Store {
     pub fn set_overview(&self, provider: &str, key: &str, kind: ContentKind, overview: Overview) {
         self.overviews.update(|m| {
-            m.insert(tab(provider, key, kind), overview);
+            m.insert(tab(provider, key, kind), Known::new(overview));
         });
     }
 
     pub fn overview(&self, provider: &str, key: &str, kind: ContentKind) -> Option<Overview> {
-        self.overviews.with(|m| m.get(&tab(provider, key, kind)).cloned())
+        self.overviews.with(|m| m.get(&tab(provider, key, kind)).map(|k| k.overview.clone()))
+    }
+
+    /// Whether the provider's overview of the tab has a file of project `project_id`.
+    pub fn knows_project(&self, provider: &str, key: &str, kind: ContentKind, project_id: &str) -> bool {
+        self.overviews
+            .with(|m| m.get(&tab(provider, key, kind)).is_some_and(|k| k.projects.contains(project_id)))
     }
 
     /// The provider's note of the row whose file is `file`.
     pub fn note(&self, provider: &str, key: &str, kind: ContentKind, file: &str) -> Option<FileNote> {
-        self.overviews.with(|m| {
-            m.get(&tab(provider, key, kind)).and_then(|o| o.notes.iter().find(|n| n.file == file).cloned())
-        })
+        self.overviews.with(|m| m.get(&tab(provider, key, kind)).and_then(|k| k.note(file).cloned()))
     }
 
     /// The provider a row of `file` is shown with (`order`: the providers in the app's order): the
@@ -76,9 +101,7 @@ impl Store {
                 .map(|p| {
                     let said = match m.get(&tab(p, key, kind)) {
                         None => Heard::Waiting,
-                        Some(o) => {
-                            o.notes.iter().find(|n| n.file == file).map_or(Heard::Unknown, Heard::Knows)
-                        }
+                        Some(known) => known.note(file).map_or(Heard::Unknown, Heard::Knows),
                     };
                     (p.as_str(), said)
                 })
@@ -92,7 +115,9 @@ impl Store {
     pub fn owned_updates(&self, order: &[String], provider: &str, key: &str, kind: ContentKind) -> usize {
         let files: Vec<String> = self.overviews.with(|m| {
             m.get(&tab(provider, key, kind))
-                .map(|o| o.notes.iter().filter(|n| n.update.is_some()).map(|n| n.file.clone()).collect())
+                .map(|k| {
+                    k.overview.notes.iter().filter(|n| n.update.is_some()).map(|n| n.file.clone()).collect()
+                })
                 .unwrap_or_default()
         });
         files.iter().filter(|file| self.owner(order, key, kind, file).as_deref() == Some(provider)).count()
@@ -107,8 +132,11 @@ impl Store {
         project_id: &str,
     ) -> Option<FileNote> {
         self.overviews.with(|m| {
-            m.get(&tab(provider, key, kind)).and_then(|o| {
-                o.notes.iter().find(|n| n.project_id == project_id && n.update.is_some()).cloned()
+            m.get(&tab(provider, key, kind)).and_then(|k| {
+                if !k.projects.contains(project_id) {
+                    return None;
+                }
+                k.overview.notes.iter().find(|n| n.project_id == project_id && n.update.is_some()).cloned()
             })
         })
     }
@@ -275,6 +303,21 @@ mod tests {
             );
             assert!(s.take_ask("modrinth", "aero", ContentKind::Mods).is_some());
             assert!(s.take_ask("modrinth", "aero", ContentKind::Mods).is_none(), "taken once");
+            assert!(s.knows_project("modrinth", "aero", ContentKind::Mods, "B"));
+            assert!(!s.knows_project("modrinth", "aero", ContentKind::Mods, "Z"));
+            assert!(!s.knows_project("curseforge", "aero", ContentKind::Mods, "A"), "another provider's");
+            s.set_overview(
+                "modrinth",
+                "aero",
+                ContentKind::Mods,
+                Overview { notes: vec![note("c.jar", "C", None)], updates: None },
+            );
+            assert!(
+                s.note("modrinth", "aero", ContentKind::Mods, "a.jar").is_none(),
+                "a newer look replaces"
+            );
+            assert_eq!(s.note("modrinth", "aero", ContentKind::Mods, "c.jar").unwrap().project_id, "C");
+            assert!(!s.knows_project("modrinth", "aero", ContentKind::Mods, "A"));
             s.set_checking("modrinth", "aero", ContentKind::Mods, true);
             assert!(s.checking("modrinth", "aero", ContentKind::Mods));
             assert!(!s.take_again("modrinth", "aero", ContentKind::Mods), "nothing asked");

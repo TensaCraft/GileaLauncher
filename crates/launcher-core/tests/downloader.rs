@@ -53,6 +53,24 @@ fn leftovers(dir: &Path) -> Vec<String> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_transient_file_lands_whole_and_verified() {
+    let server = fake_files::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (small, large) = (content(40_000, 7), content(5 * 1024 * 1024, 9));
+    server.put("small.lzma", Served { body: small.clone(), ..Served::default() });
+    server.put("large.lzma", Served { body: large.clone(), ..Served::default() });
+    let tasks = vec![
+        task(&server, "small.lzma", dir.path(), &small).transient(),
+        task(&server, "large.lzma", dir.path(), &large).transient(),
+    ];
+    let report = run(tasks).await.unwrap();
+    assert_eq!((report.downloaded, report.failed.len()), (2, 0));
+    assert_eq!(std::fs::read(dir.path().join("small.lzma")).unwrap(), small);
+    assert_eq!(std::fs::read(dir.path().join("large.lzma")).unwrap(), large);
+    assert!(leftovers(dir.path()).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn downloads_and_verifies_files() {
     let server = fake_files::start().await;
     let dir = tempfile::tempdir().unwrap();

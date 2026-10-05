@@ -32,12 +32,14 @@ const AUTO_UPDATE_CHECK_DELAY: Duration = Duration::from_secs(2);
 static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// What a close would cut short: the work the player sees (installs, backups, restores), by title.
-/// A step of it, or work in the background (an update check), holds nothing.
+/// A step of it, or work in the background (an update check), holds nothing; work the player sees
+/// inside a hidden one (a backup before Play) does.
 fn under_way(snapshot: &launcher_shared::OpsSnapshot) -> Vec<launcher_shared::Text> {
+    let seen = |id: u64| snapshot.operations.iter().any(|op| op.id == id && op.visible);
     snapshot
         .operations
         .iter()
-        .filter(|op| op.visible && op.parent_id.is_none())
+        .filter(|op| op.visible && !op.parent_id.is_some_and(seen))
         .map(|op| op.title.clone())
         .collect()
 }
@@ -364,6 +366,13 @@ mod tests {
         };
         assert_eq!(super::under_way(&snapshot), [Text::key("installing")]);
         assert!(super::under_way(&OpsSnapshot::default()).is_empty());
+        // Play is a hidden operation; a backup it runs first is work the player sees.
+        let launching = OpsSnapshot {
+            busy: true,
+            operations: vec![op(4, None, false, "launch"), op(5, Some(4), true, "world_backup_progress")],
+            revision: 5,
+        };
+        assert_eq!(super::under_way(&launching), [Text::key("world_backup_progress")]);
     }
 
     #[test]

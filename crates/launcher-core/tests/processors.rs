@@ -27,7 +27,19 @@ fn processors_run_as_java_with_their_classpath() {
         dir.path().join("a.jar").to_string_lossy(),
         dir.path().join("b.jar").to_string_lossy()
     );
-    assert_eq!(record["args"], json!(["-cp", classpath, "net.fake.Patcher", "--output", "out.jar"]));
+    assert_eq!(
+        record["args"],
+        json!([
+            "-Dsun.net.client.defaultConnectTimeout=30000",
+            "-Dsun.net.client.defaultReadTimeout=120000",
+            "-cp",
+            classpath,
+            "net.fake.Patcher",
+            "--output",
+            "out.jar"
+        ]),
+        "the JVM's network gives up instead of holding the install"
+    );
     let failing = ProcessorCall { args: vec!["-Dfake.exit=3".into()], ..call };
     let error = JavaProcessorRunner.run(&fake_java(), &failing, dir.path()).unwrap_err();
     assert!(error.contains("fake game started") && error.contains("net.fake.Patcher"), "{error}");

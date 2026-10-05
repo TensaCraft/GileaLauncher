@@ -365,6 +365,11 @@ pub fn plan(root: &Path, source: &Source, preserve: &[PreserveRule], force: bool
 /// it is whole, else its older list of files — unless the build names its force-update endpoint.
 /// The server unavailable is a `Network` error naming the build (`pack`).
 pub async fn prepare(api: &TensaApi, pack: &Pack, root: &Path, force: bool) -> AppResult<SyncPlan> {
+    planned(listed(api, pack).await?, pack, root, force).await
+}
+
+/// What the server lists of `pack` (the asking part of `prepare`).
+pub async fn listed(api: &TensaApi, pack: &Pack) -> AppResult<Source> {
     let unavailable = |why: AppError| {
         tracing::warn!("The server build {} is unavailable: {}", pack.id, why.detail);
         AppError::new(
@@ -389,6 +394,11 @@ pub async fn prepare(api: &TensaApi, pack: &Pack, root: &Path, force: bool) -> A
             Source::Files(api.files(&pack.id, pack.files_endpoint.as_deref()).await.map_err(unavailable)?)
         }
     };
+    Ok(source)
+}
+
+/// The sync of `pack` into `root` from what the server listed (the files' part of `prepare`).
+pub async fn planned(source: Source, pack: &Pack, root: &Path, force: bool) -> AppResult<SyncPlan> {
     let own_rules = pack.preserve_rules.as_ref().filter(|rules| !rules.is_null());
     let rules = preserve_rules(own_rules.or(match &source {
         Source::Manifest(manifest) => manifest.get("preserve_rules"),

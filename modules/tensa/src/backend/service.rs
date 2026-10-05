@@ -57,6 +57,7 @@ pub async fn force_sync(deps: &Deps, key: &str) -> AppResult<Synced> {
         components: deps.components.as_ref(),
         downloader: &deps.downloader,
         running: false,
+        ask_within: None,
     };
     match sync(&sync_deps, &build, true, &op).await {
         Ok(done) => {

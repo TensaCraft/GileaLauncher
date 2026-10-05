@@ -7,7 +7,7 @@ mod delete;
 mod installed;
 mod screenshots;
 
-use launcher_shared::{ContentItem, ContentKind, mods_supported};
+use launcher_shared::{BuildDto, ContentItem, ContentKind, mods_supported};
 use leptos::prelude::*;
 use leptos_router::NavigateOptions;
 use leptos_router::hooks::{use_navigate, use_query_map};
@@ -154,10 +154,14 @@ pub fn display_name(item: &ContentItem) -> String {
     item.name.clone().unwrap_or_else(|| item.filename.clone())
 }
 
-/// The name, file name, mod id or version contains `query` (case and outer spaces ignored).
-pub fn matches(item: &ContentItem, query: &str) -> bool {
-    let q = query.trim().to_lowercase();
-    q.is_empty()
+/// What a search looks for: `query` without outer spaces, in lower case (made once per list).
+pub fn search_text(query: &str) -> String {
+    query.trim().to_lowercase()
+}
+
+/// The name, file name, mod id or version contains `wanted` (a `search_text`; case is ignored).
+pub fn matches(item: &ContentItem, wanted: &str) -> bool {
+    wanted.is_empty()
         || [
             item.name.as_deref(),
             Some(item.filename.as_str()),
@@ -166,7 +170,7 @@ pub fn matches(item: &ContentItem, query: &str) -> bool {
         ]
         .into_iter()
         .flatten()
-        .any(|v| v.to_lowercase().contains(&q))
+        .any(|v| v.to_lowercase().contains(wanted))
 }
 
 /// At most `max` characters, with "…" when cut.
@@ -212,9 +216,10 @@ pub fn ContentPage(key: String) -> impl IntoView {
         &query_map.with_untracked(|q| q.get("tab").unwrap_or_default()),
         &parts.get_untracked().tabs,
     ));
-    let build = {
+    // A memo: the list is searched once for all its readers, and an equal build wakes none.
+    let build: Signal<Option<BuildDto>> = {
         let key = key.clone();
-        Signal::derive(move || store.builds.with(|b| b.iter().find(|b| b.key == key).cloned()))
+        Memo::new(move |_| store.builds.with(|b| b.iter().find(|b| b.key == key).cloned())).into()
     };
     // The address and the open tab agree: a link to another tab of this build (the crash
     // dialog's, say) opens it, and a picked tab replaces the address.
@@ -480,9 +485,20 @@ mod tests {
         assert_eq!(display_name(&sodium), "Sodium");
         assert_eq!(display_name(&item("a.zip")), "a.zip");
         for query in ["", "  SOD ", "fabric", "0.6", "sodium"] {
-            assert!(matches(&sodium, query), "{query}");
+            assert!(matches(&sodium, &search_text(query)), "{query}");
         }
-        assert!(!matches(&sodium, "iris"));
+        assert!(!matches(&sodium, &search_text("iris")));
+    }
+
+    #[test]
+    fn a_search_is_trimmed_and_lowercased_once() {
+        assert_eq!(search_text("  SoD "), "sod");
+        assert_eq!(search_text("   "), "");
+        assert_eq!(search_text("  ЇЖАК "), "їжак");
+        let mut pack = item("pack.zip");
+        pack.name = Some("Їжак".into());
+        assert!(matches(&pack, &search_text("ЇЖ")), "any case, any alphabet");
+        assert!(matches(&pack, &search_text("")), "an empty search leaves everything");
     }
 
     #[test]

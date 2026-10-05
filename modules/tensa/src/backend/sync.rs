@@ -5,6 +5,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 use launcher_core::feedback::OperationHandle;
 use launcher_core::launch::options::game_dir;
@@ -16,11 +17,12 @@ use launcher_core::storage::transaction::{ApplyHooks, FileTransaction, Transacti
 use launcher_core::storage::versions::{Build, VersionStore};
 use launcher_shared::{AppError, AppResult, ErrorCode, LoaderKind, Text};
 use serde_json::{Value, json};
+use tokio::time::Instant;
 
 use super::api::TensaApi;
 use super::identity::{self, CLIENT, JOURNAL};
 use super::pack::{Pack, find};
-use super::plan::{SyncPlan, prepare};
+use super::plan::{SyncPlan, listed, planned};
 use super::profile;
 
 /// The journal's name for a server build's sync.
@@ -43,6 +45,18 @@ pub struct SyncDeps<'a> {
     pub downloader: &'a Downloader,
     /// The build's game is running (a second copy is being started).
     pub running: bool,
+    /// How long a quiet sync (before Play) waits for the server before Play goes on without it.
+    pub ask_within: Option<Duration>,
+}
+
+/// `work`, given up as a `Network` error at `deadline`.
+async fn in_time<T>(deadline: Option<Instant>, work: impl Future<Output = AppResult<T>>) -> AppResult<T> {
+    match deadline {
+        Some(at) => tokio::time::timeout_at(at, work)
+            .await
+            .unwrap_or_else(|_| Err(AppError::new(ErrorCode::Network, "the server took too long to answer"))),
+        None => work.await,
+    }
 }
 
 /// The names the build may be found by in the catalog, the pack id first.
@@ -194,7 +208,8 @@ pub async fn sync(
     op.update(Some(Text::key("syncing_files_check")), Some(0.0), Some(100.0));
     let names = candidates(build);
     let shown = names.first().cloned().unwrap_or_else(|| build.name.clone());
-    let packs = match deps.api.packs().await {
+    let deadline = deps.ask_within.filter(|_| !force).map(|within| Instant::now() + within);
+    let packs = match in_time(deadline, deps.api.packs()).await {
         Ok(packs) => packs,
         Err(e) => return unreachable(build, &shown, force, &e.detail),
     };
@@ -203,7 +218,11 @@ pub async fn sync(
     };
     let root = game_dir(build, deps.versions.minecraft_dir());
     finish_interrupted_commit(&root)?;
-    let plan = match prepare(deps.api, &pack, &root, force).await {
+    let plan = match in_time(deadline, listed(deps.api, &pack)).await {
+        Ok(source) => planned(source, &pack, &root, force).await,
+        Err(e) => Err(e),
+    };
+    let plan = match plan {
         Ok(plan) => plan,
         Err(e) if e.code == ErrorCode::Network => return unreachable(build, &pack.id, force, &e.detail),
         Err(e) => return Err(e),
