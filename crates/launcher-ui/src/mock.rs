@@ -207,7 +207,7 @@ pub fn install() {
         minecraft_dir_is_default: true,
         default_minecraft_dir: "C:\\Users\\Player\\AppData\\Roaming\\Launcher".into(),
         default_max_ram_gb: None,
-        gpu_mode_default: "dgpu".into(),
+        gpu_mode_default: "auto".into(),
         window_size: "1366x800".into(),
         home_recent_builds: query_value("recent").and_then(|n| n.parse().ok()).unwrap_or(5),
         home_recent_cleared_ms: None,
@@ -275,6 +275,7 @@ pub fn install() {
     #[cfg(feature = "mod-reports")]
     let reports = Rc::new(RefCell::new(crate::mock_reports::MockReports::new(
         query_value("reports").is_some_and(|v| v.contains("fail")),
+        query_value("reports").is_some_and(|v| v.contains("crash")),
     )));
     #[cfg(feature = "mod-tensa")]
     let tensa = Rc::new(RefCell::new(crate::mock_tensa::MockTensa::new(
@@ -414,14 +415,34 @@ pub fn install() {
         "module_invoke" if args["module"] == "reports" => {
             reports.borrow_mut().handle(args["command"].as_str().unwrap_or_default(), &args["args"])
         }
-        #[cfg(feature = "mod-reports")]
-        "build_launch" if query_value("reports").is_some_and(|v| v.contains("alert")) => {
+        // `?installfail=1`: a new build's files cannot be downloaded (a failure the launcher reports).
+        "build_create_vanilla" | "build_create_loader" if query_flag("installfail") => {
+            Err(AppError::new(ErrorCode::DownloadFailed, "HTTP 503 from piston-data.mojang.com")
+                .with_param("error", "HTTP 503"))
+        }
+        // `?gamecrash=1`: the game crashes right after its launch.
+        "build_launch" if query_flag("gamecrash") => {
+            let logs = r"C:\Users\Player\AppData\Roaming\Launcher\games\aero\logs";
+            let file = |label: &str, path: String, folder: bool| launcher_shared::AlertFile {
+                label: Text::key(label),
+                path,
+                folder,
+            };
             let alert = launcher_shared::Alert {
                 id: 7,
                 title: Text::key("warning"),
-                message: Text::key("version_crashed_open_logs")
-                    .param("path", r"C:\Users\Player\AppData\Roaming\Launcher\games\aero\logs\latest.log"),
-                allow_report: true,
+                message: Text::key("version_crashed_open_logs").param("path", format!(r"{logs}\latest.log")),
+                allow_report: false,
+                files: vec![
+                    file(
+                        "open_crash_report",
+                        r"C:\Users\Player\AppData\Roaming\Launcher\games\aero\crash-reports\crash-client.txt"
+                            .into(),
+                        false,
+                    ),
+                    file("open_latest_log", format!(r"{logs}\latest.log"), false),
+                    file("open_version_logs", logs.into(), true),
+                ],
             };
             // The launch goes as usual; the alert follows.
             let answer = builds.borrow_mut().handle(cmd, &args).unwrap_or(Ok(Value::Null));
@@ -445,7 +466,7 @@ pub fn install() {
                 .with_param("heap", "16")
                 .with_param("available", "9"))
         }
-        "open_path" | "open_url" => Ok(Value::Null),
+        "open_path" | "open_url" | "open_text_file" => Ok(Value::Null),
         "downloads_folder" => to_value(Some("C:\\Users\\Player\\Downloads")),
         "window_control" => Ok(Value::Bool(false)),
         "app_quit" => Ok(Value::Null),

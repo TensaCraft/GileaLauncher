@@ -118,7 +118,7 @@ pub enum ClickSound {
     #[default]
     GateLatchClick,
     PlasticBubbleClick,
-    // Made by `tools/sounds/generate.py`.
+    // Synthesized for the launcher.
     SoftPop,
     GlassTap,
     WaterDrop,

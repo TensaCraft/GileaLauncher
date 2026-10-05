@@ -8,6 +8,7 @@ pub mod latest;
 pub mod layers;
 pub mod lists;
 pub mod module;
+pub mod problem;
 pub mod reorder;
 pub mod sound;
 

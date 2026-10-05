@@ -86,7 +86,8 @@ pub struct Build {
 
 fn with_gpu_default(mut options: Map<String, Value>) -> Map<String, Value> {
     if !options.contains_key("gpuMode") {
-        options.insert("gpuMode".to_string(), json!("dgpu"));
+        let mode = crate::java::gpu::platform_default(crate::paths::Os::current());
+        options.insert("gpuMode".to_string(), json!(mode.as_str()));
     }
     options
 }
@@ -610,7 +611,11 @@ mod tests {
             "the folder is where the record is"
         );
         assert_eq!(b.client.as_deref(), Some("neoforge-21.1.77"), "client falls back to the loader");
-        assert_eq!(b.options.get("gpuMode"), Some(&json!("dgpu")), "invalid options become defaults");
+        assert_eq!(
+            b.options.get("gpuMode"),
+            Some(&json!(crate::java::gpu::platform_default(crate::paths::Os::current()).as_str())),
+            "invalid options become defaults"
+        );
         assert_eq!(store.get_by_name("Aeronautics (Roxy)").unwrap().key, "aeronautics");
         let pack = store.get("my_pack").unwrap();
         assert_eq!((pack.key.as_str(), pack.name.as_str()), ("my pack", "my_pack"), "found by version id");
@@ -632,7 +637,10 @@ mod tests {
         assert_eq!(saved.as_object().unwrap().len(), 13);
         assert_eq!(saved["name"], json!("Моя збірка"));
         assert_eq!(saved["path"], json!("games/moja_zbirka"));
-        assert_eq!(saved["options"], json!({"gpuMode": "dgpu"}));
+        assert_eq!(
+            saved["options"],
+            json!({"gpuMode": crate::java::gpu::platform_default(crate::paths::Os::current()).as_str()})
+        );
         let text = fs::read_to_string(d.games.join("moja_zbirka").join(RECORD_FILE)).unwrap();
         assert!(text.contains("Моя збірка"), "not escaped");
         assert!(!d.state.join(VERSIONS_FILE).exists(), "no registry file any more");

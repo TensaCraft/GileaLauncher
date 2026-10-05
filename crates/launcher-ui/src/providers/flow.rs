@@ -115,7 +115,12 @@ impl InstallFlow {
         match answer {
             Ok(InstallAnswer::Installed(done)) => report_done(self.done, done.project_id),
             Ok(InstallAnswer::Replanned(plan)) => self.show(args, *plan),
-            Err(e) => self.toasts.show(Level::Error, describe(self.i18n, provider, &e), None),
+            Err(e) => crate::shell::failure::failure_toast(
+                self.toasts,
+                self.i18n,
+                describe(self.i18n, provider, &e),
+                &e,
+            ),
         }
     }
 

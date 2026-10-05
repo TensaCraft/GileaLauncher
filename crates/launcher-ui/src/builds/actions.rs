@@ -73,8 +73,9 @@ pub struct BuildActions {
 }
 
 impl BuildActions {
-    fn warn(&self, text: String) {
-        self.toasts.show(Level::Error, text, None);
+    /// A failure's toast, with «Report» when it is the launcher's to fix.
+    fn warn(&self, text: String, error: &AppError) {
+        crate::shell::failure::failure_toast(self.toasts, self.i18n, text, error);
     }
 
     /// Reloads the list (game events change `running` without sending it).
@@ -102,7 +103,7 @@ impl BuildActions {
             match ipc::invoke::<_, BuildsSnapshot>("builds_reorder", &ReorderArgs { keys }).await {
                 Ok(snapshot) => this.store.builds.set(snapshot.builds),
                 Err(e) => {
-                    this.warn(this.i18n.error(&e));
+                    this.warn(this.i18n.error(&e), &e);
                     this.refresh();
                 }
             }
@@ -118,10 +119,13 @@ impl BuildActions {
                 Ok(_) => finish(done, true),
                 Err(e) => {
                     let error = this.i18n.error(&e);
-                    this.warn(this.i18n.tp(
-                        "version_install_error",
-                        &[("client", "Minecraft".into()), ("version", name), ("error", error)],
-                    ));
+                    this.warn(
+                        this.i18n.tp(
+                            "version_install_error",
+                            &[("client", "Minecraft".into()), ("version", name), ("error", error)],
+                        ),
+                        &e,
+                    );
                     finish(done, false);
                 }
             }
@@ -144,10 +148,13 @@ impl BuildActions {
                 Ok(_) => finish(done, true),
                 Err(e) => {
                     let error = this.i18n.error(&e);
-                    this.warn(this.i18n.tp(
-                        "version_install_error",
-                        &[("client", kind.display_name().into()), ("version", name), ("error", error)],
-                    ));
+                    this.warn(
+                        this.i18n.tp(
+                            "version_install_error",
+                            &[("client", kind.display_name().into()), ("version", name), ("error", error)],
+                        ),
+                        &e,
+                    );
                     finish(done, false);
                 }
             }
@@ -161,7 +168,7 @@ impl BuildActions {
                 Ok(_) => finish(done, true),
                 Err(e) => {
                     let error = this.i18n.error(&e);
-                    this.warn(this.i18n.tp("version_copy_error", &[("version", name), ("error", error)]));
+                    this.warn(this.i18n.tp("version_copy_error", &[("version", name), ("error", error)]), &e);
                     finish(done, false);
                 }
             }
@@ -173,7 +180,7 @@ impl BuildActions {
         spawn_local(async move {
             match ipc::invoke::<_, BuildsSnapshot>("build_delete", &DeleteArgs { key, delete_files }).await {
                 Ok(snapshot) => this.store.builds.set(snapshot.builds),
-                Err(e) => this.warn(this.i18n.error(&e)),
+                Err(e) => this.warn(this.i18n.error(&e), &e),
             }
         });
     }
@@ -188,7 +195,7 @@ impl BuildActions {
         let this = *self;
         spawn_local(async move {
             if let Err(e) = ipc::invoke::<_, ()>("build_open_dir", &KeyArgs { key }).await {
-                this.warn(this.i18n.error(&e));
+                this.warn(this.i18n.error(&e), &e);
             }
         });
     }
@@ -197,7 +204,7 @@ impl BuildActions {
         let this = *self;
         spawn_local(async move {
             if let Err(e) = ipc::invoke::<_, String>("build_shortcut", &KeyArgs { key }).await {
-                this.warn(this.i18n.error(&e));
+                this.warn(this.i18n.error(&e), &e);
             }
         });
     }

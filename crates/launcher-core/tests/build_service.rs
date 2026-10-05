@@ -371,7 +371,8 @@ async fn settings_are_read_and_saved() {
     if GamePlatform::current().java_runtime_key().is_some() {
         assert!(before.auto_java.as_deref().is_some_and(|p| p.contains("runtime")));
     }
-    assert_eq!((before.gpu_mode.as_str(), before.max_ram_gb, before.image.as_deref()), ("dgpu", None, None));
+    let system = launcher_core::java::gpu::platform_default(launcher_core::paths::Os::current()).as_str();
+    assert_eq!((before.gpu_mode.as_str(), before.max_ram_gb, before.image.as_deref()), (system, None, None));
     let java = w.games.parent().unwrap().join("jdk").join("bin").join(if cfg!(windows) {
         "java.exe"
     } else {

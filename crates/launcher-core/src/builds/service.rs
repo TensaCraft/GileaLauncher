@@ -24,12 +24,12 @@ use crate::loaders::{ComponentInstaller, ComponentSpec};
 use crate::lock::Coordinator;
 use crate::minecraft::InstallProgress;
 use crate::minecraft::version::read_version_json;
+use crate::paths::Os;
 use crate::storage::config::ConfigStore;
 use crate::storage::versions::{Build, RECORD_FILE, VersionStore};
 
 pub const GPU_MODE_DEFAULT_KEY: &str = "gpu_mode_default";
 
-/// `gpu_mode_default` from the config: `auto`, `igpu` or `dgpu` (the default).
 /// The order the user put the builds in (their keys).
 pub const BUILD_ORDER_KEY: &str = "build_order";
 
@@ -44,11 +44,46 @@ fn saved_order(config: &ConfigStore) -> Vec<String> {
     config.get(BUILD_ORDER_KEY).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
 }
 
+/// Set once the builds' GPU was brought to the system's default (`migrate_gpu_default`).
+pub const GPU_AUTO_MIGRATED_KEY: &str = "gpu_auto_migrated";
+
+/// Once, when Windows began to choose the GPU by itself: there, with no default the user picked,
+/// builds that got the old `dgpu` default go to `auto`, so nothing is written to the registry
+/// until the user picks a GPU (and is told what that does). Returns how many builds changed.
+pub fn migrate_gpu_default(config: &ConfigStore, versions: &VersionStore, os: Os) -> usize {
+    // A config that could not be read is never written over (its settings would be lost).
+    if !config.is_healthy() || config.get_bool(GPU_AUTO_MIGRATED_KEY, false) {
+        return 0;
+    }
+    let mut changed = 0;
+    if os == Os::Windows && config.get_str(GPU_MODE_DEFAULT_KEY).is_none() {
+        for mut build in versions.list() {
+            if build.options.get("gpuMode").and_then(Value::as_str) != Some("dgpu") {
+                continue;
+            }
+            build.options.insert("gpuMode".into(), json!("auto"));
+            match versions.save(&mut build) {
+                Ok(()) => changed += 1,
+                Err(e) => {
+                    tracing::warn!("Unable to let Windows choose the GPU of {}: {}", build.name, e.detail)
+                }
+            }
+        }
+    }
+    if let Err(e) = config.set_bool(GPU_AUTO_MIGRATED_KEY, true) {
+        tracing::warn!("Unable to note the GPU migration: {e}");
+    }
+    changed
+}
+
+/// `gpu_mode_default` from the config: `auto`, `igpu` or `dgpu`; unset, the system's default
+/// (`auto` on Windows: nothing goes to the registry until the user picks a GPU).
 pub fn default_gpu_mode(config: &ConfigStore) -> &'static str {
     match config.get_str(GPU_MODE_DEFAULT_KEY).as_deref() {
         Some("auto") => "auto",
         Some("igpu") => "igpu",
-        _ => "dgpu",
+        Some("dgpu") => "dgpu",
+        _ => crate::java::gpu::platform_default(Os::current()).as_str(),
     }
 }
 
@@ -446,11 +481,48 @@ mod tests {
     fn the_gpu_default_comes_from_the_config() {
         let dir = tempfile::tempdir().unwrap();
         let config = ConfigStore::open(dir.path().join("config.json"));
-        assert_eq!(default_gpu_mode(&config), "dgpu");
-        for (value, mode) in [("auto", "auto"), ("igpu", "igpu"), ("dgpu", "dgpu"), ("rtx", "dgpu")] {
+        let system = crate::java::gpu::platform_default(crate::paths::Os::current()).as_str();
+        assert_eq!(default_gpu_mode(&config), system, "unset: the system's default");
+        for (value, mode) in [("auto", "auto"), ("igpu", "igpu"), ("dgpu", "dgpu"), ("rtx", system)] {
             config.set(GPU_MODE_DEFAULT_KEY, json!(value)).unwrap();
             assert_eq!(default_gpu_mode(&config), mode, "{value}");
         }
+    }
+
+    #[test]
+    fn builds_with_the_old_gpu_default_let_windows_choose_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = ConfigStore::open(dir.path().join("config.json"));
+        let versions = VersionStore::open(&dir.path().join("state"), &dir.path().join("mc"));
+        let build = |name: &str, gpu: &str| {
+            let mut b = Build::new(name);
+            b.options.insert("gpuMode".into(), json!(gpu));
+            versions.save(&mut b).unwrap();
+            b.key
+        };
+        let (old, chosen) = (build("Aero", "dgpu"), build("Laptop", "igpu"));
+        let gpu = |key: &str| versions.get(key).unwrap().options["gpuMode"].clone();
+        assert_eq!(migrate_gpu_default(&config, &versions, Os::Windows), 1);
+        assert_eq!((gpu(&old), gpu(&chosen)), (json!("auto"), json!("igpu")), "only the old default");
+        // Once: a GPU the user picks later stays.
+        let later = build("Later", "dgpu");
+        assert_eq!(migrate_gpu_default(&config, &versions, Os::Windows), 0);
+        assert_eq!(gpu(&later), json!("dgpu"));
+    }
+
+    #[test]
+    fn a_gpu_default_the_user_picked_or_another_system_keeps_its_builds() {
+        let dir = tempfile::tempdir().unwrap();
+        let versions = VersionStore::open(&dir.path().join("state"), &dir.path().join("mc"));
+        let mut b = Build::new("Aero");
+        b.options.insert("gpuMode".into(), json!("dgpu"));
+        versions.save(&mut b).unwrap();
+        let picked = ConfigStore::open(dir.path().join("picked.json"));
+        picked.set(GPU_MODE_DEFAULT_KEY, json!("dgpu")).unwrap();
+        assert_eq!(migrate_gpu_default(&picked, &versions, Os::Windows), 0, "the user's own default");
+        let linux = ConfigStore::open(dir.path().join("linux.json"));
+        assert_eq!(migrate_gpu_default(&linux, &versions, Os::Linux), 0, "no registry there");
+        assert_eq!(versions.get(&b.key).unwrap().options["gpuMode"], json!("dgpu"));
     }
 
     #[test]

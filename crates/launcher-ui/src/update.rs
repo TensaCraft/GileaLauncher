@@ -70,7 +70,7 @@ impl UpdateActions {
         spawn_local(async move {
             match ipc::call::<UpdateStatus>("update_download").await {
                 Ok(status) => store.update.set(Some(status)),
-                Err(e) => toasts.show(Level::Error, i18n.error(&e), None),
+                Err(e) => crate::shell::failure::failure_toast(toasts, i18n, i18n.error(&e), &e),
             }
         });
     }
@@ -82,7 +82,7 @@ impl UpdateActions {
         spawn_local(async move {
             if let Err(e) = ipc::call::<()>("update_apply").await {
                 starting.set(false);
-                toasts.show(Level::Error, i18n.error(&e), None);
+                crate::shell::failure::failure_toast(toasts, i18n, i18n.error(&e), &e);
             }
         });
     }

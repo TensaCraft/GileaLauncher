@@ -240,7 +240,9 @@ fn PackInstallDialog(
                         toasts.show(Level::Error, describe(i18n, &provider, &e), None);
                     }
                 }
-                Err(e) => toasts.show(Level::Error, describe(i18n, &provider, &e), None),
+                Err(e) => {
+                    crate::shell::failure::failure_toast(toasts, i18n, describe(i18n, &provider, &e), &e)
+                }
             }
         });
     });

@@ -19,22 +19,22 @@ use service::Reports;
 pub const STATUS: &str = "status";
 /// `{id, title, message}` → `{report_id}`: reports an alert as the user saw it.
 pub const SEND_ALERT: &str = "send_alert";
-/// `{key}` → `[name]`: the files a report of the build attaches.
-pub const ATTACHMENTS: &str = "attachments";
-/// `{key, message, contact}` → `{report_id}`: reports a build.
-pub const SEND_BUILD: &str = "send_build";
+/// `{message, contact, error?: {title, code?, detail?}}` → `{report_id}`: reports a problem with
+/// the launcher.
+pub const SEND_PROBLEM: &str = "send_problem";
+/// → the launcher's own crash waiting to be reported (`{version, at, message, location, thread}`)
+/// or null.
+pub const LAST_CRASH: &str = "last_crash";
+/// `{message, contact}` → `{report_id}`: reports that crash.
+pub const SEND_CRASH: &str = "send_crash";
+/// Forgets that crash.
+pub const DISMISS_CRASH: &str = "dismiss_crash";
 /// `{contact}`; `set_settings` takes the same.
 pub const SETTINGS: &str = "settings";
 pub const SET_SETTINGS: &str = "set_settings";
 
 fn text(args: &Value, key: &str) -> String {
     args.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
-}
-
-fn key_arg(args: &Value) -> Result<String, AppError> {
-    Some(text(args, "key").trim().to_string())
-        .filter(|k| !k.is_empty())
-        .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "the command needs the build's `key`"))
 }
 
 pub struct ReportsModule;
@@ -73,12 +73,20 @@ impl Module for ReportsModule {
                     reports?.send_alert(id, &text(&args, "title"), &text(&args, "message")).await?;
                 Ok(json!({"report_id": report_id}))
             }),
-            ATTACHMENTS => Box::pin(async move { Ok(json!(reports?.attachments(&key_arg(&args)?)?)) }),
-            SEND_BUILD => Box::pin(async move {
-                let key = key_arg(&args)?;
+            SEND_PROBLEM => Box::pin(async move {
+                let error = args.get("error").cloned().and_then(|e| serde_json::from_value(e).ok());
                 let report_id =
-                    reports?.send_build(&key, &text(&args, "message"), &text(&args, "contact")).await?;
+                    reports?.send_problem(&text(&args, "message"), &text(&args, "contact"), error).await?;
                 Ok(json!({"report_id": report_id}))
+            }),
+            LAST_CRASH => Box::pin(async move { Ok(json!(reports?.last_crash())) }),
+            SEND_CRASH => Box::pin(async move {
+                let report_id = reports?.send_crash(&text(&args, "message"), &text(&args, "contact")).await?;
+                Ok(json!({"report_id": report_id}))
+            }),
+            DISMISS_CRASH => Box::pin(async move {
+                reports?.dismiss_crash();
+                Ok(Value::Null)
             }),
             SETTINGS => Box::pin(async move { Ok(json!({"contact": reports?.contact()})) }),
             SET_SETTINGS => Box::pin(async move {

@@ -388,3 +388,28 @@
 .viewer__rename { display: flex; align-items: center; gap: 6px; max-width: 560px; }
 .viewer__rename .control { flex: 1; min-width: 0; }
 .viewer__error { margin-top: 4px; font-size: 12px; color: var(--danger-text); }
+
+/* An alert's files to open (a crash's report and logs). */
+.alert-files { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+/* What choosing a GPU of one's own writes to the Windows registry. */
+.gpu-registry__lead { margin: 0 0 10px; }
+.gpu-registry__points { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--text-2); }
+
+/* The error a launcher problem's report is about. */
+.problem-report__error { padding: 10px 12px; border-radius: 10px; background: rgba(255, 99, 99, .06); border: 1px solid rgba(255, 99, 99, .25); display: grid; gap: 6px; }
+.problem-report__error-title { font-weight: 600; }
+.problem-report__error code { font-size: 12px; color: var(--text-3); white-space: pre-wrap; word-break: break-word; }
+
+/* No profile yet: the profile button calls for one, with a hint beside it. */
+.sidebar:has(.sidebar__user.is-nudge) { position: relative; z-index: 20; }
+.sidebar__user.is-nudge { color: var(--primary); }
+.sidebar__user.is-nudge > :first-child { border-radius: 50%; animation: profile-nudge-ring 1.8s ease-out infinite; }
+.sidebar__nudge { position: absolute; left: calc(100% + 16px); top: 50%; transform: translateY(-50%); white-space: nowrap; padding: 8px 12px; border-radius: 10px; background: var(--primary); color: #03241c; font: 600 13px var(--f-ui); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); pointer-events: none; animation: profile-nudge-hint 1.8s ease-in-out infinite; }
+.sidebar__nudge::before { content: ""; position: absolute; left: -6px; top: 50%; width: 12px; height: 12px; background: var(--primary); transform: translateY(-50%) rotate(45deg); border-radius: 2px; }
+@keyframes profile-nudge-ring { 0% { box-shadow: 0 0 0 0 rgba(23, 195, 162, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(23, 195, 162, 0); } 100% { box-shadow: 0 0 0 0 rgba(23, 195, 162, 0); } }
+@keyframes profile-nudge-hint { 0%, 100% { transform: translate(0, -50%); } 50% { transform: translate(5px, -50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__user.is-nudge > :first-child { animation: none; box-shadow: 0 0 0 3px rgba(23, 195, 162, 0.45); }
+  .sidebar__nudge { animation: none; }
+}

@@ -99,6 +99,17 @@ pub struct Alert {
     pub title: Text,
     pub message: Text,
     pub allow_report: bool,
+    /// Files and folders the alert offers to open (a crash's report and logs).
+    #[serde(default)]
+    pub files: Vec<AlertFile>,
+}
+
+/// A file or folder an alert opens: a text file in its program, a folder in the file manager.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlertFile {
+    pub label: Text,
+    pub path: String,
+    pub folder: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

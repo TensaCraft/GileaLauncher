@@ -54,6 +54,12 @@ pub fn backend_modules(info: Option<&launcher_shared::AppInfo>) -> Vec<String> {
     info.iter().flat_map(|i| i.modules.iter().map(|m| m.id.clone())).collect()
 }
 
+/// Whether the profile button calls for a first profile: none was made, the list is known, and
+/// the user is not on the profiles page already.
+pub fn calls_for_profile(loaded: bool, profiles: usize, on_profiles: bool) -> bool {
+    loaded && profiles == 0 && !on_profiles
+}
+
 pub fn is_active(current: &str, path: &str) -> bool {
     if path == "/" { current == "/" } else { current == path || current.starts_with(&format!("{path}/")) }
 }
@@ -66,6 +72,13 @@ pub fn Sidebar() -> impl IntoView {
     let location = use_location();
     let contacts = has_contacts();
     let default_profile = move || store.profiles.with(|list| list.iter().find(|p| p.is_default).cloned());
+    let nudge = move || {
+        calls_for_profile(
+            store.profiles_loaded.get(),
+            store.profiles.with(Vec::len),
+            is_active(&location.pathname.get(), "/profiles"),
+        )
+    };
     let pages = StoredValue::new(use_context::<ModulePages>().unwrap_or_default().0);
     let items = move || {
         let (backend, modpacks) = store
@@ -107,6 +120,7 @@ pub fn Sidebar() -> impl IntoView {
                 href="/profiles"
                 class="sidebar__item sidebar__user"
                 class:is-active=move || is_active(&location.pathname.get(), "/profiles")
+                class:is-nudge=nudge
                 data-tip=tip("profile_title")
                 on:click=move |_| sound::play_click()
             >
@@ -118,6 +132,8 @@ pub fn Sidebar() -> impl IntoView {
                 <span class="sidebar__label">
                     {move || default_profile().map(|p| p.name).unwrap_or_else(|| i18n.t("profile_empty"))}
                 </span>
+                // No profile yet: a hint beside the button says what to do.
+                {move || nudge().then(|| view! { <span class="sidebar__nudge" role="status">{i18n.t("profile_nudge")}</span> })}
             </a>
         </aside>
     }
@@ -126,6 +142,14 @@ pub fn Sidebar() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_profile_button_calls_for_a_first_profile_only() {
+        assert!(calls_for_profile(true, 0, false));
+        assert!(!calls_for_profile(false, 0, false), "not before the list is known");
+        assert!(!calls_for_profile(true, 1, false), "one is there");
+        assert!(!calls_for_profile(true, 0, true), "already on the profiles page");
+    }
 
     #[test]
     fn active_matching() {

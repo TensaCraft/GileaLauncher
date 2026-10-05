@@ -75,6 +75,7 @@ pub fn App() -> impl IntoView {
     // Where every build card puts its Play button (Settings → Interface).
     provide_context(ui_kit::CardPlayStyle(Signal::derive(move || store.settings.with(|s| s.card_play))));
     let toasts = provide_toasts();
+    let problems = ui_kit::problem::provide_problem_reporter();
     provide_context_menu();
     provide_header();
     provide_support();
@@ -132,7 +133,10 @@ pub fn App() -> impl IntoView {
         })
     });
     ipc::listen::<UpdateStatus>(names::UPDATE, move |s| store.update.set(Some(s)));
-    ipc::listen::<ProfilesSnapshot>(names::PROFILES, move |s| store.profiles.set(s.profiles));
+    ipc::listen::<ProfilesSnapshot>(names::PROFILES, move |s| {
+        store.profiles.set(s.profiles);
+        store.profiles_loaded.set(true);
+    });
     ipc::listen::<BuildsSnapshot>(names::BUILDS, move |s| {
         store.builds.set(s.builds);
         store.builds_loaded.set(true);
@@ -166,6 +170,7 @@ pub fn App() -> impl IntoView {
                 title: Text::key("warning"),
                 message: first,
                 allow_report: false,
+                files: Vec::new(),
             }));
         }
         if let Ok(ops) = ipc::call::<OpsSnapshot>("ops_snapshot").await {
@@ -185,6 +190,7 @@ pub fn App() -> impl IntoView {
         }
         if let Ok(snapshot) = ipc::call::<ProfilesSnapshot>("profiles_list").await {
             store.profiles.set(snapshot.profiles);
+            store.profiles_loaded.set(true);
         }
         if let Ok(snapshot) = ipc::call::<BuildsSnapshot>("builds_list").await {
             store.builds.set(snapshot.builds);
@@ -220,7 +226,15 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/dev/kit") view=KitPage />
                 </Routes>
             </Shell>
-            <Toaster close_label=Signal::derive(move || i18n.t("toast_close")) />
+            <Toaster
+                close_label=Signal::derive(move || i18n.t("toast_close"))
+                on_action=Callback::new(move |action: String| {
+                    // A failure's «Report»: the reports module opens its window with it.
+                    if let Some(problem) = ui_kit::problem::reported_problem(&action) {
+                        problems.request.set(Some(problem));
+                    }
+                })
+            />
             <ContextMenuHost on_select=Callback::new(|_id: String| {}) />
             <TipLayer />
             <AlertHost />

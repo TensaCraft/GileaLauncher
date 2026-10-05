@@ -82,7 +82,7 @@ impl ProfileActions {
                     toasts.show(Level::Info, i18n.t("microsoft_auth_cancelled"), None)
                 }
                 Err(e) if e.code == ErrorCode::Busy => {}
-                Err(e) => toasts.show(Level::Warning, i18n.error(&e), None),
+                Err(e) => crate::shell::failure::failure_toast(toasts, i18n, i18n.error(&e), &e),
             }
         });
     }

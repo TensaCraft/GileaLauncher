@@ -65,6 +65,11 @@ impl GpuPreferenceStore for GpuCalls {
         self.0.lock().unwrap().push((exe.to_path_buf(), value.to_string()));
         Ok(())
     }
+
+    fn remove(&self, exe: &Path) -> std::io::Result<()> {
+        self.0.lock().unwrap().push((exe.to_path_buf(), "removed".to_string()));
+        Ok(())
+    }
 }
 
 struct World {
@@ -284,12 +289,8 @@ async fn a_build_starts_with_its_command_and_reports_its_exit() {
     assert!(log.contains("fake game started"), "{log}");
     let starting = Text::key("version_starting").param("version", "Aero");
     assert!(w.recorder.toasts.lock().unwrap().iter().any(|t| t.title == starting));
-    let gpu = w.gpu.0.lock().unwrap().clone();
-    if cfg!(windows) {
-        assert_eq!(gpu, [(fake_game(), "GpuPreference=2;".to_string())]);
-    } else {
-        assert!(gpu.is_empty());
-    }
+    // A new build lets Windows choose its GPU: the registry is not touched.
+    assert!(w.gpu.0.lock().unwrap().is_empty());
     assert!(!w.launcher.is_running(&key));
 }
 

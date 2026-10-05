@@ -84,12 +84,9 @@ pub fn parse_port(raw: &str) -> AppResult<Option<u16>> {
     })
 }
 
+/// `auto`, `igpu` or `dgpu`; anything else is the system's default.
 fn gpu_mode(raw: &str) -> &'static str {
-    match raw {
-        "auto" => "auto",
-        "igpu" => "igpu",
-        _ => "dgpu",
-    }
+    crate::java::gpu::GpuMode::parse(Some(raw)).as_str()
 }
 
 /// The page's view of `build`. Its `executablePath` in `<mc_dir>/runtime` is the launcher's own
@@ -332,7 +329,8 @@ mod tests {
         for key in ["jvmArguments", "executablePath", "server"] {
             assert!(!b.options.contains_key(key), "{key}");
         }
-        assert_eq!(b.options["gpuMode"], json!("dgpu"));
+        let system = crate::java::gpu::platform_default(crate::paths::Os::current()).as_str();
+        assert_eq!(b.options["gpuMode"], json!(system), "an unknown mode is the system's default");
         let mut no_port = update();
         no_port.server_host = "play.example".into();
         apply_options(&mut b, &no_port).unwrap();

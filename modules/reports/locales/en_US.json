@@ -1,9 +1,21 @@
 {
     "module_reports_name": "Error reports",
-    "module_reports_desc": "Send crash and build problem reports",
+    "module_reports_desc": "Reports of the launcher's own problems: failures, crashes and what you describe",
     "settings_tab_reports": "Reports",
-    "reports_settings_desc": "Error reports to the developers: your contact, so they can reach you",
-    "reports_attachments_title": "The report will attach",
-    "reports_no_attachments": "This build has no logs yet — your description and the launcher's log are sent",
-    "reports_alert_gone": "This alert's report is no longer available"
+    "reports_settings_desc": "Reports of launcher problems to the developers: your contact, so they can reach you",
+    "reports_alert_gone": "This alert's report is no longer available",
+    "problem_report_title": "Report a launcher problem",
+    "problem_report_hint": "Describe what happened. The launcher adds its own log to the report — no game logs; your home folder's path and sign-in tokens are hidden.",
+    "problem_report_message_label": "What happened",
+    "problem_report_message_hint": "What you did, what you expected and what happened instead…",
+    "problem_report_message_required": "Describe the problem before sending",
+    "problem_report_sent": "Report sent: {report_id}. Thank you!",
+    "support_problem_title": "A problem with the launcher",
+    "support_problem_desc": "Describe what went wrong: the launcher adds its own log to the report",
+    "support_problem_open": "Report",
+    "crash_prompt_title": "The launcher crashed",
+    "crash_prompt_text": "Last time the launcher (version {version}) hit an internal error. Send a report so it gets fixed sooner: it carries the launcher's log, no game logs.",
+    "crash_prompt_comment_label": "What were you doing? (optional)",
+    "crash_prompt_comment_hint": "For example: pressed Play on a modded build…",
+    "crash_prompt_skip": "Don't send"
 }

@@ -111,6 +111,13 @@ pub struct ModuleAlertAction {
     pub view: fn(launcher_shared::Alert) -> AnyView,
 }
 
+/// A row a module adds to the Support window: a way to reach the launcher's developers.
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleSupportAction {
+    pub module: &'static str,
+    pub view: fn() -> AnyView,
+}
+
 /// What the app lets a module's UI do beyond its own parts.
 #[derive(Clone, Copy)]
 pub struct ModuleHost {
@@ -228,6 +235,11 @@ pub trait UiModule: 'static {
 
     /// Warnings above a provider's tab of a build's content.
     fn content_notices(&self) -> Vec<ModuleContentNotice> {
+        Vec::new()
+    }
+
+    /// Rows of the Support window.
+    fn support_actions(&self) -> Vec<ModuleSupportAction> {
         Vec::new()
     }
 }

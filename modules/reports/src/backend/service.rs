@@ -1,20 +1,18 @@
-//! The module's work over the launcher's services: reports of alerts and of builds, and the
-//! contact the reports carry.
+//! The module's work over the launcher's services: reports of the launcher's own problems (a
+//! failed operation, a problem the user describes, a crash of the launcher) and the contact the
+//! reports carry. A game's crash is its build's (its mods), not the launcher's: none is sent.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
-use launcher_core::builds::settings::split_jvm_arguments;
 use launcher_core::core_app::CoreApp;
+use launcher_core::crash::{self, Crash};
 use launcher_core::feedback::{FeedbackService, ReportKind};
-use launcher_core::launch::options::game_dir;
-use launcher_core::launch::process::LAUNCH_LOG;
 use launcher_core::storage::config::ConfigStore;
-use launcher_core::storage::versions::{Build, VersionStore};
 use launcher_shared::branding::VERSION;
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use reqwest::Client;
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::payload::{Env, ReportInput, build, feedback_snapshot};
@@ -28,10 +26,20 @@ pub struct Reports {
     pub endpoint: String,
     pub config: Arc<ConfigStore>,
     pub feedback: Arc<FeedbackService>,
-    pub versions: Arc<VersionStore>,
-    pub minecraft_dir: PathBuf,
+    /// Where the launcher's own crashes wait (`launcher_core::crash`).
+    pub crash_dir: PathBuf,
     pub app_log: Option<PathBuf>,
     pub home: Option<PathBuf>,
+}
+
+/// The error the user saw when they report a failure: its text, code and detail.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct ProblemError {
+    pub title: String,
+    #[serde(default)]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
 }
 
 /// `windows`, `macos` or `linux`.
@@ -47,42 +55,6 @@ fn io(e: std::io::Error) -> AppError {
     AppError::new(ErrorCode::Io, e.to_string())
 }
 
-/// How old a crash file may be to explain what a report is about.
-const RECENT: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// The newest file in `dir` whose name `keep` accepts, written in the last day (an older one is
-/// another run's, maybe another launcher's).
-fn newest(dir: &Path, keep: impl Fn(&str) -> bool) -> Option<PathBuf> {
-    std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .filter(|entry| keep(&entry.file_name().to_string_lossy()))
-        .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
-        .filter(|(modified, path)| path.is_file() && modified.elapsed().map_or(true, |age| age <= RECENT))
-        .max_by_key(|(modified, _)| *modified)
-        .map(|(_, path)| path)
-}
-
-/// A build's files a report of it attaches: the game's log, the launch log,
-/// the newest crash report and the newest JVM crash log of the last day — those there are.
-pub fn build_attachments(game_dir: &Path) -> Vec<PathBuf> {
-    let logs = game_dir.join("logs");
-    [
-        Some(logs.join("latest.log")),
-        Some(logs.join(LAUNCH_LOG)),
-        newest(&game_dir.join("crash-reports"), |_| true),
-        newest(game_dir, |name| name.starts_with("hs_err_") && name.ends_with(".log")),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|path| path.is_file())
-    .collect()
-}
-
-fn names(files: &[PathBuf]) -> Vec<String> {
-    files.iter().filter_map(|f| f.file_name()).map(|n| n.to_string_lossy().into_owned()).collect()
-}
-
 impl Reports {
     pub fn of(core: &CoreApp) -> AppResult<Reports> {
         Ok(Reports {
@@ -90,8 +62,7 @@ impl Reports {
             endpoint: endpoint(),
             config: core.config.clone(),
             feedback: core.feedback.clone(),
-            versions: core.versions.clone(),
-            minecraft_dir: core.paths.minecraft_dir.clone(),
+            crash_dir: core.crash_dir(),
             app_log: Some(core.log_file()),
             home: launcher_core::paths::PathEnv::from_system().home.into(),
         })
@@ -159,45 +130,76 @@ impl Reports {
         .await
     }
 
-    fn build_of(&self, key: &str) -> AppResult<(Build, PathBuf)> {
-        let build = self.versions.get(key).ok_or_else(|| {
-            AppError::new(ErrorCode::VersionNotFound, format!("no build {key}")).with_param("version", key)
-        })?;
-        let dir = game_dir(&build, &self.minecraft_dir);
-        Ok((build, dir))
-    }
-
-    /// The names of the files a report of build `key` attaches.
-    pub fn attachments(&self, key: &str) -> AppResult<Vec<String>> {
-        let (_, dir) = self.build_of(key)?;
-        Ok(names(&build_attachments(&dir)))
-    }
-
-    /// Reports build `key` with the user's description; `contact` is kept for next time.
-    pub async fn send_build(&self, key: &str, message: &str, contact: &str) -> AppResult<String> {
-        if message.trim().is_empty() {
-            return Err(AppError::new(ErrorCode::InvalidInput, "a build report needs a description"));
+    /// Reports a problem with the launcher: the user's words, the error they saw (from a failed
+    /// operation) or both, with the launcher's log. `contact` is kept for next time.
+    pub async fn send_problem(
+        &self,
+        message: &str,
+        contact: &str,
+        error: Option<ProblemError>,
+    ) -> AppResult<String> {
+        let error = error.filter(|e| !e.title.trim().is_empty());
+        if message.trim().is_empty() && error.is_none() {
+            return Err(AppError::new(ErrorCode::InvalidInput, "a report needs a description"));
         }
-        let (build, dir) = self.build_of(key)?;
         self.set_contact(contact)?;
-        let files = build_attachments(&dir);
-        let (max_ram_gb, jvm_arguments) = split_jvm_arguments(&build.options);
-        let option = |key: &str| build.options.get(key).cloned().unwrap_or(Value::Null);
-        let metadata = json!({
-            "version_id": build.key, "version_name": build.name, "client": build.client, "loader": build.loader,
-            "minecraft": build.version, "path": dir.to_string_lossy(), "java_path": option("executablePath"),
-            "gpu_mode": option("gpuMode"), "max_ram_gb": max_ram_gb, "jvm_arguments": jvm_arguments,
-            "server": option("server"), "force_update": build.force_update, "attachments": names(&files),
-        });
+        let title = match error.as_ref().and_then(|e| e.code.as_deref()) {
+            Some(code) => format!("Launcher error: {code}"),
+            None => "Launcher problem".to_string(),
+        };
+        let message = match (message.trim(), &error) {
+            ("", Some(e)) => e.title.trim().to_string(),
+            (words, _) => words.to_string(),
+        };
+        let metadata = match &error {
+            Some(e) => json!({"error_title": e.title, "error_code": e.code, "error_detail": e.detail}),
+            None => json!({}),
+        };
         self.deliver(ReportInput {
             kind: ReportKind::Error,
-            title: format!("Version report: {}", build.name),
-            message: message.trim().to_string(),
-            screen: "version".into(),
-            action: "manual_version_report".into(),
+            title,
+            message,
+            screen: "launcher".into(),
+            action: "problem_report".into(),
             metadata,
-            attachments: files,
+            attachments: Vec::new(),
         })
         .await
+    }
+
+    /// The launcher's own crash waiting to be reported, the newest.
+    pub fn last_crash(&self) -> Option<Crash> {
+        crash::pending(&self.crash_dir)
+    }
+
+    /// Reports the waiting crash with the user's words (if any) and the launcher's log; once
+    /// sent, no crash waits any more.
+    pub async fn send_crash(&self, message: &str, contact: &str) -> AppResult<String> {
+        let crash = self.last_crash().ok_or_else(|| {
+            AppError::new(ErrorCode::NotFound, "no crash of the launcher waits to be reported")
+        })?;
+        self.set_contact(contact)?;
+        let words = message.trim();
+        let id = self
+            .deliver(ReportInput {
+                kind: ReportKind::Crash,
+                title: "Launcher crashed".into(),
+                message: if words.is_empty() { crash.message.clone() } else { words.to_string() },
+                screen: "launcher".into(),
+                action: "panic".into(),
+                metadata: json!({
+                    "panic_message": crash.message, "panic_location": crash.location,
+                    "crashed_version": crash.version, "crashed_at": crash.at, "thread": crash.thread,
+                }),
+                attachments: Vec::new(),
+            })
+            .await?;
+        crash::clear(&self.crash_dir);
+        Ok(id)
+    }
+
+    /// Forgets the waiting crash: the user chose not to report it.
+    pub fn dismiss_crash(&self) {
+        crash::clear(&self.crash_dir);
     }
 }

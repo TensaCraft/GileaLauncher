@@ -1,19 +1,16 @@
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
 
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
+use launcher_core::crash::{self, Crash};
 use launcher_core::feedback::{FeedbackService, NullSink, ReportContext, ReportKind};
-use launcher_core::launch::options::game_dir;
 use launcher_core::storage::config::ConfigStore;
-use launcher_core::storage::versions::{Build, VersionStore};
 use launcher_shared::{ErrorCode, Level, Text};
 use module_reports::backend::send::{client, send};
-use module_reports::backend::service::Reports;
+use module_reports::backend::service::{ProblemError, Reports};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 
@@ -46,27 +43,15 @@ fn bodies(seen: &Shared) -> Vec<Value> {
 }
 
 fn reports(dir: &Path, endpoint: &str) -> Reports {
-    let state = dir.join("state");
-    std::fs::create_dir_all(&state).unwrap();
     Reports {
         http: client().unwrap(),
         endpoint: endpoint.into(),
         config: Arc::new(ConfigStore::open(dir.join("config.json"))),
         feedback: FeedbackService::new(Arc::new(NullSink)),
-        versions: Arc::new(VersionStore::open(&state, &dir.join("mc"))),
-        minecraft_dir: dir.join("mc"),
+        crash_dir: dir.join("crashes"),
         app_log: None,
         home: None,
     }
-}
-
-fn aero(reports: &Reports) -> (Build, PathBuf) {
-    let mut build = Build::new("Aero");
-    build.version = Some("26.3".into());
-    build.client = Some("Fabric".into());
-    reports.versions.create(&mut build).unwrap();
-    let dir = game_dir(&build, &reports.minecraft_dir);
-    (build, dir)
 }
 
 fn write(path: PathBuf, body: &str) -> PathBuf {
@@ -112,70 +97,77 @@ async fn no_endpoint_no_report() {
 }
 
 #[tokio::test]
-async fn a_build_report_needs_a_message() {
+async fn a_problem_report_needs_words_or_an_error() {
     let (url, seen) = server(200, r#"{"ok": true}"#).await;
     let dir = tempfile::tempdir().unwrap();
-    let reports = reports(dir.path(), &url);
-    let (build, _) = aero(&reports);
-    let e = reports.send_build(&build.key, "  ", "").await.unwrap_err();
+    let e = reports(dir.path(), &url).send_problem("  ", "", None).await.unwrap_err();
     assert_eq!(e.code, ErrorCode::InvalidInput);
     assert!(bodies(&seen).is_empty(), "nothing is sent");
 }
 
 #[tokio::test]
-async fn a_build_report_attaches_the_build_s_logs() {
+async fn a_problem_report_carries_the_launcher_s_log_and_the_error_not_the_game_s() {
     let (url, seen) = server(200, r#"{"ok": true, "report_id": "R-7"}"#).await;
     let dir = tempfile::tempdir().unwrap();
-    let reports = reports(dir.path(), &url);
-    let (build, game) = aero(&reports);
-    write(game.join("logs").join("latest.log"), "game log");
-    write(game.join("logs").join("launch.log"), "launch log");
-    let old = write(game.join("crash-reports").join("crash-old.txt"), "old crash");
-    File::options()
-        .write(true)
-        .open(&old)
-        .unwrap()
-        .set_modified(SystemTime::now() - Duration::from_secs(3600))
-        .unwrap();
-    write(game.join("crash-reports").join("crash-new.txt"), "new crash");
-    write(game.join("hs_err_pid1.log"), "jvm died");
-    assert_eq!(
-        reports.attachments(&build.key).unwrap(),
-        ["latest.log", "launch.log", "crash-new.txt", "hs_err_pid1.log"]
-    );
-    let id = reports.send_build(&build.key, "It crashes", " me@example.com ").await.unwrap();
+    let mut reports = reports(dir.path(), &url);
+    reports.app_log = Some(write(dir.path().join("app.log"), "INFO Installing Aero"));
+    write(dir.path().join("mc").join("games").join("aero").join("logs").join("latest.log"), "game log");
+    let error = ProblemError {
+        title: "Не вдалося встановити Aero".into(),
+        code: Some("download_failed".into()),
+        detail: Some("HTTP 503 from piston-data.mojang.com".into()),
+    };
+    let id = reports.send_problem("It hangs at 40%", " me@example.com ", Some(error.clone())).await.unwrap();
     assert_eq!(id, "R-7");
     let body = bodies(&seen).remove(0);
-    assert_eq!(body["type"], "error");
-    assert_eq!(body["message"], "It crashes");
+    assert_eq!(
+        (body["type"].as_str(), body["title"].as_str()),
+        (Some("error"), Some("Launcher error: download_failed"))
+    );
+    assert_eq!(body["message"], "It hangs at 40%");
     assert_eq!(body["contact"], "me@example.com");
     let metadata = &body["metadata"];
-    assert_eq!(metadata["action"], "manual_version_report");
-    assert_eq!(metadata["version_name"], "Aero");
-    assert_eq!(metadata["minecraft"], "26.3");
+    assert_eq!(metadata["action"], "problem_report");
+    assert_eq!(
+        (metadata["error_title"].as_str(), metadata["error_detail"].as_str()),
+        (Some(error.title.as_str()), error.detail.as_deref())
+    );
     let log = body["log"].as_str().unwrap();
-    assert!(log.contains("--- diagnostic file: crash-new.txt ---\nnew crash"), "{log}");
-    assert!(!log.contains("old crash"), "only the newest crash report");
-    assert!(log.contains("jvm died") && log.contains("launch log"));
+    assert!(log.contains("Installing Aero"), "{log}");
+    assert!(!log.contains("game log"), "no game's files go");
     assert_eq!(reports.contact(), "me@example.com", "the contact is kept for next time");
+    // With the error alone, its words are the message.
+    reports.send_problem("", "", Some(error.clone())).await.unwrap();
+    assert_eq!(bodies(&seen)[1]["message"], error.title.as_str());
 }
 
-#[test]
-fn a_build_report_leaves_out_crash_files_of_long_ago() {
-    // A report about a crash sent the game's JVM error file of a month before (from another
-    // launcher's run of the folder): only crash files of the last day explain what just happened.
+#[tokio::test]
+async fn a_launcher_crash_is_offered_until_sent() {
+    let (url, seen) = server(200, r#"{"ok": true, "report_id": 9}"#).await;
     let dir = tempfile::tempdir().unwrap();
-    let reports = reports(dir.path(), "");
-    let (build, game) = aero(&reports);
-    write(game.join("logs").join("latest.log"), "game log");
-    let month = SystemTime::now() - Duration::from_secs(30 * 24 * 3600);
-    for old in [game.join("hs_err_pid32976.log"), game.join("crash-reports").join("crash-2026-08-29.txt")] {
-        write(old.clone(), "long ago");
-        File::options().write(true).open(&old).unwrap().set_modified(month).unwrap();
-    }
-    assert_eq!(reports.attachments(&build.key).unwrap(), ["latest.log"]);
-    write(game.join("hs_err_pid34608.log"), "now");
-    assert_eq!(reports.attachments(&build.key).unwrap(), ["latest.log", "hs_err_pid34608.log"]);
+    let reports = reports(dir.path(), &url);
+    assert_eq!(reports.last_crash(), None);
+    let crash = Crash::now("index out of bounds", "crates/launcher-core/src/x.rs:10:5", "main", None);
+    crash::write(&reports.crash_dir, &crash).unwrap();
+    assert_eq!(reports.last_crash(), Some(crash.clone()));
+    reports.send_crash("I pressed Play", "").await.unwrap();
+    let body = bodies(&seen).remove(0);
+    assert_eq!((body["type"].as_str(), body["title"].as_str()), (Some("crash"), Some("Launcher crashed")));
+    assert_eq!(body["message"], "I pressed Play");
+    assert_eq!(body["metadata"]["panic_location"], crash.location.as_str());
+    assert_eq!(body["metadata"]["panic_message"], crash.message.as_str());
+    assert_eq!(reports.last_crash(), None, "sent: not offered again");
+}
+
+#[tokio::test]
+async fn a_launcher_crash_not_sent_waits_or_is_dismissed() {
+    let dir = tempfile::tempdir().unwrap();
+    let reports = reports(dir.path(), "http://127.0.0.1:9/logs");
+    crash::write(&reports.crash_dir, &Crash::now("boom", "src/a.rs:1:1", "main", None)).unwrap();
+    assert!(reports.send_crash("", "").await.is_err(), "offline");
+    assert!(reports.last_crash().is_some(), "it waits for the next try");
+    reports.dismiss_crash();
+    assert_eq!(reports.last_crash(), None);
 }
 
 #[tokio::test]
@@ -201,20 +193,20 @@ async fn an_alert_report_uses_its_context() {
         Text::key("warning"),
         Text::raw("crash"),
         ReportContext {
-            kind: ReportKind::Crash,
-            title: "Minecraft exited after launch".into(),
-            screen: "game".into(),
-            action: "launch".into(),
+            kind: ReportKind::Error,
+            title: "Server build install failed".into(),
+            screen: "Home".into(),
+            action: "tensacraft_install".into(),
             metadata: json!({"version_name": "Aero"}),
             attachments: vec![log],
         },
     );
-    reports.send_alert(id, "Попередження", "Minecraft crashed").await.unwrap();
+    reports.send_alert(id, "Попередження", "Install failed").await.unwrap();
     let body = bodies(&seen).remove(0);
-    assert_eq!(body["type"], "crash");
-    assert_eq!(body["title"], "Minecraft exited after launch");
-    assert_eq!(body["message"], "Minecraft crashed");
-    assert_eq!(body["metadata"]["action"], "launch");
+    assert_eq!(body["type"], "error");
+    assert_eq!(body["title"], "Server build install failed");
+    assert_eq!(body["message"], "Install failed");
+    assert_eq!(body["metadata"]["action"], "tensacraft_install");
     assert_eq!(body["metadata"]["version_name"], "Aero");
     assert!(body["log"].as_str().unwrap().contains("OutOfMemoryError"));
 }

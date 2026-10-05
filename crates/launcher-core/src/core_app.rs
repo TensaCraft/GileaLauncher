@@ -126,6 +126,13 @@ impl CoreApp {
         let paths = LauncherPaths::resolve(&env, override_dir.as_deref());
         tracing::info!("Starting the launcher {VERSION} (profile {PROFILE}, dev={})", paths.dev_mode);
 
+        // The launcher's own crashes are kept, to be offered as a report at the next start.
+        if opts.init_logging {
+            crate::crash::install_hook(
+                paths.cache_dir.join(crate::crash::CRASH_DIR),
+                Some(env.home.to_string_lossy().into_owned()),
+            );
+        }
         let mut startup_warnings = Vec::new();
         if paths.rejected_minecraft_override {
             tracing::warn!("Ignoring unsafe Minecraft directory override {override_dir:?}");
@@ -177,6 +184,11 @@ impl CoreApp {
             downloader.clone(),
         );
         let versions = Arc::new(VersionStore::open(&paths.app_state_dir, &paths.minecraft_dir));
+        let moved =
+            crate::builds::service::migrate_gpu_default(&config, &versions, crate::paths::Os::current());
+        if moved > 0 {
+            tracing::info!("Windows chooses the GPU of {moved} builds now (nothing goes to the registry)");
+        }
         let shared = Arc::new(Coordinator::shared());
         let platform = GamePlatform::current();
         let endpoints = MojangEndpoints::default();
@@ -279,6 +291,11 @@ impl CoreApp {
     }
 
     /// The launcher log: the file logging writes to, or where it would be in the log directory.
+    /// Where the launcher's own crashes wait to be reported (`crash`).
+    pub fn crash_dir(&self) -> PathBuf {
+        self.paths.cache_dir.join(crate::crash::CRASH_DIR)
+    }
+
     pub fn log_file(&self) -> PathBuf {
         crate::logging::log_path().unwrap_or_else(|| self.paths.log_dir.join(crate::logging::LOG_FILE))
     }

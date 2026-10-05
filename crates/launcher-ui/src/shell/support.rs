@@ -74,6 +74,7 @@ pub fn SupportDialog() -> impl IntoView {
     let opener = use_url_opener();
     let support = use_support();
     let list = build_contacts();
+    let parts = crate::modules::use_module_parts();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
     view! {
         <Dialog open=support.open title=t("support_title") icon="support_agent">
@@ -87,6 +88,8 @@ pub fn SupportDialog() -> impl IntoView {
                     </Button>
                 </SettingRow>
             }).collect_view()}
+            // Modules' ways to reach the developers (a report of a problem).
+            {move || parts.with(|p| p.support_actions.iter().map(|a| (a.view)()).collect_view())}
         </Dialog>
     }
 }

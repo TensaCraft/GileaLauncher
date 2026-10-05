@@ -7,10 +7,11 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    ActionTone, Button, Field, IconAction, InFlight, PathField, Section, SegOption, Segmented, SettingRow,
-    TextInput, Variant, ipc, use_toasts,
+    ActionTone, Button, Field, IconAction, InFlight, PathField, Section, SettingRow, TextInput, Variant, ipc,
+    use_toasts,
 };
 
+use crate::builds::gpu::GpuChoice;
 use crate::builds::ram::RamSetting;
 use crate::builds::ram_slider;
 use crate::store::{use_settings_writer, use_store};
@@ -79,13 +80,6 @@ pub fn JavaSection() -> impl IntoView {
         writer.apply(SettingUpdate::DefaultMaxRamGb(Some(gb.round().max(1.0) as u64)))
     });
     let gpu = RwSignal::new(gpu_choice(&store.settings.get_untracked().gpu_mode_default).to_string());
-    let gpu_options = Signal::derive(move || {
-        vec![
-            SegOption::new("auto", i18n.t("gpu_mode_auto")),
-            SegOption::new("igpu", i18n.t("gpu_mode_integrated")),
-            SegOption::new("dgpu", i18n.t("gpu_mode_discrete")),
-        ]
-    });
     let on_gpu = Callback::new(move |mode: String| writer.apply(SettingUpdate::GpuModeDefault(mode)));
 
     let name = RwSignal::new(String::new());
@@ -193,7 +187,7 @@ pub fn JavaSection() -> impl IntoView {
                 on_ram=on_ram
             />
             <SettingRow title=t("gpu_mode_default_label")>
-                <Segmented options=gpu_options value=gpu on_change=on_gpu />
+                <GpuChoice value=gpu on_change=on_gpu />
             </SettingRow>
         </Section>
         <Section icon="coffee" title=t("custom_java_section") desc=t("custom_java_section_desc")>

@@ -20,6 +20,8 @@ pub struct AppStore {
     pub update: RwSignal<Option<UpdateStatus>>,
     /// Accounts, default first (`app://profiles`).
     pub profiles: RwSignal<Vec<ProfileDto>>,
+    /// `profiles` holds the backend's answer (no hint to add one before).
+    pub profiles_loaded: RwSignal<bool>,
     /// Every build, sorted by name (`app://builds`).
     pub builds: RwSignal<Vec<BuildDto>>,
     /// `builds` holds the backend's answer (external launches wait for it).
@@ -80,6 +82,7 @@ pub fn provide_store() -> AppStore {
         activity: RwSignal::new(Vec::new()),
         update: RwSignal::new(None),
         profiles: RwSignal::new(Vec::new()),
+        profiles_loaded: RwSignal::new(false),
         builds: RwSignal::new(Vec::new()),
         builds_loaded: RwSignal::new(false),
         launching: RwSignal::new(BTreeSet::new()),

@@ -208,6 +208,29 @@ pub fn reveal_path(app: AppHandle, path: String) -> AppResult<()> {
     app.opener().reveal_item_in_dir(&file).map_err(|e| AppError::new(ErrorCode::Io, e.to_string()))
 }
 
+/// Opens an existing text file (a crash report, a game's log) in its program.
+#[tauri::command(async)]
+pub fn open_text_file(app: AppHandle, path: String) -> AppResult<()> {
+    let file = text_file(&path)?;
+    open_file(&app, &file).map_err(|e| AppError::new(ErrorCode::Io, e))
+}
+
+/// Only an existing `.log` or `.txt` file given by an absolute path may be opened: any other file
+/// could be a program the system would run.
+pub fn text_file(path: &str) -> AppResult<std::path::PathBuf> {
+    let file = revealable_file(path)?;
+    let text = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("log") || e.eq_ignore_ascii_case("txt"));
+    if !text {
+        return Err(
+            AppError::new(ErrorCode::InvalidInput, "only text files can be opened").with_param("path", path)
+        );
+    }
+    Ok(file)
+}
+
 /// Only an existing file given by an absolute path may be revealed.
 pub fn revealable_file(path: &str) -> AppResult<std::path::PathBuf> {
     let file = std::path::PathBuf::from(path);
@@ -403,5 +426,27 @@ mod tests {
         let missing = dir.path().join("gone.log");
         assert_eq!(revealable_file(missing.to_str().unwrap()).unwrap_err().code, ErrorCode::NotFound);
         assert_eq!(revealable_file("app.log").unwrap_err().code, ErrorCode::InvalidInput, "relative");
+    }
+
+    #[test]
+    fn only_text_files_are_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["latest.log", "crash-2026-10-05_18.27.26-client.txt", "hs_err_pid1.LOG"] {
+            let file = dir.path().join(name);
+            std::fs::write(&file, "x").unwrap();
+            assert_eq!(text_file(file.to_str().unwrap()).unwrap(), file, "{name}");
+        }
+        for name in ["run-me.bat", "game.jar", "notes"] {
+            let file = dir.path().join(name);
+            std::fs::write(&file, "x").unwrap();
+            assert_eq!(
+                text_file(file.to_str().unwrap()).unwrap_err().code,
+                ErrorCode::InvalidInput,
+                "{name}"
+            );
+        }
+        assert_eq!(text_file(dir.path().to_str().unwrap()).unwrap_err().code, ErrorCode::InvalidInput);
+        let missing = dir.path().join("gone.log");
+        assert_eq!(text_file(missing.to_str().unwrap()).unwrap_err().code, ErrorCode::NotFound);
     }
 }

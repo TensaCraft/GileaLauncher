@@ -40,6 +40,38 @@ fn screen_of(window: &WebviewWindow) -> Option<(f64, f64)> {
     })
 }
 
+/// The variable that sends a debug build's window to another monitor (`secondary`), so test runs
+/// stay off the developer's main screen. A release build never reads it.
+pub const DEV_MONITOR_VAR: &str = "LAUNCHER_DEV_MONITOR";
+
+fn dev_monitor_asked(value: Option<&str>) -> bool {
+    value == Some("secondary")
+}
+
+/// Of the monitors at `positions`, the first that is not the primary one at `primary`.
+fn secondary_monitor(positions: &[(i32, i32)], primary: (i32, i32)) -> Option<usize> {
+    positions.iter().position(|p| *p != primary)
+}
+
+/// In a debug build with `LAUNCHER_DEV_MONITOR=secondary`, puts the new window on a monitor that
+/// is not the main one, before it is sized and centred there.
+pub fn move_to_dev_monitor(window: &WebviewWindow) {
+    if !cfg!(debug_assertions) || !dev_monitor_asked(std::env::var(DEV_MONITOR_VAR).ok().as_deref()) {
+        return;
+    }
+    let (Ok(monitors), Ok(Some(primary))) = (window.available_monitors(), window.primary_monitor()) else {
+        return;
+    };
+    let positions: Vec<(i32, i32)> = monitors.iter().map(|m| (m.position().x, m.position().y)).collect();
+    let main = (primary.position().x, primary.position().y);
+    if let Some(other) = secondary_monitor(&positions, main).map(|i| &monitors[i]) {
+        let at = other.work_area().position;
+        if let Err(e) = window.set_position(tauri::PhysicalPosition::new(at.x + 40, at.y + 40)) {
+            tracing::warn!("Unable to move the window to another monitor: {e}");
+        }
+    }
+}
+
 /// Sizes the new window at startup, before it shows (it is in no other state yet).
 pub fn apply_window_size(window: &WebviewWindow, size: WindowSize) {
     let result = match size {
@@ -350,6 +382,16 @@ mod tests {
         assert!(!toggle_maximized(&w), "full screen is left, not maximized over");
         settle(&w);
         assert!(!w.is_fullscreen() && !w.is_maximized());
+    }
+
+    #[test]
+    fn a_dev_window_goes_to_a_monitor_that_is_not_the_main_one() {
+        // A 2560×1600 main screen with a 1920×1080 one to its right.
+        let monitors = [(2560, 0), (0, 0)];
+        assert_eq!(secondary_monitor(&monitors, (0, 0)), Some(0));
+        assert_eq!(secondary_monitor(&[(0, 0)], (0, 0)), None, "one screen: the window stays");
+        assert!(dev_monitor_asked(Some("secondary")));
+        assert!(!dev_monitor_asked(Some("")) && !dev_monitor_asked(None));
     }
 
     #[test]

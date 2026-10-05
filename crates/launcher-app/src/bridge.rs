@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn a_crash_brings_the_launcher_back_with_its_report() {
+    fn a_crash_brings_the_launcher_back() {
         let event = |state| GameEvent { build_key: "aero".into(), build_name: "Aero".into(), state };
         assert!(comes_back_on(&event(GameState::Crashed { code: Some(1), early: false, log: None })));
         assert!(

@@ -229,3 +229,95 @@ impl AppError {
 }
 
 pub type AppResult<T> = Result<T, AppError>;
+
+impl ErrorCode {
+    /// Whether a failure with this code is likely the launcher's to fix, so the user is offered to
+    /// report it. What the user, their network, account or computer causes is not.
+    pub fn reportable(self) -> bool {
+        use ErrorCode::*;
+        match self {
+            Internal
+            | Io
+            | StorageUnavailable
+            | DirectoryCreateFailed
+            | NotFound
+            | Unsupported
+            | IntegrityMismatch
+            | NoUpdateAsset
+            | AuthFailed
+            | CredentialStorageUnavailable
+            | ProfileSaveFailed
+            | VersionNotFound
+            | DownloadFailed
+            | VersionFilesRemain
+            | JavaRuntimeFailed
+            | LaunchFailed
+            | ShortcutFailed
+            | LoaderInstallFailed
+            | ContentConflict
+            | NoFileFound
+            | BackupFailed
+            | BackupNotFound
+            | ProviderKeyRejected => true,
+            InvalidInput
+            | InvalidDirectoryPath
+            | Busy
+            | Cancelled
+            | Network
+            | RateLimited
+            | AuthTimeout
+            | AuthDenied
+            | MinecraftServicesUnavailable
+            | XboxAccountMissing
+            | XboxChildAccount
+            | XboxUnavailable
+            | MinecraftNotOwned
+            | ReauthRequired
+            | ProfileExists
+            | ProfileNameInvalid
+            | NoProfile
+            | InstanceBusy
+            | SharedBusy
+            | NotEnoughSpace
+            | VersionExists
+            | VersionNameEmpty
+            | VersionRunning
+            | LaunchThrottled
+            | InvalidJavaExecutable
+            | BuildRunning
+            | GameRunning
+            | NoCompatibleVersion
+            | FileInUse
+            | ProviderFilesHeld
+            | LowMemory
+            | FileNameInvalid
+            | FileNameTaken => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod reportable_tests {
+    use super::ErrorCode;
+
+    #[test]
+    fn only_the_launcher_s_own_failures_are_offered_to_report() {
+        for code in [ErrorCode::Internal, ErrorCode::DownloadFailed, ErrorCode::LoaderInstallFailed] {
+            assert!(code.reportable(), "{code:?}");
+        }
+        for code in [
+            ErrorCode::Network,
+            ErrorCode::Cancelled,
+            ErrorCode::Busy,
+            ErrorCode::NotEnoughSpace,
+            ErrorCode::MinecraftNotOwned,
+            ErrorCode::ProviderFilesHeld,
+            ErrorCode::NoCompatibleVersion,
+        ] {
+            assert!(!code.reportable(), "{code:?}: the user's, their network's or account's");
+        }
+        assert!(
+            ErrorCode::ALL.iter().any(|c| c.reportable()) && ErrorCode::ALL.iter().any(|c| !c.reportable())
+        );
+    }
+}

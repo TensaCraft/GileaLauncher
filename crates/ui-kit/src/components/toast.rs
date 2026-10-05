@@ -66,9 +66,20 @@ impl Toasts {
     }
 
     pub fn show(&self, level: Level, title: String, message: Option<String>) {
+        self.show_with_action(level, title, message, None);
+    }
+
+    /// A toast with a button: `action` is its (label, action id), handled by the `Toaster`.
+    pub fn show_with_action(
+        &self,
+        level: Level,
+        title: String,
+        message: Option<String>,
+        action: Option<(String, String)>,
+    ) {
         let id = self.next_local.get_untracked();
         self.next_local.set(id + 1);
-        self.push(ToastItem { id, level, title, message, action: None, duration_ms: duration_for(level) });
+        self.push(ToastItem { id, level, title, message, action, duration_ms: duration_for(level) });
     }
 
     pub fn dismiss(&self, id: u64) {

@@ -203,6 +203,7 @@ pub fn run() -> i32 {
             if let Some(window) = app.get_webview_window("main") {
                 let size = launcher_shared::WindowSize::parse(&core.settings.snapshot().window_size)
                     .unwrap_or_default();
+                window::move_to_dev_monitor(&window);
                 window::apply_window_size(&window, size);
                 tray::retitle(app.handle());
                 let _ = window.show();
@@ -229,6 +230,7 @@ pub fn run() -> i32 {
             commands::open_path,
             commands::log_view,
             commands::reveal_path,
+            commands::open_text_file,
             commands::open_url,
             commands::module_invoke,
             provider_commands::provider_search,

@@ -21,7 +21,7 @@ use super::process::{GameCommand, SharedProcess, Spawner, prepare_launch_log};
 use super::registry::{LAUNCH_COOLDOWN, LaunchRegistry};
 use crate::auth::service::AuthService;
 use crate::feedback::{EventSink, FeedbackService, OperationHandle, OperationSpec};
-use crate::java::gpu::{GpuPreferenceStore, apply_gpu_mode, nvidia_driver_loaded};
+use crate::java::gpu::{GPU_WRITTEN_KEY, GpuPreferenceStore, apply_gpu_mode, nvidia_driver_loaded};
 use crate::java::memory::MemoryLimits;
 use crate::loaders::{ComponentInstaller, ComponentSpec};
 use crate::lock::{Coordinator, path_key};
@@ -405,7 +405,15 @@ impl LaunchService {
             }
         }
         let nvidia = d.platform.os == Os::Linux && nvidia_driver_loaded();
-        let env = apply_gpu_mode(gpu, &java, d.platform.os, d.gpu.as_ref(), nvidia);
+        let mut written: Vec<String> =
+            d.config.get(GPU_WRITTEN_KEY).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+        let before = written.clone();
+        let env = apply_gpu_mode(gpu, &java, d.platform.os, d.gpu.as_ref(), nvidia, &mut written);
+        if written != before
+            && let Err(e) = d.config.set(GPU_WRITTEN_KEY, serde_json::json!(written))
+        {
+            tracing::warn!("Unable to remember the GPU choices the launcher wrote: {e}");
+        }
         let argv = build_command(&d.mc_dir, &json, build.version.as_deref(), &options, &d.platform)
             .map_err(|e| failed(e.detail))?;
         let minecraft = build.version.clone().unwrap_or_else(|| component.clone());

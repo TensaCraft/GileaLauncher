@@ -1,16 +1,16 @@
-//! The reports module's UI: «Send report» in an alert that can be reported, the build report
-//! window from a build's menu, and the section «Звіти» with the contact.
+//! The reports module's UI: «Send report» in an alert that can be reported, «Report a launcher
+//! problem» (from the Support window or a failed operation), the question after the launcher
+//! crashed, and the section «Звіти» with the contact.
 
 mod alert;
 mod api;
-mod build_report;
+mod crash_prompt;
+mod problem;
 mod settings;
 mod state;
 
 use leptos::prelude::*;
-use ui_kit::module::{
-    BuildActionRun, ModuleAlertAction, ModuleBuildAction, ModuleOverlay, ModuleSection, UiModule,
-};
+use ui_kit::module::{ModuleAlertAction, ModuleOverlay, ModuleSection, ModuleSupportAction, UiModule};
 
 pub struct ReportsModuleUi;
 
@@ -34,22 +34,20 @@ impl UiModule for ReportsModuleUi {
         }]
     }
 
-    fn build_actions(&self) -> Vec<ModuleBuildAction> {
-        vec![ModuleBuildAction {
-            module: crate::ID,
-            id: "report",
-            icon: "bug_report",
-            label: "version_report_button",
-            run: BuildActionRun::Open(state::open_build_report),
-            // Only where reports can go (the build profile has somewhere to send them).
-            applies: |_| state::is_enabled(),
-        }]
+    fn overlays(&self) -> Vec<ModuleOverlay> {
+        vec![
+            ModuleOverlay { module: crate::ID, view: || view! { <problem::ProblemReportHost /> }.into_any() },
+            ModuleOverlay {
+                module: crate::ID,
+                view: || view! { <crash_prompt::CrashPromptHost /> }.into_any(),
+            },
+        ]
     }
 
-    fn overlays(&self) -> Vec<ModuleOverlay> {
-        vec![ModuleOverlay {
+    fn support_actions(&self) -> Vec<ModuleSupportAction> {
+        vec![ModuleSupportAction {
             module: crate::ID,
-            view: || view! { <build_report::BuildReportHost /> }.into_any(),
+            view: || view! { <problem::SupportProblemRow /> }.into_any(),
         }]
     }
 
@@ -71,25 +69,22 @@ pub fn ui_module() -> Box<dyn UiModule> {
 
 #[cfg(test)]
 mod tests {
-    use ui_kit::module::{BuildActionRun, UiModule};
+    use ui_kit::module::UiModule;
+    use ui_kit::problem::ProblemDraft;
 
     use launcher_shared::{AppError, ErrorCode};
 
     use super::alert::{Failure, ReportState, button_of, failure_of};
-    use super::build_report::can_send;
+    use super::problem::can_send;
     use super::*;
 
     #[test]
-    fn the_module_adds_an_alert_action_a_menu_dialog_and_a_section() {
+    fn the_module_adds_a_report_button_its_windows_a_support_row_and_a_section() {
         let ui = ReportsModuleUi;
         assert_eq!(ui.alert_actions().iter().map(|a| a.module).collect::<Vec<_>>(), [crate::ID]);
-        assert_eq!(ui.overlays().len(), 1, "the build report's window");
-        let actions = ui.build_actions();
-        assert_eq!(
-            actions.iter().map(|a| (a.id, a.icon, a.label)).collect::<Vec<_>>(),
-            [("report", "bug_report", "version_report_button")]
-        );
-        assert!(matches!(actions[0].run, BuildActionRun::Open(_)));
+        assert_eq!(ui.overlays().len(), 2, "the problem's window and the question after a crash");
+        assert_eq!(ui.support_actions().len(), 1);
+        assert!(ui.build_actions().is_empty(), "a build's game logs are not the launcher's to send");
         let sections = ui.settings_sections();
         assert_eq!(
             sections.iter().map(|s| (s.id, s.label, s.after)).collect::<Vec<_>>(),
@@ -106,10 +101,14 @@ mod tests {
     }
 
     #[test]
-    fn a_build_report_needs_a_message_before_sending() {
-        assert!(!can_send(""));
-        assert!(!can_send(" \n "));
-        assert!(can_send("It crashes on start"));
+    fn a_problem_report_needs_words_or_an_error() {
+        assert!(!can_send("", None));
+        assert!(!can_send(" \n ", Some(&ProblemDraft::default())));
+        assert!(can_send("It hangs", None));
+        let error = ProblemDraft {
+            title: "Не вдалося встановити Aero".into(), ..ProblemDraft::default()
+        };
+        assert!(can_send("", Some(&error)));
     }
 
     #[test]
@@ -118,7 +117,14 @@ mod tests {
         let en: serde_json::Value = serde_json::from_str(include_str!("../../locales/en_US.json")).unwrap();
         assert_eq!(uk["settings_tab_reports"], "Звіти");
         assert_eq!(en["settings_tab_reports"], "Reports");
-        for key in ["reports_settings_desc", "reports_attachments_title", "reports_no_attachments"] {
+        for key in [
+            "reports_settings_desc",
+            "problem_report_title",
+            "problem_report_hint",
+            "support_problem_title",
+            "crash_prompt_title",
+            "crash_prompt_text",
+        ] {
             assert!(uk.get(key).is_some() && en.get(key).is_some(), "{key}");
         }
     }

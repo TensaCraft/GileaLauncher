@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use launcher_shared::{
-    ActivityEntry, ActivityEvent, Alert, AuthState, GameEvent, Level, OperationDto, OpsSnapshot,
+    ActivityEntry, ActivityEvent, Alert, AlertFile, AuthState, GameEvent, Level, OperationDto, OpsSnapshot,
     ProfilesSnapshot, Text, Toast, ToastAction, UpdateStatus,
 };
 
@@ -395,12 +395,17 @@ impl FeedbackService {
     }
 
     pub fn alert(&self, level: Level, title: Text, message: Text, allow_report: bool) -> u64 {
-        self.raise(level, title, message, allow_report, None)
+        self.raise(level, title, message, allow_report, None, Vec::new())
     }
 
     /// An alert the user can report: `report` is kept for [`Self::report_context`].
     pub fn alert_with_report(&self, level: Level, title: Text, message: Text, report: ReportContext) -> u64 {
-        self.raise(level, title, message, true, Some(report))
+        self.raise(level, title, message, true, Some(report), Vec::new())
+    }
+
+    /// An alert that offers `files` to open (a crash's report and logs); nothing to report.
+    pub fn alert_with_files(&self, level: Level, title: Text, message: Text, files: Vec<AlertFile>) -> u64 {
+        self.raise(level, title, message, false, None, files)
     }
 
     /// What a report of alert `id` needs, while it is among the latest reportable ones.
@@ -415,6 +420,7 @@ impl FeedbackService {
         message: Text,
         allow_report: bool,
         report: Option<ReportContext>,
+        files: Vec<AlertFile>,
     ) -> u64 {
         let (id, entry) = {
             let mut st = self.lock();
@@ -433,7 +439,7 @@ impl FeedbackService {
         if let Some(e) = entry {
             self.sink.activity(&e);
         }
-        self.sink.alert(&Alert { id, title, message, allow_report });
+        self.sink.alert(&Alert { id, title, message, allow_report, files });
         id
     }
 

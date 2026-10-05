@@ -376,7 +376,10 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let svc = service(home.path());
         let snap = svc.snapshot();
-        assert_eq!((snap.default_max_ram_gb, snap.gpu_mode_default.as_str()), (None, "dgpu"));
+        assert_eq!(
+            (snap.default_max_ram_gb, snap.gpu_mode_default.as_str()),
+            (None, crate::java::gpu::platform_default(crate::paths::Os::current()).as_str())
+        );
         assert_eq!(svc.apply(SettingUpdate::DefaultMaxRamGb(Some(6))).unwrap().default_max_ram_gb, Some(6));
         assert_eq!(svc.config.get("default_max_ram_gb"), Some(json!(6)));
         svc.config.set("default_max_ram_gb", json!("-Xmx4096M")).unwrap();

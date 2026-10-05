@@ -10,11 +10,12 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    Button, Checkbox, CodeEditor, Dialog, DialogFooter, Field, Icon, NavEntry, Section, SegOption, Segmented,
-    Select, SelectOption, SettingRow, SettingsNav, Size, TextInput, Variant, card_image, ipc, use_toasts,
+    Button, Checkbox, CodeEditor, Dialog, DialogFooter, Field, Icon, NavEntry, Section, Select, SelectOption,
+    SettingRow, SettingsNav, Size, TextInput, Variant, card_image, ipc, use_toasts,
 };
 
 use crate::builds::catalog::{CreateRow, build_choices, load_rows};
+use crate::builds::gpu::GpuChoice;
 use crate::builds::ram::RamSetting;
 use crate::builds::{LatestRequest, ram_slider};
 use crate::pages::settings::java::gpu_choice;
@@ -594,13 +595,6 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
             .with(|l| l.as_ref().and_then(|r| r.as_ref().ok()).and_then(|s| s.auto_java.clone()))
             .unwrap_or_else(|| i18n.t("java_path_auto_pending"))
     };
-    let gpu_options = Signal::derive(move || {
-        vec![
-            SegOption::new("auto", i18n.t("gpu_mode_auto")),
-            SegOption::new("igpu", i18n.t("gpu_mode_integrated")),
-            SegOption::new("dgpu", i18n.t("gpu_mode_discrete")),
-        ]
-    });
     let auto_label = move || {
         let value = store
             .settings
@@ -708,7 +702,7 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                     <div class="hint">{move || format!("{}: {}", i18n.t("java_path_label"), effective_java())}</div>
                 </SettingRow>
                 <SettingRow title=t("gpu_mode_label")>
-                    <Segmented options=gpu_options value=gpu />
+                    <GpuChoice value=gpu />
                 </SettingRow>
                 <RamSetting
                     title=t("max_ram_label")

@@ -4,7 +4,7 @@ use launcher_shared::{AppInfo, BuildDto};
 use leptos::prelude::*;
 use ui_kit::module::{
     DeleteOption, ModuleAlertAction, ModuleBuildAction, ModuleContentNotice, ModuleHomeCards, ModuleOverlay,
-    ModuleSection, ModuleTab, UiModule,
+    ModuleSection, ModuleSupportAction, ModuleTab, UiModule,
 };
 
 use crate::shell::sidebar::backend_modules;
@@ -21,6 +21,7 @@ pub struct ModuleParts {
     pub build_actions: Vec<ModuleBuildAction>,
     pub alert_actions: Vec<ModuleAlertAction>,
     pub content_notices: Vec<ModuleContentNotice>,
+    pub support_actions: Vec<ModuleSupportAction>,
 }
 
 impl ModuleParts {
@@ -34,6 +35,7 @@ impl ModuleParts {
             build_actions: modules.iter().flat_map(|m| m.build_actions()).collect(),
             alert_actions: modules.iter().flat_map(|m| m.alert_actions()).collect(),
             content_notices: modules.iter().flat_map(|m| m.content_notices()).collect(),
+            support_actions: modules.iter().flat_map(|m| m.support_actions()).collect(),
         }
     }
 
@@ -54,6 +56,7 @@ impl ModuleParts {
             build_actions: self.build_actions.iter().copied().filter(|a| has(a.module)).collect(),
             alert_actions: self.alert_actions.iter().copied().filter(|a| has(a.module)).collect(),
             content_notices: self.content_notices.iter().copied().filter(|n| has(n.module)).collect(),
+            support_actions: self.support_actions.iter().copied().filter(|a| has(a.module)).collect(),
         }
     }
 

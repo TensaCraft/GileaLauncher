@@ -113,7 +113,7 @@ impl MockBuilds {
             component: build.loader.clone(),
             java_path: None,
             auto_java: Some("C:\\Users\\Player\\AppData\\Roaming\\Launcher\\minecraft\\runtime\\java-runtime-delta\\bin\\javaw.exe".into()),
-            gpu_mode: "dgpu".into(),
+            gpu_mode: "auto".into(),
             max_ram_gb: None,
             jvm_arguments: Vec::new(),
             server_host: String::new(),
@@ -607,7 +607,7 @@ mod tests {
         let mut m = MockBuilds::new(false, false);
         let key = m.snapshot().builds[0].key.clone();
         let settings = m.settings(&key).unwrap();
-        assert_eq!((settings.gpu_mode.as_str(), settings.java_path.as_ref()), ("dgpu", None));
+        assert_eq!((settings.gpu_mode.as_str(), settings.java_path.as_ref()), ("auto", None));
         let mut update = BuildSettingsUpdate {
             name: "Нова назва".into(),
             component: settings.component.clone(),

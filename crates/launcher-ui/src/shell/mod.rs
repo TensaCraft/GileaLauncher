@@ -1,6 +1,7 @@
 mod alert;
 pub mod browser;
 mod clipboard;
+pub mod failure;
 mod footer;
 mod header;
 mod ops;

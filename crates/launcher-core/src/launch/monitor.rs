@@ -2,17 +2,17 @@
 //! whatever the code; later, anything but code 0 is. A game the launcher stopped just exits.
 //! Modules' watches (`GameWatch`) may see that a running game cannot go on (it is stopped and
 //! counts as a crash) and may tell the user what a crash was; otherwise a crash raises an alert
-//! naming the file to read.
+//! that opens its report and logs (nothing of a game's crash is sent).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use launcher_shared::{GameEvent, GameState, Level, Text};
+use launcher_shared::{AlertFile, GameEvent, GameState, Level, Text};
 
 use super::hooks::GameWatch;
 use super::process::{LAUNCH_LOG, SharedProcess, crash_artifact, log_tail, ran_out_of_memory};
 use super::registry::LaunchRegistry;
-use crate::feedback::{EventSink, FeedbackService, ReportContext, ReportKind};
+use crate::feedback::{EventSink, FeedbackService};
 
 pub const EARLY_EXIT: Duration = Duration::from_secs(5);
 pub const POLL: Duration = Duration::from_millis(250);
@@ -34,28 +34,28 @@ fn emit(sink: &dyn EventSink, watch: &Watch, state: GameState) {
     sink.game(&GameEvent { build_key: watch.build_key.clone(), build_name: watch.build_name.clone(), state });
 }
 
-/// What a report of the crash sends: the crash's own file and the game's logs,
-/// each once.
-fn crash_report(watch: &Watch, artifact: Option<&Path>, code: Option<i32>, early: bool) -> ReportContext {
+/// What the crash's alert opens: the crash's own file (a crash report, Java's `hs_err` log), the
+/// game's log and the folder of its logs, each that is there. A game's crash is its build's (its
+/// mods, most often), not the launcher's: nothing of it is sent.
+fn crash_files(watch: &Watch, artifact: Option<&Path>) -> Vec<AlertFile> {
     let logs = watch.game_dir.join("logs");
-    let mut attachments: Vec<PathBuf> = Vec::new();
-    for path in
-        artifact.map(Path::to_path_buf).into_iter().chain([logs.join("latest.log"), logs.join(LAUNCH_LOG)])
-    {
-        if path.is_file() && !attachments.contains(&path) {
-            attachments.push(path);
-        }
+    let latest = logs.join("latest.log");
+    let file = |label: &str, path: &Path, folder: bool| AlertFile {
+        label: Text::key(label),
+        path: path.to_string_lossy().into_owned(),
+        folder,
+    };
+    let mut files = Vec::new();
+    if let Some(own) = artifact.filter(|a| *a != latest && *a != logs.join(LAUNCH_LOG)) {
+        files.push(file("open_crash_report", own, false));
     }
-    ReportContext {
-        kind: ReportKind::Crash,
-        title: "Minecraft exited after launch".into(),
-        screen: "game".into(),
-        action: "launch".into(),
-        metadata: serde_json::json!({
-            "version_id": watch.build_key, "version_name": watch.build_name, "code": code, "early": early
-        }),
-        attachments,
+    if latest.is_file() {
+        files.push(file("open_latest_log", &latest, false));
     }
+    if logs.is_dir() {
+        files.push(file("open_version_logs", &logs, true));
+    }
+    files
 }
 
 fn crashed(
@@ -86,8 +86,8 @@ fn crashed(
     if told {
         feedback.note(Level::Error, message);
     } else {
-        let report = crash_report(watch, artifact.as_deref(), code, early);
-        feedback.alert_with_report(Level::Error, Text::key("warning"), message, report);
+        let files = crash_files(watch, artifact.as_deref());
+        feedback.alert_with_files(Level::Error, Text::key("warning"), message, files);
     }
     GameState::Crashed { code, early, log: artifact.map(|p| p.to_string_lossy().into_owned()) }
 }
@@ -315,26 +315,61 @@ mod tests {
         );
         let expected = Text::key("version_crashed_out_of_memory").param("path", hs_err.to_string_lossy());
         assert_eq!(crash_alerts(&run.recorder), [expected]);
-        let report = run.feedback.report_context(run.recorder.alerts.lock().unwrap()[0].id).unwrap();
-        assert_eq!(report.attachments[0], hs_err, "the reason goes with a report first");
+        let alert = run.recorder.alerts.lock().unwrap()[0].clone();
+        assert_eq!(alert.files[0].path, hs_err.to_string_lossy(), "the reason opens first");
+        assert_eq!(alert.files[0].label, Text::key("open_crash_report"));
+    }
+
+    fn opened(alert: &launcher_shared::Alert) -> Vec<(String, String, bool)> {
+        let key = |t: &Text| match t {
+            Text::Key { key, .. } => key.clone(),
+            Text::Raw { text } => text.clone(),
+        };
+        alert.files.iter().map(|f| (key(&f.label), f.path.clone(), f.folder)).collect()
     }
 
     #[test]
-    fn a_crash_alert_can_be_reported() {
+    fn a_crash_opens_its_report_and_logs_and_is_not_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path().join("logs");
+        let reports = dir.path().join("crash-reports");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::create_dir_all(&reports).unwrap();
+        std::fs::write(logs.join("latest.log"), "java.lang.IllegalStateException").unwrap();
+        let crash = reports.join("crash-2026-10-05_18.27.26-client.txt");
+        std::fs::write(&crash, "---- Minecraft Crash Report ----").unwrap();
+        let run = run(FakeProcess::exiting_after(1, Duration::from_millis(600), Some(1)), dir.path(), None);
+        let alert = run.recorder.alerts.lock().unwrap()[0].clone();
+        assert!(!alert.allow_report, "a game's crash is its builds', not the launcher's");
+        assert_eq!(run.feedback.report_context(alert.id), None);
+        let path = |p: &Path| p.to_string_lossy().into_owned();
+        assert_eq!(
+            opened(&alert),
+            [
+                ("open_crash_report".to_string(), path(&crash), false),
+                ("open_latest_log".to_string(), path(&logs.join("latest.log")), false),
+                ("open_version_logs".to_string(), path(&logs), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_crash_with_only_its_log_opens_it_once() {
         let dir = tempfile::tempdir().unwrap();
         let logs = dir.path().join("logs");
         std::fs::create_dir_all(&logs).unwrap();
         std::fs::write(logs.join("latest.log"), "java.lang.OutOfMemoryError").unwrap();
-        std::fs::write(logs.join("launch.log"), "java -Xmx2G").unwrap();
         let run = run(FakeProcess::exiting_after(1, Duration::from_millis(600), Some(1)), dir.path(), None);
         let alert = run.recorder.alerts.lock().unwrap()[0].clone();
-        assert!(alert.allow_report);
-        let report = run.feedback.report_context(alert.id).expect("a crash can be reported");
-        assert_eq!(report.kind, crate::feedback::ReportKind::Crash);
-        assert_eq!((report.screen.as_str(), report.action.as_str()), ("game", "launch"));
-        assert_eq!(report.attachments, [logs.join("latest.log"), logs.join("launch.log")], "each file once");
-        assert_eq!(report.metadata["version_name"], "Aero");
-        assert_eq!(report.metadata["code"], 1);
+        let keys: Vec<String> = opened(&alert).into_iter().map(|(k, ..)| k).collect();
+        assert_eq!(keys, ["open_latest_log", "open_version_logs"]);
+    }
+
+    #[test]
+    fn a_crash_without_logs_offers_nothing_to_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = run(FakeProcess::exiting_after(1, Duration::from_millis(10), Some(1)), dir.path(), None);
+        assert!(run.recorder.alerts.lock().unwrap()[0].files.is_empty());
     }
 
     #[test]
