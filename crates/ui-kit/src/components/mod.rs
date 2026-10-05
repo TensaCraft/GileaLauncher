@@ -1,6 +1,7 @@
 pub mod brand;
 pub mod button;
 pub mod card;
+pub mod choice;
 pub mod code;
 pub mod dialog;
 pub mod feedback;
@@ -18,6 +19,7 @@ pub mod tooltip;
 
 pub use button::{ActionGap, ActionGroup, ActionTone, Button, IconAction, Size, Variant};
 pub use card::{BuildCard, CardPlayStyle, FALLBACK_IMAGE, card_image};
+pub use choice::{ChoiceCards, ChoiceOption};
 pub use code::CodeEditor;
 pub use dialog::{ConfirmDialog, Dialog, DialogFooter, DialogTone};
 pub use feedback::{EmptyState, ProgressBar, Skeleton, progress_percent};

@@ -60,6 +60,9 @@ pub struct AppInfo {
     /// Where bugs and suggestions go (the repository's issues).
     #[serde(default)]
     pub issues_url: Option<String>,
+    /// The folder of the setup wizard's pictures.
+    #[serde(default)]
+    pub media_url: Option<String>,
     pub updates_configured: bool,
     /// `None` when updates come from api.github.com, otherwise the (test) API address.
     pub update_source: Option<String>,
@@ -324,6 +327,9 @@ pub struct SetupState {
 pub struct SetupPlan {
     pub lang: String,
     pub app_state_dir: String,
+    /// The settings chosen in the wizard: written into the folder it ends with too.
+    #[serde(default)]
+    pub updates: Vec<SettingUpdate>,
 }
 
 /// Folders the wizard will really use for a chosen launcher-data folder (computed by the backend).
@@ -332,6 +338,9 @@ pub struct SetupPreview {
     pub app_state_dir: String,
     pub minecraft_dir: String,
     pub backups_dir: String,
+    /// Why the folder cannot be used (a program folder, or nowhere to write).
+    #[serde(default)]
+    pub issue: Option<Text>,
 }
 
 /// One build as the UI lists it.

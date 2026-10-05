@@ -57,6 +57,8 @@ Then open `http://127.0.0.1:1420`:
 
 - `/dev/kit` — the component gallery;
 - `?setup=1` — the first-run wizard;
+- `?media=http://127.0.0.1:8000` — the wizard's pictures from another folder (one not pushed yet);
+- `?lang=en_US`, `?recent=0`, `?cards=bar`, `?sidebar=full` — start from other settings;
 - `?builds=none` — no builds.
 
 ## Profiles
@@ -67,6 +69,7 @@ Profiles live in `build-profiles/*.toml`. Each sets:
 - the brand;
 - the edition (`edition`);
 - the update repository;
+- where the first-run wizard's pictures load from (`media_url`);
 - the modules' settings.
 
 | Profile | Modules | Edition | Published |
@@ -77,6 +80,10 @@ Profiles live in `build-profiles/*.toml`. Each sets:
 | `mock-updates` | as in standard | `standard` | no (only for testing updates) |
 
 A profile is published when it has `update_repo` and no `update_api`. See [releasing.md](releasing.md).
+
+### The first-run wizard's pictures
+
+The wizard shows what a choice looks like (Home, the Play button, the sidebar) with pictures it loads when shown, never packed into the launcher: `<media_url>/<lang>/<name>.jpg`, from `setup/` on the `media` branch (the repository's pictures, kept out of `main`). Released launchers keep loading them, so a picture is replaced under the same name and never renamed or removed. Without network a choice shows its icon. Retake them (both languages, 1280 × 800 at twice the pixels, cropped to 16:10) when those parts of the interface change.
 
 ## Code rules
 

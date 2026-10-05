@@ -13,6 +13,7 @@ use crate::paths::{
     LauncherPaths, PathEnv, default_app_state_dir, default_minecraft_dir, is_protected_dir, probe_writable,
     write_pointer,
 };
+use crate::settings::entry;
 use crate::storage::config::ConfigStore;
 
 pub const SETUP_COMPLETED_KEY: &str = "setup_wizard_completed";
@@ -49,12 +50,22 @@ fn dir_issue(env: &PathEnv, dir: &Path, protected_key: &str, unwritable_key: &st
         Some("not a directory".to_string())
     } else {
         match dir.ancestors().find(|p| p.exists()) {
-            Some(existing) if existing.is_dir() => probe_writable(existing).err().map(|e| e.to_string()),
+            Some(existing) if existing == dir => probe_writable(existing).err().map(|e| e.to_string()),
+            // A folder still to make needs only that a folder can be made there: Windows lets anyone
+            // make folders in `C:\` but not files.
+            Some(existing) if existing.is_dir() => probe_folder(existing).err().map(|e| e.to_string()),
             Some(_) => Some("not a directory".to_string()),
             None => Some("path does not exist".to_string()),
         }
     };
     error.map(|e| Text::key(unwritable_key).param("path", shown).param("error", e))
+}
+
+/// A folder can be made in `parent` (one is made and removed).
+fn probe_folder(parent: &Path) -> std::io::Result<()> {
+    let probe = parent.join(format!(".launcher-folder-test-{}", uuid::Uuid::new_v4().simple()));
+    fs::create_dir(&probe)?;
+    fs::remove_dir(&probe)
 }
 
 pub fn storage_issues(env: &PathEnv, paths: &LauncherPaths) -> Vec<Text> {
@@ -118,6 +129,7 @@ pub fn preview(env: &PathEnv, dir: &str) -> AppResult<SetupPreview> {
         app_state_dir: display(&target),
         backups_dir: display(&minecraft.join("backups").join("worlds")),
         minecraft_dir: display(&minecraft),
+        issue: dir_issue(env, &target, "setup_issue_app_state_protected", "setup_issue_app_state_unwritable"),
     })
 }
 
@@ -144,6 +156,7 @@ pub fn preview_current(
         app_state_dir: derived.app_state_dir,
         minecraft_dir: display(&minecraft),
         backups_dir: display(&backups),
+        issue: derived.issue,
     })
 }
 
@@ -164,6 +177,8 @@ pub fn apply_setup(
     plan: &SetupPlan,
 ) -> AppResult<SetupOutcome> {
     let target = rebase_app_state_dir(&absolute_dir(&plan.app_state_dir)?);
+    // The wizard's choices are checked before anything is created or moved.
+    let chosen = plan.updates.iter().cloned().map(entry).collect::<AppResult<Vec<_>>>()?;
     if is_protected_dir(env, &target) {
         return Err(AppError::new(ErrorCode::InvalidDirectoryPath, "protected program directory")
             .with_param("path", display(&target)));
@@ -196,7 +211,19 @@ pub fn apply_setup(
     if SUPPORTED_LANGS.contains(&plan.lang.as_str()) {
         entries.push(("lang".to_string(), json!(plan.lang)));
     }
+    let mut cleared = Vec::new();
+    for (key, value) in chosen {
+        match value {
+            Some(value) => entries.push((key.to_string(), value)),
+            None => cleared.push(key),
+        }
+    }
     cfg.set_many(entries).map_err(io_err)?;
+    for key in cleared {
+        if cfg.contains(key) {
+            cfg.delete(key).map_err(io_err)?;
+        }
+    }
     // A new launcher-data folder brings Minecraft and backups along with it. The same folder keeps
     // the player's own folders: the wizard may have opened only because their drive is away.
     if changed {
@@ -213,6 +240,7 @@ pub fn apply_setup(
 mod tests {
     use super::*;
     use crate::paths::Os;
+    use launcher_shared::{CardPlay, SettingUpdate};
 
     fn linux_env(home: &Path) -> PathEnv {
         PathEnv { os: Os::Linux, home: home.to_path_buf(), ..PathEnv::default() }
@@ -220,6 +248,14 @@ mod tests {
 
     fn open_config(paths: &LauncherPaths) -> ConfigStore {
         ConfigStore::open(paths.app_state_dir.join("config.json"))
+    }
+
+    fn plan(lang: &str, dir: &Path) -> SetupPlan {
+        SetupPlan {
+            lang: lang.into(),
+            app_state_dir: dir.to_string_lossy().into_owned(),
+            updates: Vec::new(),
+        }
     }
 
     #[test]
@@ -301,11 +337,7 @@ mod tests {
         let env = linux_env(home.path());
         let paths = LauncherPaths::resolve(&env, None);
         let cfg = open_config(&paths);
-        let plan = SetupPlan {
-            lang: "uk_UA".into(),
-            app_state_dir: paths.app_state_dir.to_string_lossy().into_owned(),
-        };
-        let out = apply_setup(&env, &paths, &cfg, &plan).unwrap();
+        let out = apply_setup(&env, &paths, &cfg, &plan("uk_UA", &paths.app_state_dir)).unwrap();
         assert!(!out.restart_required);
         assert_eq!(cfg.get_str("lang").as_deref(), Some("uk_UA"));
         assert!(cfg.get_bool(SETUP_COMPLETED_KEY, false));
@@ -322,8 +354,7 @@ mod tests {
         cfg.set("compact_sidebar", json!("no")).unwrap();
         std::fs::write(paths.app_state_dir.join("profiles.json"), "{}").unwrap();
         let target = home.path().join("games").join(APP_NAME);
-        let plan = SetupPlan { lang: "en_US".into(), app_state_dir: target.to_string_lossy().into_owned() };
-        let out = apply_setup(&env, &paths, &cfg, &plan).unwrap();
+        let out = apply_setup(&env, &paths, &cfg, &plan("en_US", &target)).unwrap();
         assert!(out.restart_required);
         assert_eq!(out.app_state_dir, target);
         assert!(target.join("profiles.json").is_file());
@@ -339,14 +370,11 @@ mod tests {
         let env = linux_env(home.path());
         let paths = LauncherPaths::resolve(&env, None);
         let cfg = open_config(&paths);
-        let rel = SetupPlan { lang: "en_US".into(), app_state_dir: "relative/dir".into() };
+        let rel = plan("en_US", Path::new("relative/dir"));
         assert_eq!(apply_setup(&env, &paths, &cfg, &rel).unwrap_err().code, ErrorCode::InvalidDirectoryPath);
         let file = home.path().join("file");
         std::fs::write(&file, "x").unwrap();
-        let under_file = SetupPlan {
-            lang: "en_US".into(),
-            app_state_dir: file.join("sub").to_string_lossy().into_owned(),
-        };
+        let under_file = plan("en_US", &file.join("sub"));
         assert_eq!(
             apply_setup(&env, &paths, &cfg, &under_file).unwrap_err().code,
             ErrorCode::DirectoryCreateFailed
@@ -411,6 +439,91 @@ mod tests {
     }
 
     #[test]
+    fn the_wizard_s_choices_go_to_the_folder_it_moves_to() {
+        let home = tempfile::tempdir().unwrap();
+        let env = linux_env(home.path());
+        let paths = LauncherPaths::resolve(&env, None);
+        paths.ensure_dirs().unwrap();
+        let cfg = open_config(&paths);
+        // The new folder already has settings of its own: the wizard's choices still win there.
+        let target = home.path().join("games").join(APP_NAME);
+        std::fs::create_dir_all(&target).unwrap();
+        let theirs = ConfigStore::open(target.join("config.json"));
+        theirs.set("compact_sidebar", json!("yes")).unwrap();
+        theirs.set("default_max_ram_gb", json!(6)).unwrap();
+        drop(theirs);
+        let mut chosen = plan("en_US", &target);
+        chosen.updates = vec![
+            SettingUpdate::CompactSidebar(false),
+            SettingUpdate::CardPlay(CardPlay::Corner),
+            SettingUpdate::DefaultMaxRamGb(None),
+        ];
+        assert!(apply_setup(&env, &paths, &cfg, &chosen).unwrap().restart_required);
+        let moved = ConfigStore::open(target.join("config.json"));
+        assert_eq!(moved.get_str("compact_sidebar").as_deref(), Some("no"));
+        assert_eq!(moved.get_str("home_card_play").as_deref(), Some("corner"));
+        assert_eq!(moved.get("default_max_ram_gb"), None, "back to the recommended amount");
+        assert!(moved.get_bool(SETUP_COMPLETED_KEY, false));
+    }
+
+    #[test]
+    fn the_wizard_s_choices_apply_in_the_same_folder_and_its_language_wins() {
+        let home = tempfile::tempdir().unwrap();
+        let env = linux_env(home.path());
+        let paths = LauncherPaths::resolve(&env, None);
+        let cfg = open_config(&paths);
+        let mut chosen = plan("uk_UA", &paths.app_state_dir);
+        chosen.updates = vec![SettingUpdate::Lang("en_US".into()), SettingUpdate::HomeRecentBuilds(5)];
+        assert!(!apply_setup(&env, &paths, &cfg, &chosen).unwrap().restart_required);
+        assert_eq!(cfg.get_str("lang").as_deref(), Some("en_US"), "the language picked in the wizard");
+        assert_eq!(cfg.get_u64("home_recent_builds"), Some(5));
+    }
+
+    #[test]
+    fn a_preview_tries_a_new_folder_where_it_would_be_made_and_leaves_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let env = linux_env(home.path());
+        let games = home.path().join("games");
+        std::fs::create_dir(&games).unwrap();
+        let p = preview(&env, games.join("Launcher").join("data").to_str().unwrap()).unwrap();
+        assert_eq!(p.issue, None);
+        assert_eq!(std::fs::read_dir(&games).unwrap().count(), 0, "nothing is left where it looked");
+    }
+
+    #[test]
+    fn the_wizard_s_choices_are_checked_before_anything_is_written() {
+        let home = tempfile::tempdir().unwrap();
+        let env = linux_env(home.path());
+        let paths = LauncherPaths::resolve(&env, None);
+        let cfg = open_config(&paths);
+        let target = home.path().join("games").join(APP_NAME);
+        let mut chosen = plan("en_US", &target);
+        chosen.updates = vec![SettingUpdate::CompactSidebar(false), SettingUpdate::HomeRecentBuilds(200)];
+        let err = apply_setup(&env, &paths, &cfg, &chosen).unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidInput);
+        assert!(!target.exists(), "nothing was created");
+        assert!(!cfg.get_bool(SETUP_COMPLETED_KEY, false));
+        assert_eq!(crate::paths::read_pointer(&env), None);
+    }
+
+    #[test]
+    fn preview_names_a_folder_that_cannot_be_used_without_creating_it() {
+        let home = tempfile::tempdir().unwrap();
+        let env = linux_env(home.path());
+        let fine = home.path().join("games").join("Launcher");
+        let p = preview(&env, fine.to_str().unwrap()).unwrap();
+        assert_eq!(p.issue, None);
+        assert!(!fine.exists(), "a preview creates nothing");
+        let file = home.path().join("file");
+        std::fs::write(&file, "x").unwrap();
+        let p = preview(&env, file.join("sub").to_str().unwrap()).unwrap();
+        match p.issue {
+            Some(Text::Key { key, .. }) => assert_eq!(key, "setup_issue_app_state_unwritable"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
     fn preview_rejects_relative_paths() {
         let home = tempfile::tempdir().unwrap();
         let err = preview(&linux_env(home.path()), "relative/dir").unwrap_err();
@@ -427,8 +540,7 @@ mod tests {
         cfg.set("minecraft_game_dir", json!("E:\\MC")).unwrap();
         cfg.set("world_backups_dir", json!("E:\\MC\\backups")).unwrap();
         let target = home.path().join("games").join(APP_NAME);
-        let plan = SetupPlan { lang: "uk_UA".into(), app_state_dir: target.to_string_lossy().into_owned() };
-        apply_setup(&env, &paths, &cfg, &plan).unwrap();
+        apply_setup(&env, &paths, &cfg, &plan("uk_UA", &target)).unwrap();
         let moved = ConfigStore::open(target.join("config.json"));
         assert_eq!(moved.get("minecraft_game_dir"), None);
         assert_eq!(moved.get("world_backups_dir"), None);
@@ -444,11 +556,7 @@ mod tests {
         // The wizard opened because drive E: is away; the player only pressed "Continue".
         cfg.set("minecraft_game_dir", json!("E:\\MC")).unwrap();
         cfg.set("world_backups_dir", json!("E:\\MC\\backups")).unwrap();
-        let plan = SetupPlan {
-            lang: "uk_UA".into(),
-            app_state_dir: paths.app_state_dir.to_string_lossy().into_owned(),
-        };
-        apply_setup(&env, &paths, &cfg, &plan).unwrap();
+        apply_setup(&env, &paths, &cfg, &plan("uk_UA", &paths.app_state_dir)).unwrap();
         assert_eq!(cfg.get_str("minecraft_game_dir").as_deref(), Some("E:\\MC"));
         assert_eq!(cfg.get_str("world_backups_dir").as_deref(), Some("E:\\MC\\backups"));
         assert!(cfg.get_bool(SETUP_COMPLETED_KEY, false));

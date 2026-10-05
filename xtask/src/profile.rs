@@ -35,6 +35,9 @@ struct Branding {
     /// Where bugs and suggestions go (the repository's issues).
     #[serde(default)]
     issues_url: String,
+    /// The folder of the setup wizard's pictures (`<lang>/<name>.jpg`), loaded when shown.
+    #[serde(default)]
+    media_url: String,
     #[serde(default)]
     update_repo: String,
     /// GitHub API root; only test profiles set it (the local mock server).
@@ -174,6 +177,7 @@ pub fn parse_profile(text: &str) -> Result<BuildSpec> {
         ("LAUNCHER_EDITION".to_string(), b.edition.clone()),
         ("LAUNCHER_SUPPORT_URL".to_string(), b.support_url.clone()),
         ("LAUNCHER_ISSUES_URL".to_string(), b.issues_url.clone()),
+        ("LAUNCHER_MEDIA_URL".to_string(), b.media_url.clone()),
         ("LAUNCHER_UPDATE_REPO".to_string(), b.update_repo.clone()),
         ("LAUNCHER_MS_CLIENT_ID".to_string(), b.ms_client_id.clone()),
     ];
@@ -304,6 +308,11 @@ mod tests {
         assert!(spec.env.contains(&("LAUNCHER_PROFILE".into(), "standard".into())));
         let issues = spec.env.iter().find(|(k, _)| k == "LAUNCHER_ISSUES_URL").map(|(_, v)| v.as_str());
         assert!(issues.is_some_and(|url| url.starts_with("https://github.com/") && url.ends_with("/issues")));
+        let media = spec.env.iter().find(|(k, _)| k == "LAUNCHER_MEDIA_URL").map(|(_, v)| v.as_str());
+        assert!(
+            media.is_some_and(|url| url.starts_with("https://") && !url.ends_with('/')),
+            "the setup pictures' folder: {media:?}"
+        );
         assert!(spec.env.contains(&(
             "LAUNCHER_MOD_REPORTS_ENDPOINT".into(),
             "https://gigabait.uk/api/mods/launcher/logs".into()

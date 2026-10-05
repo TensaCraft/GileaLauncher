@@ -21,6 +21,12 @@ pub const SUPPORT_URL: &str =
 /// Where bugs and suggestions go; empty means nowhere.
 pub const ISSUES_URL: &str =
     or(option_env!("LAUNCHER_ISSUES_URL"), "https://github.com/TensaCraft/GileaLauncher/issues");
+/// The folder of the setup wizard's pictures (`<lang>/<name>.jpg`), loaded only when shown; empty
+/// means the wizard shows icons instead.
+pub const MEDIA_URL: &str = or(
+    option_env!("LAUNCHER_MEDIA_URL"),
+    "https://raw.githubusercontent.com/TensaCraft/GileaLauncher/media/setup",
+);
 /// `owner/repo`; empty means launcher updates are disabled.
 pub const UPDATE_REPO: &str = or(option_env!("LAUNCHER_UPDATE_REPO"), "");
 pub const DEFAULT_UPDATE_API: &str = "https://api.github.com";

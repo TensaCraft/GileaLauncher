@@ -210,10 +210,12 @@ mod tests {
         &text[start..start + text[start..].find('"').unwrap()]
     }
 
-    /// `or(option_env!("VAR"), "default")` in branding.rs.
+    /// `or(option_env!("VAR"), "default")` in branding.rs (rustfmt may put the default on a line
+    /// of its own).
     fn branding_default<'a>(text: &'a str, var: &str) -> &'a str {
-        let pattern = format!("option_env!(\"{var}\"), \"");
-        let at = text.find(&pattern).unwrap_or_else(|| panic!("{var}")) + pattern.len();
+        let pattern = format!("option_env!(\"{var}\"),");
+        let after = text.find(&pattern).unwrap_or_else(|| panic!("{var}")) + pattern.len();
+        let at = after + text[after..].find('"').unwrap() + 1;
         &text[at..at + text[at..].find('"').unwrap()]
     }
 
@@ -232,6 +234,11 @@ mod tests {
             branding_default(&branding, "LAUNCHER_ISSUES_URL"),
             env(&standard, "LAUNCHER_ISSUES_URL"),
             "branding.rs default issues address"
+        );
+        assert_eq!(
+            branding_default(&branding, "LAUNCHER_MEDIA_URL"),
+            env(&standard, "LAUNCHER_MEDIA_URL"),
+            "branding.rs default address of the setup pictures"
         );
         let tauri = fs::read_to_string(root.join("crates/launcher-app/tauri.conf.json")).unwrap();
         for key in ["productName", "mainBinaryName"] {

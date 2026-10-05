@@ -147,6 +147,27 @@
 .check.is-on::after { content: "check"; font-family: "Material Icons"; font-size: 14px; color: #03241c; font-feature-settings: "liga"; }
 .choice { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); cursor: pointer; background: none; border: 0; padding: 0; }
 .choice:hover { color: var(--text); }
+/* Choice cards: one option among a few, each with a picture of what it looks like. */
+.choices { display: grid; grid-template-columns: repeat(var(--choice-cols, 3), minmax(0, 1fr)); gap: 14px; }
+.choice-card { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 0; text-align: left; font: inherit; color: var(--text-2);
+  border-radius: var(--r-lg); border: 1px solid var(--line-2); background: var(--s-row); cursor: pointer; overflow: hidden;
+  transition: border-color var(--dur), box-shadow var(--dur), transform var(--dur) var(--ease); }
+.choice-card:hover { border-color: var(--line-3); transform: translateY(-2px); }
+.choice-card:focus-visible { outline: none; box-shadow: var(--ring); }
+.choice-card.is-on { border-color: var(--primary); color: var(--text); box-shadow: 0 0 0 1px var(--primary), 0 12px 32px rgba(23, 195, 162, 0.16); }
+.choice-card__pic { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 10; overflow: hidden; border-bottom: 1px solid var(--line);
+  background: radial-gradient(120% 90% at 50% 30%, rgba(23, 195, 162, 0.14), transparent 70%), var(--s-input); }
+.choice-card__pic > .icon { font-size: 44px; color: var(--primary-light); opacity: 0.6; }
+.choice-card__pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; pointer-events: none; transition: opacity var(--dur); }
+.choice-card__pic img.is-loaded { opacity: 1; }
+.choice-card.is-plain .choice-card__pic { aspect-ratio: auto; height: 84px; }
+.choice-card.is-plain .choice-card__pic > .icon { font-size: 36px; }
+.choice-card.is-on .choice-card__pic > .icon { color: var(--primary-hi); opacity: 1; }
+.choice-card__text { display: grid; gap: 4px; padding: 12px 14px 14px; }
+.choice-card__title { display: flex; align-items: center; gap: 9px; font: 600 14px var(--f-ui); color: var(--text); }
+.choice-card__dot { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-3); transition: border-color var(--dur), background var(--dur); }
+.choice-card.is-on .choice-card__dot { border-color: var(--primary); background: radial-gradient(circle, var(--primary) 0 3.5px, transparent 4.5px); }
+.choice-card__desc { padding-left: 25px; font-size: 12.5px; line-height: 1.45; color: var(--text-3); }
 .seg { height: var(--h-md); display: inline-flex; padding: 3px; background: var(--s-input); border: 1px solid var(--line-ctl); border-radius: var(--r-md); gap: 2px; }
 .seg__btn { height: 100%; padding: 0 13px; border-radius: 5px; border: 0; background: none; color: var(--text-3); font: 600 12.5px var(--f-ui); display: flex; align-items: center; gap: 6px; }
 .seg__btn .icon { font-size: 16px; }

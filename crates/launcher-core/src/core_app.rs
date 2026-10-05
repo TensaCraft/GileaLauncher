@@ -5,7 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use launcher_shared::branding::{
-    DEFAULT_UPDATE_API, ISSUES_URL, MS_CLIENT_ID, PROFILE, SUPPORT_URL, UPDATE_API, UPDATE_REPO, VERSION,
+    DEFAULT_UPDATE_API, ISSUES_URL, MEDIA_URL, MS_CLIENT_ID, PROFILE, SUPPORT_URL, UPDATE_API, UPDATE_REPO,
+    VERSION,
 };
 use launcher_shared::{AppInfo, AppResult, PathsInfo, SetupPlan, SetupPreview, SetupState, Text};
 use serde_json::json;
@@ -291,6 +292,7 @@ impl CoreApp {
             os: Os::current().as_str().to_string(),
             support_url: (!SUPPORT_URL.is_empty()).then(|| SUPPORT_URL.to_string()),
             issues_url: (!ISSUES_URL.is_empty()).then(|| ISSUES_URL.to_string()),
+            media_url: (!MEDIA_URL.is_empty()).then(|| MEDIA_URL.to_string()),
             updates_configured: !UPDATE_REPO.is_empty(),
             update_source: (UPDATE_API != DEFAULT_UPDATE_API).then(|| UPDATE_API.to_string()),
             modules: self.modules.infos(),
@@ -409,6 +411,7 @@ mod tests {
         assert!(info.dev_mode);
         assert_eq!(info.modules[0].id, "flag");
         assert_eq!(info.issues_url.as_deref(), Some(launcher_shared::branding::ISSUES_URL));
+        assert_eq!(info.media_url.as_deref(), Some(launcher_shared::branding::MEDIA_URL));
         assert!(app.setup_state().should_open);
         assert!(app.auth.snapshot().profiles.is_empty());
     }

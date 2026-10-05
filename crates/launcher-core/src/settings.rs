@@ -22,6 +22,47 @@ pub const ON_GAME_START_KEY: &str = "on_game_start";
 /// The switch it replaced: "yes" closed the launcher.
 const CLOSE_ON_GAME_KEY: &str = "close_launcher_on_game";
 
+/// The config key an update writes and its value (`None` deletes the key), checked.
+pub fn entry(update: SettingUpdate) -> AppResult<(&'static str, Option<serde_json::Value>)> {
+    let invalid = |what: &str| AppError::new(ErrorCode::InvalidInput, what.to_string());
+    let entry = match update {
+        SettingUpdate::Lang(lang) => {
+            if !SUPPORTED_LANGS.contains(&lang.as_str()) {
+                return Err(invalid("unsupported language").with_param("lang", lang));
+            }
+            ("lang", Some(json!(lang)))
+        }
+        SettingUpdate::AutoUpdate(v) => ("auto_update", Some(json!(yes_no(v)))),
+        SettingUpdate::IncludeBetaUpdates(v) => ("include_beta_updates", Some(json!(yes_no(v)))),
+        SettingUpdate::OnGameStart(action) => (ON_GAME_START_KEY, Some(json!(action.as_config_str()))),
+        SettingUpdate::AskProfileOnLaunch(v) => ("ask_profile_on_launch", Some(json!(yes_no(v)))),
+        SettingUpdate::CompactSidebar(v) => ("compact_sidebar", Some(json!(yes_no(v)))),
+        SettingUpdate::ClickSoundEnabled(v) => ("ui_click_sound_enabled", Some(json!(yes_no(v)))),
+        SettingUpdate::ClickSound(s) => ("ui_click_sound", Some(json!(s.as_config_str()))),
+        SettingUpdate::DefaultMaxRamGb(Some(0)) => {
+            return Err(invalid("the memory limit must be at least 1 GB"));
+        }
+        SettingUpdate::DefaultMaxRamGb(gb) => (DEFAULT_MAX_RAM_KEY, gb.map(|gb| json!(gb))),
+        SettingUpdate::GpuModeDefault(mode) => {
+            if !["auto", "igpu", "dgpu"].contains(&mode.as_str()) {
+                return Err(invalid("unknown GPU mode").with_param("mode", mode));
+            }
+            (GPU_MODE_DEFAULT_KEY, Some(json!(mode)))
+        }
+        SettingUpdate::WindowSize(raw) => match WindowSize::parse(&raw) {
+            Some(size) => (WINDOW_SIZE_KEY, Some(json!(size.as_config_str()))),
+            None => return Err(invalid("unknown window size").with_param("size", raw)),
+        },
+        SettingUpdate::HomeRecentBuilds(count) if count > RECENT_MOST => {
+            return Err(invalid("too many recent builds").with_param("count", count.to_string()));
+        }
+        SettingUpdate::HomeRecentBuilds(count) => (HOME_RECENT_KEY, Some(json!(count))),
+        SettingUpdate::HomeRecentClear(clear) => (HOME_RECENT_CLEARED_KEY, clear.then(|| json!(now_ms()))),
+        SettingUpdate::CardPlay(play) => (CARD_PLAY_KEY, Some(json!(play.as_config_str()))),
+    };
+    Ok(entry)
+}
+
 /// What the launcher does once the game it started runs: the user's choice, else what the old
 /// switch said.
 pub fn game_start_action(config: &ConfigStore) -> GameStartAction {
@@ -116,44 +157,7 @@ impl SettingsService {
     }
 
     pub fn apply(&self, update: SettingUpdate) -> AppResult<SettingsSnapshot> {
-        let invalid = |what: &str| AppError::new(ErrorCode::InvalidInput, what.to_string());
-        let (key, value) = match update {
-            SettingUpdate::Lang(lang) => {
-                if !SUPPORTED_LANGS.contains(&lang.as_str()) {
-                    return Err(invalid("unsupported language").with_param("lang", lang));
-                }
-                ("lang", Some(json!(lang)))
-            }
-            SettingUpdate::AutoUpdate(v) => ("auto_update", Some(json!(yes_no(v)))),
-            SettingUpdate::IncludeBetaUpdates(v) => ("include_beta_updates", Some(json!(yes_no(v)))),
-            SettingUpdate::OnGameStart(action) => (ON_GAME_START_KEY, Some(json!(action.as_config_str()))),
-            SettingUpdate::AskProfileOnLaunch(v) => ("ask_profile_on_launch", Some(json!(yes_no(v)))),
-            SettingUpdate::CompactSidebar(v) => ("compact_sidebar", Some(json!(yes_no(v)))),
-            SettingUpdate::ClickSoundEnabled(v) => ("ui_click_sound_enabled", Some(json!(yes_no(v)))),
-            SettingUpdate::ClickSound(s) => ("ui_click_sound", Some(json!(s.as_config_str()))),
-            SettingUpdate::DefaultMaxRamGb(Some(0)) => {
-                return Err(invalid("the memory limit must be at least 1 GB"));
-            }
-            SettingUpdate::DefaultMaxRamGb(gb) => (DEFAULT_MAX_RAM_KEY, gb.map(|gb| json!(gb))),
-            SettingUpdate::GpuModeDefault(mode) => {
-                if !["auto", "igpu", "dgpu"].contains(&mode.as_str()) {
-                    return Err(invalid("unknown GPU mode").with_param("mode", mode));
-                }
-                (GPU_MODE_DEFAULT_KEY, Some(json!(mode)))
-            }
-            SettingUpdate::WindowSize(raw) => match WindowSize::parse(&raw) {
-                Some(size) => (WINDOW_SIZE_KEY, Some(json!(size.as_config_str()))),
-                None => return Err(invalid("unknown window size").with_param("size", raw)),
-            },
-            SettingUpdate::HomeRecentBuilds(count) if count > RECENT_MOST => {
-                return Err(invalid("too many recent builds").with_param("count", count.to_string()));
-            }
-            SettingUpdate::HomeRecentBuilds(count) => (HOME_RECENT_KEY, Some(json!(count))),
-            SettingUpdate::HomeRecentClear(clear) => {
-                (HOME_RECENT_CLEARED_KEY, clear.then(|| json!(now_ms())))
-            }
-            SettingUpdate::CardPlay(play) => (CARD_PLAY_KEY, Some(json!(play.as_config_str()))),
-        };
+        let (key, value) = entry(update)?;
         let mut revision = self.revision.lock().unwrap_or_else(|e| e.into_inner());
         match value {
             Some(value) => self.config.set(key, value),

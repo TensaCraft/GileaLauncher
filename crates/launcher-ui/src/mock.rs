@@ -192,13 +192,15 @@ fn preview_providers() -> Vec<launcher_shared::provider::ProviderInfo> {
 }
 
 pub fn install() {
+    // `?lang=en_US&recent=0&cards=bar&sidebar=full` start from other settings (the setup wizard's
+    // pictures are taken so).
     let settings = Rc::new(RefCell::new(SettingsSnapshot {
-        lang: "uk_UA".into(),
+        lang: query_value("lang").unwrap_or_else(|| "uk_UA".into()),
         auto_update: true,
         include_beta_updates: false,
         on_game_start: Default::default(),
         ask_profile_on_launch: false,
-        compact_sidebar: true,
+        compact_sidebar: query_value("sidebar").as_deref() != Some("full"),
         click_sound_enabled: true,
         click_sound: ClickSound::GateLatchClick,
         minecraft_dir: "C:\\Users\\Player\\AppData\\Roaming\\Launcher".into(),
@@ -207,9 +209,9 @@ pub fn install() {
         default_max_ram_gb: None,
         gpu_mode_default: "dgpu".into(),
         window_size: "1366x800".into(),
-        home_recent_builds: 5,
+        home_recent_builds: query_value("recent").and_then(|n| n.parse().ok()).unwrap_or(5),
         home_recent_cleared_ms: None,
-        card_play: launcher_shared::CardPlay::Center,
+        card_play: launcher_shared::CardPlay::from_config_str(&query_value("cards").unwrap_or_default()),
         revision: 0,
     }));
     let info = AppInfo {
@@ -219,6 +221,8 @@ pub fn install() {
         os: "windows".into(),
         support_url: Some("https://discord.com/invite/mftAjQA4Pp".into()),
         issues_url: Some(launcher_shared::branding::ISSUES_URL.into()),
+        // `?media=http://127.0.0.1:…` shows pictures not yet in the repository.
+        media_url: Some(query_value("media").unwrap_or_else(|| launcher_shared::branding::MEDIA_URL.into())),
         updates_configured: false,
         update_source: None,
         modules: crate::modules::ui_modules()
@@ -315,10 +319,16 @@ pub fn install() {
             } else {
                 format!("{dir}\\minecraft")
             };
+            // A folder under `C:\Windows` shows how one that cannot be used looks.
+            let issue = dir
+                .to_lowercase()
+                .starts_with("c:\\windows")
+                .then(|| Text::key("setup_issue_app_state_protected").param("path", dir.clone()));
             to_value(SetupPreview {
                 app_state_dir: dir,
                 backups_dir: format!("{minecraft}\\backups\\worlds"),
                 minecraft_dir: minecraft,
+                issue,
             })
         }
         "setup_apply" => to_value(false),

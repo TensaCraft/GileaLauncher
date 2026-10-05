@@ -1,7 +1,7 @@
 use launcher_shared::{GameStartAction, SettingUpdate, UpdateState};
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{ActionTone, IconAction, Section, Select, SelectOption, SettingRow, Switch};
+use ui_kit::{ActionTone, Button, IconAction, Section, Select, SelectOption, SettingRow, Switch};
 
 use super::mirror_bool;
 use crate::store::{use_settings_writer, use_store};
@@ -108,6 +108,9 @@ pub fn LauncherSection() -> impl IntoView {
             </SettingRow>
             <SettingRow title=t("beta_updates") desc=t("include_beta_updates_desc")>
                 <Switch checked=beta on_change=Callback::new(move |v| writer.apply(SettingUpdate::IncludeBetaUpdates(v))) />
+            </SettingRow>
+            <SettingRow title=t("setup_again") desc=t("setup_again_desc")>
+                <Button icon="auto_fix_high" on_click=move |_| store.go("/setup")>{move || i18n.t("setup_again_open")}</Button>
             </SettingRow>
         </Section>
     }
