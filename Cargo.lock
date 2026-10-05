@@ -2877,7 +2877,7 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
 name = "launcher-app"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "arboard",
  "launcher-core",
@@ -2903,7 +2903,7 @@ dependencies = [
 
 [[package]]
 name = "launcher-core"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2951,7 +2951,7 @@ dependencies = [
 
 [[package]]
 name = "launcher-shared"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "serde",
  "serde_json",
@@ -2960,7 +2960,7 @@ dependencies = [
 
 [[package]]
 name = "launcher-ui"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
@@ -3370,7 +3370,7 @@ dependencies = [
 
 [[package]]
 name = "mock-github"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "axum",
  "chrono",
@@ -3387,7 +3387,7 @@ dependencies = [
 
 [[package]]
 name = "module-backups"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "chrono",
  "js-sys",
@@ -3406,7 +3406,7 @@ dependencies = [
 
 [[package]]
 name = "module-curseforge"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "axum",
  "futures-util",
@@ -3428,7 +3428,7 @@ dependencies = [
 
 [[package]]
 name = "module-diagnostics"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "js-sys",
  "launcher-core",
@@ -3445,7 +3445,7 @@ dependencies = [
 
 [[package]]
 name = "module-modrinth"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "axum",
  "chrono",
@@ -3466,7 +3466,7 @@ dependencies = [
 
 [[package]]
 name = "module-reports"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "axum",
  "launcher-core",
@@ -3484,7 +3484,7 @@ dependencies = [
 
 [[package]]
 name = "module-tensa"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "axum",
  "launcher-core",
@@ -6448,7 +6448,7 @@ dependencies = [
 
 [[package]]
 name = "ui-kit"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "js-sys",
  "launcher-shared",
@@ -7449,7 +7449,7 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
 name = "xtask"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "anyhow",
  "clap",
