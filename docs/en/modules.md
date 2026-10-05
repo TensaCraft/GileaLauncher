@@ -8,7 +8,7 @@ A module is an optional part of the launcher: a build includes it only when its 
 |---|---|---|
 | `modrinth` | mods, resource packs, shaders and modpacks from Modrinth (a content provider) | standard, full |
 | `backups` | world backups | standard, full |
-| `reports` | error reports sent to the profile's `endpoint` | standard, full |
+| `reports` | reports of the launcher's own problems (a failed operation, a crash of the launcher, what the user describes), sent to the profile's `endpoint` | standard, full |
 | `tensa` | TensaCraft server builds on Home | full |
 | `curseforge` | mods, resource packs, shaders and modpacks from CurseForge (a content provider; needs the CurseForge API key, see below) | standard, full |
 | `diagnostics` | the postponed diagnostics module | none (outside `--modules all`) |
@@ -54,7 +54,12 @@ A module can add to the interface:
 - windows shown over the whole app (`overlays`);
 - cards on Home (`home_cards`). The card component tells Home how many cards it shows with `report_home_cards`, so Home only says "no builds yet" when there is nothing on it;
 - build menu entries (`build_actions`);
+- buttons of an alert the user can report (`alert_actions`);
+- warnings above a provider's tab (`content_notices`);
+- rows of the Support window (`support_actions`);
 - translations (`locale_json`).
+
+A failed operation's toast offers «Report» through `ui_kit::problem`: the app provides a `ProblemReporter`, a module that can send reports sets its `available` and answers its `request`.
 
 Components come from `ui-kit`, so modules look like the core.
 

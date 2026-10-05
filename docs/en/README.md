@@ -11,5 +11,6 @@ GileaLauncher is a Minecraft launcher in Rust: Tauri 2 for the window and the sy
 | [modules.md](modules.md) | modules: backend, interface, content providers, a new module |
 | [testing.md](testing.md) | tests, their rules, Linux in WSL, checking updates |
 | [releasing.md](releasing.md) | versions, editions, packaging, GitHub releases |
+| [media.md](media.md) | pictures: the `media` branch, its folders and rules, replacing and adding a picture |
 
 For players: the [README](../../README.md) at the root, and [privacy.md](privacy.md): what the launcher keeps and sends.

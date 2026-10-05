@@ -11,5 +11,6 @@ GileaLauncher — лаунчер Minecraft на Rust: Tauri 2 відповіда
 | [modules.md](modules.md) | модулі: бекенд, інтерфейс, провайдери вмісту, новий модуль |
 | [testing.md](testing.md) | тести та їхні правила, Linux у WSL, перевірка оновлень |
 | [releasing.md](releasing.md) | версії, редакції, пакування, релізи на GitHub |
+| [media.md](media.md) | картинки: гілка `media`, її теки й правила, як замінити чи додати картинку |
 
 Для гравців: [README](../../README.uk.md) у корені репозиторію і [privacy.md](privacy.md) — що лаунчер зберігає й надсилає.

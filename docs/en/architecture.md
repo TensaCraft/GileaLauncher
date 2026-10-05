@@ -16,7 +16,6 @@
 | `xtask` | builds, checks, hooks, packaging, the update imitation |
 | `build-profiles/*.toml` | profiles: modules, brand, edition, updates |
 | `assets/` | translations, fonts, background, sounds, logo, icon |
-| `tools/` | helper scripts (click sound synthesis) |
 
 `launcher-core` is split into parts:
 

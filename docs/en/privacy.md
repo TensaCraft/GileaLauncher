@@ -9,6 +9,7 @@ GileaLauncher is a Minecraft launcher that runs on your computer. It has no acco
 - **Settings, builds, worlds and mods** are kept in the launcher's folders (see "Where data is kept" in the [README](../../README.md#where-data-is-kept)).
 - **Accounts.** For a Microsoft account the launcher keeps your player name, UUID and the sign-in tokens Microsoft gives it. The tokens are encrypted, and the key sits in the same folder. This keeps them unreadable in a copied or shared file, not from someone who can use your computer account. Offline profiles keep only a name.
 - **Logs** of the launcher and of the game stay in those folders until you delete them.
+- **The launcher's own crashes.** If the launcher crashes, it keeps a short note (the error's text and its place in the launcher's code, without your home folder) in its cache folder, to ask you at the next start whether to report it. The note goes once it is reported or you choose not to; at most the five newest are kept, for 30 days.
 
 Nothing of this leaves your computer unless a step below says so.
 
@@ -28,18 +29,44 @@ The launcher connects to these services only to do what you ask of it. Each one 
 
 When you start the game, Minecraft itself talks to Mojang and Microsoft under [their privacy statement](https://privacy.microsoft.com/privacystatement).
 
+## The Windows registry
+
+By default the launcher writes nothing to the Windows registry: the GPU mode is **Auto**, and Windows picks the graphics card for the game.
+
+If you choose **Integrated** or **Discrete** (Settings → Java → "GPU mode for new builds", or a build's settings → Runtime), the launcher asks first, then writes that choice for the game's Java where Windows keeps per-program GPU choices: the same place Windows' own Settings → System → Display → Graphics writes to.
+
+| | |
+|---|---|
+| Key | `HKEY_CURRENT_USER\Software\Microsoft\DirectX\UserGpuPreferences` |
+| Value name | the full path of the build's Java (`javaw.exe`) |
+| Value | `GpuPreference=1;` for integrated, `GpuPreference=2;` for discrete |
+
+- Only the current user's part of the registry, no administrator rights. Nothing else is read or changed.
+- Why: on a laptop with two graphics cards Windows may run the game on the slower built-in one; this is how to tell it otherwise.
+- Some antivirus programs watch registry changes and may warn about this one. That is expected.
+- To take it back, switch to **Auto**: at the next game start the launcher deletes the entries it wrote. You can also remove them in Windows Settings → Graphics.
+
+The Windows installer adds the usual entries of an installed program (its line in the list of installed apps, for uninstalling it). On Linux and macOS the launcher keeps nothing like this: on Linux, **Discrete** only sets NVIDIA's PRIME variables for the game's process.
+
 ## Reports
 
-When the game or the launcher fails, the error window has a "Send report" button. A report is sent only when you press it, to `gigabait.uk`, so that the problem can be found and fixed.
+Reports are about the launcher itself, so that its problems can be found and fixed. A report is sent only when you press a button, to `gigabait.uk`:
+
+- "Report" on the notice of a failed operation (installing a version, a loader or a modpack, updating the launcher…), when the failure looks like the launcher's and not your network's, account's or computer's;
+- "A problem with the launcher" in the Support window, where you describe what happened;
+- the question after the launcher crashed, at its next start ("Don't send" deletes the crash's note);
+- in the TensaCraft edition: the error window of a server build's install on Home.
 
 A report holds:
-- the error's title and message;
+- the error's text and code, or your description;
 - the launcher's version, the system (OS) and the launcher's recent activity;
-- for a build: its name, Minecraft and loader version, Java path, memory, Java arguments and server address;
-- the logs: the launcher's log and the game's latest log, crash report and Java crash log;
+- for a crash of the launcher: its error's text and place in the launcher's code;
+- the launcher's own log;
 - your contact, only if you entered one.
 
-Before a report is sent, the launcher replaces your home folder's path with `<USER_HOME>` and removes sign-in tokens from the logs. The game's logs can still contain your player name.
+A report never holds the game's logs, crash reports or files. When the game crashes, the launcher only opens those files for you, on your computer: a game's crash is most often its build's mods, not the launcher's.
+
+Before a report is sent, the launcher replaces your home folder's path with `<USER_HOME>` and removes sign-in tokens from its log.
 
 To have a report you sent deleted, ask on [Discord](https://discord.com/invite/mftAjQA4Pp).
 
@@ -52,4 +79,4 @@ To have a report you sent deleted, ask on [Discord](https://discord.com/invite/m
 
 Questions about this page: [Discord](https://discord.com/invite/mftAjQA4Pp) or [GitHub Issues](https://github.com/TensaCraft/GileaLauncher/issues).
 
-Last updated: 2 October 2026.
+Last updated: 5 October 2026.
