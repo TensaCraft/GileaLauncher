@@ -1,6 +1,7 @@
 //! Old build caches. Cargo keeps a separate set of artifacts for every feature set, profile, crate
 //! version and toolchain, and never removes the ones no longer built: in a few weeks `target/` grew
-//! to hundreds of gigabytes. The sweep removes the cache entries not written for a while.
+//! to hundreds of gigabytes. The sweep removes the cache entries not written for a while, then the
+//! oldest ones while the caches hold more than their budget.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,10 @@ const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 /// rebuilt after this (a few minutes, once in a while).
 const KEEP: Duration = Duration::from_secs(14 * 24 * 60 * 60);
 /// Incremental caches serve only the latest build of a crate's configuration.
-const KEEP_INCREMENTAL: Duration = Duration::from_secs(3 * 24 * 60 * 60);
+const KEEP_INCREMENTAL: Duration = DAY;
+/// The most the caches may hold. Days of work on every feature set, the UI's wasm and the tests
+/// grew them by a hundred gigabytes a day, all of it recent: past the budget the oldest go first.
+const BUDGET: u64 = 60_000_000_000;
 /// When the target folder was last swept.
 const STAMP: &str = ".sweep-stamp";
 /// How deep profile folders lie (`target/hooks/<triple>/debug`).
@@ -73,6 +77,35 @@ fn sweep_cache(cache: &Path, cutoff: SystemTime, swept: &mut Swept) {
     }
 }
 
+/// Removes the oldest entries of the cache folders under `target` until they hold at most
+/// `budget` bytes.
+pub fn trim(target: &Path, budget: u64) -> Swept {
+    let mut entries: Vec<(SystemTime, u64, PathBuf)> = Vec::new();
+    visit(target, 0, &mut |cache, _| {
+        let Ok(found) = fs::read_dir(cache) else { return };
+        for entry in found.flatten() {
+            let path = entry.path();
+            entries.push((newest(&path).unwrap_or(SystemTime::UNIX_EPOCH), size(&path), path));
+        }
+    });
+    let mut held: u64 = entries.iter().map(|(_, size, _)| size).sum();
+    entries.sort_by_key(|(written, _, _)| *written);
+    let mut trimmed = Swept::default();
+    for (_, size, path) in entries {
+        if held <= budget {
+            break;
+        }
+        let removed = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
+        // A file in use (another build runs) stays.
+        if removed.is_ok() {
+            held -= size;
+            trimmed.entries += 1;
+            trimmed.bytes += size;
+        }
+    }
+    trimmed
+}
+
 /// When `path` was last written: a file's own time, a folder's newest file.
 fn newest(path: &Path) -> Option<SystemTime> {
     let meta = fs::symlink_metadata(path).ok()?;
@@ -118,7 +151,10 @@ fn once_a_day(target: &Path) {
     if fresh || !target.is_dir() {
         return;
     }
-    let swept = sweep(target, KEEP, KEEP_INCREMENTAL, now);
+    let mut swept = sweep(target, KEEP, KEEP_INCREMENTAL, now);
+    let trimmed = trim(target, BUDGET);
+    swept.entries += trimmed.entries;
+    swept.bytes += trimmed.bytes;
     let _ = fs::write(&stamp, b"");
     if swept.entries > 0 {
         println!(
@@ -177,6 +213,27 @@ mod tests {
         }
         assert_eq!(swept.entries, 6);
         assert_eq!(swept.bytes, 6 * b"artifact".len() as u64);
+    }
+
+    #[test]
+    fn caches_past_the_budget_go_oldest_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = tmp.path();
+        let now = SystemTime::now();
+        let unit = b"artifact".len() as u64;
+        let oldest = file(t.join("debug/deps/liba-1.rlib"), 6, now);
+        let older = file(t.join("debug/incremental/b-2/s-1/query.bin"), 5, now);
+        let newer = file(t.join("wasm32-unknown-unknown/debug/deps/c-3.rlib"), 2, now);
+        let newest = file(t.join("debug/deps/d-4.exe"), 1, now);
+        let app = file(t.join("debug/launcher_app.exe"), 60, now);
+
+        let trimmed = trim(t, 2 * unit);
+
+        assert!(!oldest.exists() && !older.exists(), "the two oldest go");
+        assert!(newer.exists() && newest.exists(), "the newest fit the budget");
+        assert!(app.exists(), "outside the caches nothing is touched");
+        assert_eq!(trimmed, Swept { entries: 2, bytes: 2 * unit });
+        assert_eq!(trim(t, 2 * unit), Swept::default(), "within the budget nothing goes");
     }
 
     #[test]

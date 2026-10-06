@@ -99,6 +99,9 @@ hickory-resolver = { version = "0.25", default-features = false, features = ["sy
 # tens of times slower unoptimised, while the workspace's own crates stay quick to rebuild.
 [profile.dev.package."*"]
 opt-level = 3
+# Optimised dependencies are not stepped through: without their debug information every test
+# binary's .pdb and every .rlib is a fraction of the size.
+debug = false
 
 # CurseForge's fingerprint walks every byte of every mod in the module's own code.
 [profile.dev.package.module-curseforge]
