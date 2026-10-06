@@ -200,7 +200,7 @@
 .code__area { flex: 1; resize: vertical; min-height: 120px; padding: 8px 12px; border: 0; outline: 0; background: none; color: #cfe9e3; font: inherit; white-space: pre; overflow: auto; user-select: text; }
 
 /* ---------- sections / settings ---------- */
-.section { background: var(--s-sec); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px 20px 6px; backdrop-filter: blur(10px); margin-bottom: 14px; position: relative; overflow: visible; }
+.section { background: var(--s-sec); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px 20px 6px; margin-bottom: 14px; position: relative; overflow: visible; }
 .section::before { content: ""; position: absolute; left: 0; top: 0; width: 120px; height: 1px; background: linear-gradient(90deg, var(--primary), transparent); }
 .section__head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
 /* Free content (grids, button rows, lists) keeps its distance; setting rows bring their own padding and line. */
@@ -216,7 +216,7 @@
 .row__control { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .row--stack .row__control { justify-content: stretch; }
 .row--stack .row__control > * { flex: 1 1 100%; min-width: 0; }
-.snav { background: var(--s-sec); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 6px; backdrop-filter: blur(10px); position: sticky; top: 0; }
+.snav { background: var(--s-sec); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 6px; position: sticky; top: 0; }
 .snav__group { font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-4); padding: 10px 10px 4px; }
 .snav__item { width: 100%; height: var(--h-md); display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: var(--r-sm); font-size: 13px; font-weight: 500; color: var(--text-2); background: none; border: 0; text-align: left; }
 .snav__item .icon { font-size: 18px; color: var(--text-3); }
@@ -225,7 +225,7 @@
 .snav__item.is-active .icon { color: var(--primary); }
 
 /* ---------- tabs (segmented, underline) ---------- */
-.tabs { display: flex; padding: 2px; border-radius: var(--r-lg); background: rgba(14, 25, 23, 0.35); border: 1px solid rgba(141, 167, 162, 0.18); backdrop-filter: blur(6px); }
+.tabs { display: flex; padding: 2px; border-radius: var(--r-lg); background: rgba(14, 25, 23, 0.35); border: 1px solid rgba(141, 167, 162, 0.18); }
 .tab { flex: 1; height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border-radius: var(--r-md); font-size: 12px; font-weight: 500; color: var(--text-2); background: none; border: 0; transition: background var(--dur); }
 .tab__label { display: flex; align-items: center; gap: 6px; }
 .tab .icon { font-size: 16px; }
