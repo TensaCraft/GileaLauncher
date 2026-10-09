@@ -268,7 +268,9 @@ impl BuildService {
         if running() || game_open(&from) {
             return Err(running_error(&source));
         }
-        let op = self.feedback.begin(OperationSpec::new(Text::key("copy_in_progress"), "copy"));
+        let op = self
+            .feedback
+            .begin(OperationSpec::new(Text::key("copy_in_progress").param("version", &source.name), "copy"));
         let result = self.copy_and_register(&source, name, &from).await;
         drop(lease);
         match result {

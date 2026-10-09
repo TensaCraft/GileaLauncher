@@ -47,6 +47,21 @@ async fn home_packs_list_the_server_builds_not_installed_yet() {
 }
 
 #[tokio::test]
+async fn home_cards_show_the_server_s_picture_as_it_is_now() {
+    let w = World::start().await;
+    let icon = w.server.url("/icons/aero.png");
+    w.server.reply("/icons/aero.png", 200, "png");
+    w.server.header("/icons/aero.png", "etag", "\"bbb-2\"");
+    w.server.json(
+        "/api/mods",
+        json!([{"client": {"id": "aero", "name": "Aero", "minecraft_version": "26.3", "loader_id": "fabric",
+                           "image": icon}}]),
+    );
+    let packs = home_packs(&w.deps, &config(&w)).await.unwrap();
+    assert_eq!(packs[0]["image"], json!(format!("{icon}?iv=bbb-2")));
+}
+
+#[tokio::test]
 async fn installed_server_builds_are_no_stubs() {
     let w = World::start().await;
     two(&w);

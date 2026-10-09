@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::pack::{Pack, truthy};
 
 /// The names a server may give the fields it forces, and the field each means.
-const FIELD_ALIASES: [(&str, &str); 24] = [
+const FIELD_ALIASES: [(&str, &str); 28] = [
     ("minecraft", "minecraft_version"),
     ("minecraftversion", "minecraft_version"),
     ("minecraft_version", "minecraft_version"),
@@ -33,6 +33,10 @@ const FIELD_ALIASES: [(&str, &str); 24] = [
     ("gpu_preference", "gpu_preference"),
     ("image", "image"),
     ("icon", "image"),
+    ("name", "name"),
+    ("title", "name"),
+    ("description", "description"),
+    ("summary", "description"),
     ("jvm", "jvm_arguments"),
     ("jvmarguments", "jvm_arguments"),
     ("jvm_arguments", "jvm_arguments"),
@@ -140,6 +144,13 @@ fn apply_forced(build: &mut Build, pack: &Pack) {
     }
     if fields.contains("image") {
         build.image = pack.image.clone();
+    }
+    // A name another build has is kept off by the sync, which sees every build.
+    if fields.contains("name") && !pack.name.trim().is_empty() {
+        build.name = pack.name.trim().to_string();
+    }
+    if fields.contains("description") {
+        build.description = pack.description.clone().unwrap_or_default();
     }
     if fields.contains("gpu_preference")
         && let Some(mode) = pack.gpu.as_deref().and_then(gpu_mode)
@@ -280,6 +291,26 @@ mod tests {
             loader_kind(&pack(json!({"id": "a", "loader": "NeoForge"}))).unwrap(),
             LoaderKind::NeoForge
         );
+    }
+
+    #[test]
+    fn a_sync_takes_the_name_and_description_the_server_forces() {
+        // As the server builds' API sends them: `force_update_profile_fields` of the client.
+        let forcing = Pack::from_value(&json!({"title": "Aeronautics — Звичайна", "client": {
+            "id": "aeronautics", "description": "Основна збірка", "image": "logo.png",
+            "force_update_profile_fields": ["id", "name", "description", "image"]
+        }}))
+        .unwrap();
+        let mut b = Build::new("Моя назва");
+        b.description = "мій опис".into();
+        merge(&mut b, &forcing, false);
+        assert_eq!((b.name.as_str(), b.description.as_str()), ("Aeronautics — Звичайна", "Основна збірка"));
+
+        let quiet = Pack { forced_fields: vec!["image".into()], ..forcing.clone() };
+        let mut own = Build::new("Моя назва");
+        own.description = "мій опис".into();
+        merge(&mut own, &quiet, false);
+        assert_eq!((own.name.as_str(), own.description.as_str()), ("Моя назва", "мій опис"), "not forced");
     }
 
     #[test]

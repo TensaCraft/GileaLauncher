@@ -1,8 +1,8 @@
 use leptos::prelude::*;
+use ui_kit::ProgressBar;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{ProgressBar, progress_percent};
 
-use crate::pages::settings::activity::{listed_ops, live_op};
+use crate::pages::settings::activity::{listed_ops, live_op, overall_percent};
 use crate::store::use_store;
 
 const RING: f64 = 69.12; // 2 * PI * 11
@@ -13,9 +13,8 @@ pub fn OpsIndicator() -> impl IntoView {
     let i18n = use_i18n();
     let open = RwSignal::new(false);
     let visible = listed_ops(store);
-    // The first operation's progress: the ring turns only when it moves.
-    let root_pct =
-        Memo::new(move |_| visible.with(|v| v.first().and_then(|o| progress_percent(o.progress, o.total))));
+    // All the work under way: the ring turns only when it moves.
+    let root_pct = Memo::new(move |_| visible.with(|v| overall_percent(v)));
 
     view! {
         <Show when=move || !visible.with(Vec::is_empty)>

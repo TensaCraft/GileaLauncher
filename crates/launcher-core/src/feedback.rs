@@ -122,7 +122,6 @@ struct State {
     next_notice_id: u64,
     next_seq: u64,
     ops: BTreeMap<u64, OperationDto>,
-    root: Option<u64>,
     activity: VecDeque<ActivityRecord>,
     last_ops_emit: Option<Instant>,
     ops_dirty: bool,
@@ -170,15 +169,12 @@ impl FeedbackService {
             let mut st = self.lock();
             st.next_op_id += 1;
             let id = st.next_op_id;
-            let parent_id = st.root;
-            if st.root.is_none() {
-                st.root = Some(id);
-            }
+            // Operations started side by side are each their own: two builds synced at once.
             st.ops.insert(
                 id,
                 OperationDto {
                     id,
-                    parent_id,
+                    parent_id: None,
                     title: spec.title.clone(),
                     kind: spec.kind.clone(),
                     status: spec.status.clone(),
@@ -258,17 +254,6 @@ impl FeedbackService {
         let entry = {
             let mut st = self.lock();
             let Some(op) = st.ops.remove(&id) else { return };
-            if st.root == Some(id) {
-                st.root = st.ops.keys().next().copied();
-            }
-            let root = st.root;
-            for other in st.ops.values_mut() {
-                if Some(other.id) == root {
-                    other.parent_id = None;
-                } else if other.parent_id == Some(id) {
-                    other.parent_id = root;
-                }
-            }
             st.ops_dirty = true;
             st.ops_revision += 1;
             let (level, message) = match failure {
@@ -646,35 +631,23 @@ mod tests {
     }
 
     #[test]
-    fn first_operation_is_root_and_later_are_children() {
+    fn operations_started_side_by_side_are_each_their_own() {
+        // Two builds synced at once: neither is a step of the other.
         let (fb, _rec, _c) = setup();
-        let root = fb.begin(spec("a"));
-        let child = fb.begin(spec("b"));
+        let first = fb.begin(spec("a"));
+        let second = fb.begin(spec("b"));
         let snap = fb.snapshot();
         assert!(snap.busy);
-        assert_eq!(snap.operations[0].parent_id, None);
-        assert_eq!(snap.operations[1].parent_id, Some(root.id()));
-        child.finish();
-        root.finish();
+        assert_eq!(snap.operations.iter().map(|op| op.parent_id).collect::<Vec<_>>(), [None, None]);
+        first.finish();
+        let snap = fb.snapshot();
+        assert_eq!((snap.operations.len(), snap.operations[0].id), (1, second.id()));
+        let third = fb.begin(spec("c"));
+        assert!(fb.snapshot().operations.iter().all(|op| op.parent_id.is_none()));
+        drop(third);
+        second.finish();
         assert!(!fb.is_busy());
         assert!(fb.snapshot().operations.is_empty());
-    }
-
-    #[test]
-    fn child_is_promoted_when_root_finishes_first() {
-        let (fb, _rec, _c) = setup();
-        let root = fb.begin(spec("a"));
-        let child = fb.begin(spec("b"));
-        let child_id = child.id();
-        root.finish();
-        let snap = fb.snapshot();
-        assert!(snap.busy);
-        assert_eq!(snap.operations.len(), 1);
-        assert_eq!((snap.operations[0].id, snap.operations[0].parent_id), (child_id, None));
-        let next = fb.begin(spec("c"));
-        assert_eq!(fb.snapshot().operations[1].parent_id, Some(child_id));
-        drop(next);
-        drop(child);
     }
 
     #[test]

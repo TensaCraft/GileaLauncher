@@ -380,6 +380,12 @@ impl MockBuilds {
         self.java_list()
     }
 
+    /// The name of build `key`.
+    #[cfg(feature = "mod-tensa")]
+    pub fn name_of(&self, key: &str) -> Option<String> {
+        self.builds.iter().find(|b| b.key == key).map(|b| b.name.clone())
+    }
+
     pub fn emit_builds(&self) {
         if let Ok(value) = serde_json::to_value(self.snapshot()) {
             ipc::emit_mock(names::BUILDS, value);

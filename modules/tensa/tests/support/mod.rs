@@ -15,6 +15,7 @@ use tokio::net::TcpListener;
 #[derive(Default)]
 struct Data {
     replies: HashMap<String, Vec<(u16, Vec<u8>)>>,
+    headers: HashMap<String, Vec<(String, String)>>,
     seen: Vec<String>,
 }
 
@@ -43,6 +44,14 @@ impl Server {
         self.data.lock().unwrap().replies.entry(path.to_string()).or_default().push((status, body.into()));
     }
 
+    /// `path` answers with header `name` too.
+    pub fn header(&self, path: &str, name: &str, value: &str) {
+        let mut data = self.data.lock().unwrap();
+        let headers = data.headers.entry(path.to_string()).or_default();
+        headers.retain(|(n, _)| n != name);
+        headers.push((name.to_string(), value.to_string()));
+    }
+
     pub fn json(&self, path: &str, body: Value) {
         self.reply(path, 200, body.to_string());
     }
@@ -65,8 +74,16 @@ async fn reply(State(data): State<Shared>, uri: Uri) -> Response {
         Some(queue) if !queue.is_empty() => queue[0].clone(),
         _ => (404, b"{}".to_vec()),
     };
-    (StatusCode::from_u16(status).unwrap(), [(header::CONTENT_TYPE, "application/json")], body)
-        .into_response()
+    let mut response =
+        (StatusCode::from_u16(status).unwrap(), [(header::CONTENT_TYPE, "application/json")], body)
+            .into_response();
+    for (name, value) in data.headers.get(uri.path()).into_iter().flatten() {
+        response.headers_mut().insert(
+            header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+            header::HeaderValue::from_str(value).unwrap(),
+        );
+    }
+    response
 }
 
 /// A component installer that installs nothing: it names the component and a Java for it, or

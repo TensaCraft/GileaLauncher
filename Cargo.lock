@@ -3487,6 +3487,7 @@ name = "module-tensa"
 version = "0.0.9"
 dependencies = [
  "axum",
+ "futures-util",
  "launcher-core",
  "launcher-shared",
  "leptos",

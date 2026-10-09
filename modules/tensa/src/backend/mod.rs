@@ -4,6 +4,7 @@
 pub mod api;
 pub mod home;
 pub mod hook;
+pub mod icon;
 pub mod identity;
 pub mod install;
 pub mod manifest;

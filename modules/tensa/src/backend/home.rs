@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 
+use futures_util::future::join_all;
 use launcher_core::feedback::{ReportContext, ReportKind};
 use launcher_core::launch::options::game_dir;
 use launcher_core::storage::config::ConfigStore;
@@ -11,6 +12,7 @@ use launcher_core::storage::versions::Build;
 use launcher_shared::{AppError, AppResult, ErrorCode, Level, LoaderKind, Text};
 use serde_json::{Value, json};
 
+use super::icon;
 use super::identity;
 use super::install::install;
 use super::pack::{Pack, find};
@@ -56,14 +58,20 @@ pub async fn home_packs(deps: &Deps, config: &ConfigStore) -> AppResult<Vec<Valu
         .filter_map(identity::pack_id)
         .map(|id| id.to_lowercase())
         .collect();
-    Ok(packs
+    let shown: Vec<Pack> = packs
         .iter()
         .filter_map(Pack::from_value)
         .filter(|pack| !installed.contains(&pack.id.to_lowercase()))
-        .map(|pack| {
+        .collect();
+    // The pictures' versions are asked side by side: a picture replaced on the server shows anew.
+    let images = join_all(shown.iter().map(|pack| icon::current(&deps.api, pack.image.as_deref()))).await;
+    Ok(shown
+        .iter()
+        .zip(images)
+        .map(|(pack, image)| {
             json!({
-                "id": pack.id, "name": pack.name, "description": pack.description, "image": pack.image,
-                "runs": runs(&pack)
+                "id": pack.id, "name": pack.name, "description": pack.description, "image": image,
+                "runs": runs(pack)
             })
         })
         .collect())

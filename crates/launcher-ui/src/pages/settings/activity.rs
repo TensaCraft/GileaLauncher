@@ -58,6 +58,13 @@ pub fn listed(ops: &[OperationDto]) -> Vec<OperationDto> {
     ops.iter().filter(|op| op.visible).cloned().collect()
 }
 
+/// How far the work under way is, all of it: the mean of the operations' own percentages (each
+/// counts its own bytes or steps); `None` while none is measured.
+pub fn overall_percent(ops: &[OperationDto]) -> Option<f64> {
+    let measured: Vec<f64> = ops.iter().filter_map(|op| progress_percent(op.progress, op.total)).collect();
+    (!measured.is_empty()).then(|| measured.iter().sum::<f64>() / measured.len() as f64)
+}
+
 /// The operations listed, as the store has them now.
 pub fn listed_ops(store: AppStore) -> Memo<Vec<OperationDto>> {
     Memo::new(move |_| store.ops.with(|o| listed(&o.operations)))
@@ -189,6 +196,27 @@ mod kind_tests {
         };
         let ids: Vec<u64> = listed(&[op(1, true), op(2, false)]).iter().map(|o| o.id).collect();
         assert_eq!(ids, [1]);
+    }
+
+    #[test]
+    fn the_ring_shows_all_the_work_under_way() {
+        let op = |id: u64, progress: Option<f64>, total: Option<f64>| OperationDto {
+            id,
+            parent_id: None,
+            title: Text::key("x"),
+            kind: "sync".into(),
+            status: None,
+            progress,
+            total,
+            visible: true,
+        };
+        // Two builds synced at once: 37 % and 29 % of their own bytes.
+        let two = [op(1, Some(37.0), Some(100.0)), op(2, Some(290.0), Some(1000.0))];
+        assert_eq!(overall_percent(&two), Some(33.0));
+        let unknown = [op(1, Some(50.0), Some(100.0)), op(2, None, None)];
+        assert_eq!(overall_percent(&unknown), Some(50.0), "one without a total does not count");
+        assert_eq!(overall_percent(&[op(1, None, None)]), None, "nothing measured: the ring spins");
+        assert_eq!(overall_percent(&[]), None);
     }
 }
 

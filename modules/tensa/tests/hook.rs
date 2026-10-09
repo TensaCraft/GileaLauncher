@@ -98,6 +98,24 @@ async fn force_sync_refuses_a_running_build_and_an_unknown_one() {
     assert!(w.server.seen().is_empty());
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_force_sync_names_its_build() {
+    // Two builds synced at once are told apart in the operations.
+    let w = World::start().await;
+    server(&w);
+    let managed = build(&w, CLIENT, true);
+    let _ = force_sync(&w.deps, &managed.key).await;
+    let begun: Vec<Text> = w
+        .deps
+        .feedback
+        .activity(50)
+        .into_iter()
+        .filter(|e| e.event == launcher_shared::ActivityEvent::Begin)
+        .map(|e| e.message)
+        .collect();
+    assert!(begun.contains(&Text::key("tensacraft_force_sync_of").param("version", "Aero")), "{begun:?}");
+}
+
 #[tokio::test]
 async fn force_sync_refuses_a_build_the_server_does_not_manage() {
     let w = World::start().await;

@@ -1,7 +1,9 @@
 //! The server builds' API: the catalog, a build's files and its force-update
 //! manifest. Plain GETs, asked three times before giving up (an address the server refuses, once).
 
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use launcher_core::net::api_client;
 use launcher_shared::branding::{APP_NAME, VERSION};
@@ -18,6 +20,10 @@ const CONNECT: Duration = Duration::from_secs(5);
 const READ: Duration = Duration::from_secs(20);
 const ATTEMPTS: u32 = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
+/// The longest a picture's version is waited for: the picture shows anyway, its old copy at worst.
+const IMAGE_ASK: Duration = Duration::from_secs(4);
+/// How long a picture's version is trusted before it is asked again.
+const IMAGE_KNOWN: Duration = Duration::from_secs(10 * 60);
 
 fn network(e: impl std::fmt::Display) -> AppError {
     AppError::new(ErrorCode::Network, format!("server builds: {e}"))
@@ -53,6 +59,20 @@ pub struct TensaApi {
     client: Client,
     base: String,
     retry_delay: Duration,
+    /// The pictures' versions asked lately, by address.
+    image_versions: Mutex<HashMap<String, (Instant, String)>>,
+}
+
+/// A picture's version from its answer: its `ETag`, else its `Last-Modified`; letters, digits and
+/// dashes only.
+fn version_of(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let said = |name: reqwest::header::HeaderName| {
+        let raw = headers.get(name)?.to_str().ok()?;
+        let tag: String =
+            raw.trim_start_matches("W/").chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+        (!tag.is_empty()).then_some(tag)
+    };
+    said(reqwest::header::ETAG).or_else(|| said(reqwest::header::LAST_MODIFIED))
 }
 
 impl TensaApi {
@@ -61,6 +81,7 @@ impl TensaApi {
             client: api_client(&format!("{APP_NAME}/{VERSION}"), CONNECT, READ)?,
             base: base.trim_end_matches('/').to_string(),
             retry_delay: RETRY_DELAY,
+            image_versions: Mutex::new(HashMap::new()),
         })
     }
 
@@ -108,6 +129,25 @@ impl TensaApi {
             .map(str::trim)
             .filter(|e| !e.is_empty())
             .map_or_else(|| format!("{}/{pack_id}{suffix}", self.base), str::to_string))
+    }
+
+    /// The version of the picture at `url` (`version_of`); `None` when the server does not say or
+    /// does not answer in time. A version asked lately is not asked again.
+    pub async fn image_version(&self, url: &str) -> Option<String> {
+        let versions = || self.image_versions.lock().unwrap_or_else(|e| e.into_inner());
+        let known = versions().get(url).filter(|(at, _)| at.elapsed() < IMAGE_KNOWN).map(|(_, v)| v.clone());
+        if known.is_some() {
+            return known;
+        }
+        let answer = tokio::time::timeout(IMAGE_ASK, self.client.head(url).send()).await;
+        let version = match answer {
+            Ok(Ok(response)) if response.status().is_success() => version_of(response.headers()),
+            _ => None,
+        }?;
+        let mut kept = versions();
+        kept.retain(|_, (at, _)| at.elapsed() < IMAGE_KNOWN);
+        kept.insert(url.to_string(), (Instant::now(), version.clone()));
+        Some(version)
     }
 
     /// The catalog: its entries that are objects.

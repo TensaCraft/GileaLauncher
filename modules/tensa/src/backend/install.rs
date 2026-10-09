@@ -14,6 +14,7 @@ use launcher_core::storage::versions::Build;
 use launcher_shared::{AppError, AppResult, ErrorCode, LoaderKind, Text};
 use serde_json::{Value, json};
 
+use super::icon;
 use super::identity::{CLIENT, mark};
 use super::manifest::{expected_hash, relative_path, size};
 use super::pack::find;
@@ -92,6 +93,7 @@ async fn fill(
     let mut build = Build::new(name);
     build.options.insert("gpuMode".into(), json!((deps.gpu_mode)()));
     let kind = apply_install(&mut build, &pack)?;
+    build.image = icon::current(&deps.api, pack.image.as_deref()).await;
     let minecraft = build.version.clone().unwrap_or_default();
     let spec = match kind {
         LoaderKind::Minecraft => ComponentSpec::vanilla(&minecraft),

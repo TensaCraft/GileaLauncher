@@ -25,7 +25,7 @@ The launcher connects to these services only to do what you ask of it. Each one 
 | Modrinth, CurseForge | Searching and installing mods, resource packs, shaders and modpacks, checking for updates | Your searches, and fingerprints (hashes) of the files in a build when the launcher looks for their updates |
 | GitHub | Checking for and downloading launcher updates | Nothing beyond the request |
 | mc-heads.net, minotar.net, mineskin.eu | The skin heads shown next to your accounts | The player's UUID or name |
-| `gigabait.uk` (TensaCraft edition only) | The TensaCraft servers' builds on Home | Nothing beyond the request |
+| `gigabait.uk` (TensaCraft edition only) | The TensaCraft servers' builds on Home, and their pictures, from the addresses the server gives (the launcher asks whether a picture changed) | Nothing beyond the request |
 
 When you start the game, Minecraft itself talks to Mojang and Microsoft under [their privacy statement](https://privacy.microsoft.com/privacystatement).
 

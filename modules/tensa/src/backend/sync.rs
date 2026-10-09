@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use tokio::time::Instant;
 
 use super::api::TensaApi;
+use super::icon;
 use super::identity::{self, CLIENT, JOURNAL};
 use super::pack::{Pack, find};
 use super::plan::{SyncPlan, listed, planned};
@@ -255,6 +256,8 @@ pub async fn sync(
         target.version = pack.minecraft.clone().or(target.version.take());
     }
     profile::merge(&mut target, &pack, false);
+    keep_a_free_name(deps.versions, build, &mut target);
+    fresh_icon(deps.api, deadline, &pack, build, &mut target).await;
     identity::mark(&mut target, &pack.id);
     if plan.has_changes() {
         op.update(Some(Text::key("syncing_files")), Some(25.0), Some(100.0));
@@ -263,6 +266,46 @@ pub async fn sync(
         deps.versions.save(&mut target)?;
     }
     Ok(if loader_changed || plan.has_changes() { Synced::Updated } else { Synced::Unchanged })
+}
+
+/// The name the server forces on `target` is kept off when another build has it (ignoring case):
+/// two builds of one name could not be told apart.
+fn keep_a_free_name(versions: &VersionStore, build: &Build, target: &mut Build) {
+    if target.name == build.name {
+        return;
+    }
+    let wanted = target.name.to_lowercase();
+    if versions
+        .list()
+        .iter()
+        .any(|other| other.key != build.key && other.name.trim().to_lowercase() == wanted)
+    {
+        target.name = build.name.clone();
+    }
+}
+
+/// The server's icon of `target` with its picture's version in the address: a picture replaced
+/// under the same address shows anew. An icon of the player's own is not touched, nor asked about.
+async fn fresh_icon(
+    api: &TensaApi,
+    deadline: Option<Instant>,
+    pack: &Pack,
+    build: &Build,
+    target: &mut Build,
+) {
+    let Some(server) = pack.image.as_deref().filter(|image| icon::is_address(image)) else { return };
+    let base = icon::unversioned(server);
+    let of_server = |image: Option<&str>| image.is_some_and(|image| icon::unversioned(image) == base);
+    if !of_server(target.image.as_deref()) {
+        return;
+    }
+    let asked = in_time(deadline, async { Ok(api.image_version(server).await) }).await.ok().flatten();
+    match asked {
+        Some(version) => target.image = Some(icon::versioned(server, &version)),
+        // Not known now: the version the build had stays, and is asked again next time.
+        None if of_server(build.image.as_deref()) => target.image = build.image.clone(),
+        None => {}
+    }
 }
 
 /// A sync can run inside a launch step, whose future is sent between threads.

@@ -48,7 +48,7 @@ pub async fn force_sync(deps: &Deps, key: &str) -> AppResult<Synced> {
     }
     let _lease = deps.instances.try_acquire(&game, LEASE)?;
     let op = deps.feedback.begin(
-        OperationSpec::new(Text::key("tensacraft_force_sync"), "sync")
+        OperationSpec::new(Text::key("tensacraft_force_sync_of").param("version", &build.name), "sync")
             .status(Text::key("tensacraft_force_sync_running")),
     );
     let sync_deps = SyncDeps {
@@ -62,11 +62,15 @@ pub async fn force_sync(deps: &Deps, key: &str) -> AppResult<Synced> {
     match sync(&sync_deps, &build, true, &op).await {
         Ok(done) => {
             op.finish();
-            deps.feedback.success(Text::key("tensacraft_force_sync_complete"));
+            deps.feedback.success(Text::key("tensacraft_force_sync_complete").param("version", &build.name));
             Ok(done)
         }
         Err(e) => {
-            op.fail(Text::key("tensacraft_force_sync_failed").param("error", &e.detail));
+            op.fail(
+                Text::key("tensacraft_force_sync_failed")
+                    .param("version", &build.name)
+                    .param("error", &e.detail),
+            );
             Err(e)
         }
     }

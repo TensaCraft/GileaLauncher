@@ -104,3 +104,22 @@ async fn an_address_the_server_refuses_is_asked_once() {
         assert_eq!(server.seen().len(), 2);
     }
 }
+
+#[tokio::test]
+async fn a_picture_s_version_is_its_etag_else_its_date() {
+    let server = Server::start().await;
+    server.reply("/icons/a.png", 200, "png");
+    server.header("/icons/a.png", "etag", "\"6ac89e80-3511\"");
+    server.reply("/icons/b.png", 200, "png");
+    server.header("/icons/b.png", "last-modified", "Fri, 09 Oct 2026 07:57:52 GMT");
+    server.reply("/icons/c.png", 200, "png");
+    let api = api(&server);
+    assert_eq!(api.image_version(&server.url("/icons/a.png")).await.as_deref(), Some("6ac89e80-3511"));
+    let dated = api.image_version(&server.url("/icons/b.png")).await.unwrap();
+    assert!(!dated.is_empty() && dated.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'), "{dated}");
+    assert_eq!(api.image_version(&server.url("/icons/c.png")).await, None, "the server does not say");
+    assert_eq!(api.image_version(&server.url("/missing.png")).await, None);
+    let asked = server.seen().len();
+    api.image_version(&server.url("/icons/a.png")).await;
+    assert_eq!(server.seen().len(), asked, "a version known a moment ago is not asked again");
+}

@@ -6,9 +6,9 @@ use std::rc::Rc;
 use launcher_shared::recent::{Activity, RecentBuild, ServerStatus, parse_motd};
 use launcher_shared::{
     AccountKind, ActivityEntry, ActivityEvent, AppError, AppInfo, AuthState, ClickSound, ErrorCode, Level,
-    LogEntry, LogLevel, LogView, ModuleInfo, OpsSnapshot, PathsInfo, ProfileDto, ProfilesSnapshot,
-    SettingUpdate, SettingsSnapshot, SetupPreview, SetupState, Text, UpdateChannel, UpdateInfo, UpdateState,
-    UpdateStatus, names, sort_profiles,
+    LogEntry, LogLevel, LogView, ModuleInfo, PathsInfo, ProfileDto, ProfilesSnapshot, SettingUpdate,
+    SettingsSnapshot, SetupPreview, SetupState, Text, UpdateChannel, UpdateInfo, UpdateState, UpdateStatus,
+    names, sort_profiles,
 };
 use serde_json::{Value, json};
 use ui_kit::ipc;
@@ -374,7 +374,14 @@ pub fn install() {
         "server_status" => Ok(Value::Null),
         // The launcher plays clicks; the browser preview stays quiet.
         "play_click" => Ok(Value::Null),
-        "ops_snapshot" => to_value(OpsSnapshot::default()),
+        "ops_snapshot" => {
+            // The server builds' mock runs operations (a full sync); without it none runs.
+            #[cfg(feature = "mod-tensa")]
+            let snapshot = crate::mock_ops::snapshot();
+            #[cfg(not(feature = "mod-tensa"))]
+            let snapshot = launcher_shared::OpsSnapshot::default();
+            to_value(snapshot)
+        }
         "activity_recent" => to_value(vec![
             ActivityEntry {
                 seq: 2,

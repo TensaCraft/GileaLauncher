@@ -81,7 +81,12 @@ impl MockTensa {
                 Ok(Value::Null)
             }
             "force_sync" => {
-                toast(Level::Success, Text::key("tensacraft_force_sync_complete"));
+                let key = args["key"].as_str().unwrap_or_default();
+                let name = self.builds.borrow().name_of(key).unwrap_or_else(|| key.to_string());
+                let title = Text::key("tensacraft_force_sync_of").param("version", &name);
+                crate::mock_ops::run(title, "sync", Text::key("syncing_files"), 30, move || {
+                    toast(Level::Success, Text::key("tensacraft_force_sync_complete").param("version", name));
+                });
                 Ok(Value::Null)
             }
             other => Err(AppError::new(ErrorCode::InvalidInput, format!("mock tensa: no {other}"))),

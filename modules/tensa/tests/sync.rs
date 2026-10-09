@@ -131,6 +131,76 @@ async fn an_unchanged_build_downloads_nothing() {
     assert_eq!(downloads(&w), 0);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forced_name_is_taken_unless_another_build_has_it() {
+    let w = World::start().await;
+    catalog(
+        &w,
+        json!({"name": "Aeronautics", "force_update_profile_fields": ["name", "description"],
+                       "description": "The server's own"}),
+    );
+    manifest(&w, &[]);
+    let build = installed(&w);
+    run(&w, &build, false).await.unwrap();
+    let saved = w.deps.versions.get(&build.key).unwrap();
+    assert_eq!((saved.name.as_str(), saved.description.as_str()), ("Aeronautics", "The server's own"));
+
+    let other = World::start().await;
+    catalog(&other, json!({"name": "Aeronautics", "force_update_profile_fields": ["name"]}));
+    manifest(&other, &[]);
+    let mut mine = Build::new("aeronautics");
+    other.deps.versions.create(&mut mine).unwrap();
+    let build = installed(&other);
+    run(&other, &build, false).await.unwrap();
+    assert_eq!(other.deps.versions.get(&build.key).unwrap().name, "Aero", "the name is another build's");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_server_s_icon_carries_its_version_so_a_new_picture_shows() {
+    let w = World::start().await;
+    let icon = w.server.url("/icons/aero.png");
+    w.server.reply("/icons/aero.png", 200, "png");
+    w.server.header("/icons/aero.png", "etag", "\"aaa-1\"");
+    catalog(&w, json!({"image": icon, "force_update_profile_fields": ["image"]}));
+    manifest(&w, &[]);
+    let build = installed(&w);
+    run(&w, &build, false).await.unwrap();
+    let first = w.deps.versions.get(&build.key).unwrap();
+    assert_eq!(first.image, Some(format!("{icon}?iv=aaa-1")));
+    assert_eq!(run(&w, &first, false).await.unwrap(), Synced::Unchanged, "the same picture changes nothing");
+
+    // The picture is replaced under the same address: the build's address changes with it.
+    let fresh = World::start().await;
+    let icon = fresh.server.url("/icons/aero.png");
+    fresh.server.reply("/icons/aero.png", 200, "png");
+    fresh.server.header("/icons/aero.png", "etag", "\"bbb-2\"");
+    catalog(&fresh, json!({"image": icon, "force_update_profile_fields": ["image"]}));
+    manifest(&fresh, &[]);
+    let mut build = installed(&fresh);
+    build.image = Some(format!("{icon}?iv=aaa-1"));
+    fresh.deps.versions.save(&mut build).unwrap();
+    run(&fresh, &build, false).await.unwrap();
+    assert_eq!(fresh.deps.versions.get(&build.key).unwrap().image, Some(format!("{icon}?iv=bbb-2")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_icon_of_the_player_s_own_is_kept_and_not_asked_about() {
+    let w = World::start().await;
+    let icon = w.server.url("/icons/aero.png");
+    w.server.reply("/icons/aero.png", 200, "png");
+    catalog(&w, json!({"image": icon}));
+    manifest(&w, &[]);
+    let mut build = installed(&w);
+    build.image = Some("iVBORw0KGgoAAA".into());
+    w.deps.versions.save(&mut build).unwrap();
+    run(&w, &build, false).await.unwrap();
+    assert_eq!(w.deps.versions.get(&build.key).unwrap().image.as_deref(), Some("iVBORw0KGgoAAA"));
+    assert!(
+        !w.server.seen().iter().any(|path| path.starts_with("/icons/")),
+        "the server's picture is not asked"
+    );
+}
+
 #[tokio::test]
 async fn a_new_loader_is_installed_and_named_in_the_build() {
     let w = World::start().await;

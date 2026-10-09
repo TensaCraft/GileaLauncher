@@ -79,6 +79,20 @@ async fn a_server_build_is_installed_as_a_new_build() {
 }
 
 #[tokio::test]
+async fn an_installed_build_s_icon_carries_its_picture_s_version() {
+    let w = World::start().await;
+    let icon = w.server.url("/icons/aero.png");
+    w.server.reply("/icons/aero.png", 200, "png");
+    w.server.header("/icons/aero.png", "etag", "\"aaa-1\"");
+    let mut client = aero(&w);
+    client["image"] = json!(icon);
+    w.catalog(client);
+    files(&w, json!([]));
+    let build = install(&w.deps, "aero", "Aero").await.unwrap();
+    assert_eq!(build.image, Some(format!("{icon}?iv=aaa-1")));
+}
+
+#[tokio::test]
 async fn a_failed_install_leaves_no_build_and_no_folder() {
     let w = World::start().await;
     w.catalog(aero(&w));

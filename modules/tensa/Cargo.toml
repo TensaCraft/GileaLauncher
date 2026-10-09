@@ -5,13 +5,14 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-backend = ["dep:launcher-core", "dep:reqwest", "dep:tokio", "dep:tracing"]
+backend = ["dep:launcher-core", "dep:reqwest", "dep:tokio", "dep:tracing", "dep:futures-util"]
 ui = ["dep:ui-kit", "dep:leptos", "dep:serde"]
 
 [dependencies]
 launcher-shared.workspace = true
 serde_json.workspace = true
 launcher-core = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
