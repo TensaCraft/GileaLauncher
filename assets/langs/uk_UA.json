@@ -417,7 +417,7 @@
   "modpack_installing": "Встановлення modpack {name}",
   "modpack_updating": "Оновлення модпака {name}",
   "modpack_updated": "Модпак {name} оновлено до {version}",
-  "modpack_updated_backups": "Модпак {name} оновлено до {version}. Змінені вами файли, які пак теж оновив ({count}), збережено в теці збірки: {folder}",
+  "modpack_updated_backups": "Модпак {name} оновлено до {version}. Змінені вами файли, які пак теж оновив ({count}), збережено в теці бекапів: {folder}",
   "modpack_update_to": "Оновити модпак до {version}",
   "modpack_update_title": "Оновити модпак {name}?",
   "modpack_update_note": "Файли модпака буде замінено вибраною версією. Ваші моди, світи й налаштування поза модпаком залишаться.",

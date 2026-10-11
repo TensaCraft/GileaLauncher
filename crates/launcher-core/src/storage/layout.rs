@@ -39,22 +39,28 @@ fn name_of(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// `dir` is a build's folder of world backups as the backups module writes them: a world's folder
-/// holding a zip's metadata. A folder the player keeps something else in is not one.
-fn holds_world_backups(dir: &Path) -> bool {
-    folders(dir).iter().any(|world| {
-        fs::read_dir(world).into_iter().flatten().flatten().any(|file| {
-            name_of(&file.path()).ends_with(".zip.json")
-                && fs::read(file.path())
-                    .ok()
-                    .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
-                    .is_some_and(|meta| meta.get("world_folder").is_some())
-        })
+/// `world` is a world's folder of backups as the backups module writes them: it holds a zip's
+/// metadata. A folder the player keeps something else in is not one.
+fn holds_backups(world: &Path) -> bool {
+    fs::read_dir(world).into_iter().flatten().flatten().any(|file| {
+        name_of(&file.path()).ends_with(".zip.json")
+            && fs::read(file.path())
+                .ok()
+                .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+                .is_some_and(|meta| meta.get("world_folder").is_some())
     })
 }
 
+/// `dir` is a build's folder of world backups in the old layout: a world's folder in it holds
+/// backups.
+fn holds_world_backups(dir: &Path) -> bool {
+    folders(dir).iter().any(|world| holds_backups(world))
+}
+
 /// Moves the worlds in `from` into `to` (a build's `worlds/`): the whole folder when `to` is not
-/// there yet, else each world `to` lacks (what an interrupted move left). How many worlds moved.
+/// there yet, else each world `to` lacks, and into a world `to` has (backups made since the move
+/// began) each file it lacks. A file the new place has under the same name stays. How many worlds
+/// moved.
 fn move_worlds(from: &Path, to: &Path) -> AppResult<usize> {
     let worlds = folders(from);
     if !to.exists() {
@@ -69,7 +75,18 @@ fn move_worlds(from: &Path, to: &Path) -> AppResult<usize> {
         if !dest.exists() {
             rename_retrying(&world, &dest).map_err(|e| io_error(&world, e))?;
             moved += 1;
+            continue;
         }
+        let mut joined = false;
+        for file in fs::read_dir(&world).into_iter().flatten().flatten() {
+            let (path, target) = (file.path(), dest.join(file.file_name()));
+            if !target.exists() {
+                rename_retrying(&path, &target).map_err(|e| io_error(&path, e))?;
+                joined = true;
+            }
+        }
+        let _ = fs::remove_dir(&world);
+        moved += usize::from(joined);
     }
     let _ = fs::remove_dir(from);
     Ok(moved)
@@ -108,7 +125,9 @@ fn remove_any(path: &Path) -> io::Result<()> {
 }
 
 /// Moves `from` (a file or a folder) to `to`, its folder made first: a rename, or across drives
-/// a copy, with `from` removed only once the copy is whole (a copy cut short is removed instead).
+/// a copy into `<to>.layout-part` renamed into place once whole, then `from` removed. `to` is never
+/// a copy cut short, even when the launcher closes halfway: what it left is the part, removed
+/// before the next try.
 pub fn move_dir(from: &Path, to: &Path) -> io::Result<()> {
     move_with(from, to, &rename_retrying, &copy_all)
 }
@@ -119,10 +138,16 @@ fn move_with(from: &Path, to: &Path, rename: &Step, copy: &Step) -> io::Result<(
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent)?;
     }
+    let mut part = to.file_name().unwrap_or_default().to_os_string();
+    part.push(".layout-part");
+    let part = to.with_file_name(part);
+    if fs::symlink_metadata(&part).is_ok() {
+        remove_any(&part)?;
+    }
     match rename(from, to) {
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
-            if let Err(e) = copy(from, to) {
-                let _ = remove_any(to);
+            if let Err(e) = copy(from, &part).and_then(|()| rename_retrying(&part, to)) {
+                let _ = remove_any(&part);
                 return Err(e);
             }
             remove_any(from)
@@ -271,7 +296,8 @@ pub fn move_service_files(game: &Path) -> AppResult<usize> {
 /// World backups from `<old root>/<build>/<world>/` to `<root>/<build>/worlds/<world>/`, once.
 /// With the default folder (or the old default the wizard saved) they leave
 /// `<minecraft>/backups/worlds` for `<minecraft>/backups`; a folder of the player's own keeps its
-/// place. Only builds' folders of world backups move. How many worlds moved.
+/// place. Only builds' folders of world backups move. A folder that is not there (its drive is
+/// away) is not done with: the next start tries again. How many worlds moved.
 pub fn move_world_backups(config: &ConfigStore, mc_dir: &Path) -> AppResult<usize> {
     if config.get(LAYOUT_KEY).and_then(|v| v.as_u64()).is_some_and(|n| n >= LAYOUT) {
         return Ok(0);
@@ -283,21 +309,45 @@ pub fn move_world_backups(config: &ConfigStore, mc_dir: &Path) -> AppResult<usiz
     match setting {
         Some(custom) if !names_old_default => {
             let root = PathBuf::from(custom);
-            // A build's folder moves aside first: one of its worlds may be named `worlds`.
+            match fs::read_dir(&root) {
+                // On a drive that is away: its backups move once it is back.
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+                Err(e) => return Err(io_error(&root, e)),
+                Ok(_) => {}
+            }
+            // A build's old worlds move aside first, their files only: one of them may be named
+            // `worlds`, and the build's folder may hold its new folders already.
             for build in folders(&root) {
                 let name = name_of(&build);
-                if name.starts_with('.') || !holds_world_backups(&build) {
+                if name.starts_with('.') {
                     continue;
                 }
                 let aside = root.join(format!("{MOVING}{name}"));
-                rename_retrying(&build, &aside).map_err(|e| io_error(&build, e))?;
+                for world in folders(&build).into_iter().filter(|world| holds_backups(world)) {
+                    let to = aside.join(name_of(&world));
+                    fs::create_dir_all(&to).map_err(|e| io_error(&to, e))?;
+                    for file in fs::read_dir(&world).into_iter().flatten().flatten() {
+                        let (path, target) = (file.path(), to.join(file.file_name()));
+                        if file.file_type().is_ok_and(|t| t.is_file()) && !target.exists() {
+                            rename_retrying(&path, &target).map_err(|e| io_error(&path, e))?;
+                        }
+                    }
+                    let _ = fs::remove_dir(&world);
+                }
             }
             for aside in folders(&root) {
                 let Some(name) = name_of(&aside).strip_prefix(MOVING).map(str::to_string) else { continue };
                 moved += move_worlds(&aside, &root.join(name).join("worlds"))?;
             }
+            if folders(&root).iter().any(|f| name_of(f).starts_with(MOVING)) {
+                // A backup the new place has under its name: it stays, and the next start tries again.
+                return Ok(moved);
+            }
         }
         _ => {
+            if !mc_dir.is_dir() {
+                return Ok(0);
+            }
             let (root, old) = (default_root(mc_dir), old_default(mc_dir));
             let waiting = root.join(OLD_WORLDS);
             if old.is_dir() {
@@ -320,13 +370,18 @@ pub fn move_world_backups(config: &ConfigStore, mc_dir: &Path) -> AppResult<usiz
                     moved += move_worlds(&build, &root.join(name_of(&build)).join("worlds"))?;
                 }
             }
-            // What is not a build's backups goes back where it was.
+            let unfinished = folders(&waiting).iter().any(|build| holds_world_backups(build));
+            // What is not a build's backups goes back where it was, and so does a backup the new
+            // place has under its name: the next start tries again.
             let left: Vec<PathBuf> =
                 fs::read_dir(&waiting).into_iter().flatten().flatten().map(|e| e.path()).collect();
             put_back(&left, &old)?;
             let _ = fs::remove_dir(&waiting);
             if names_old_default {
                 config.delete(DIR_KEY).map_err(|e| io_error(&root, e))?;
+            }
+            if unfinished {
+                return Ok(moved);
             }
         }
     }
@@ -501,6 +556,31 @@ mod tests {
     }
 
     #[test]
+    fn a_copy_the_launcher_closed_on_is_never_taken_for_a_whole_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        let update = game.join(".launcher/pack-backups/1");
+        fs::create_dir_all(update.join("config")).unwrap();
+        fs::write(update.join("config/a.toml"), b"mine").unwrap();
+        fs::write(update.join("config/b.toml"), b"mine too").unwrap();
+        let to = tmp.path().join("d/aero/modpacks");
+        let elsewhere = |_: &Path, _: &Path| Err(io::Error::from(io::ErrorKind::CrossesDevices));
+        // The launcher closes halfway through the copy: nothing after it runs.
+        let closed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            move_with(&update, &to.join("1"), &elsewhere, &|from: &Path, to: &Path| {
+                fs::create_dir_all(to.join("config"))?;
+                fs::copy(from.join("config/a.toml"), to.join("config/a.toml"))?;
+                panic!("the launcher closes");
+            })
+        }));
+        assert!(closed.is_err());
+        assert!(!to.join("1").exists(), "a copy cut short is not in the backup's place");
+        assert_eq!(move_pack_backups(&game, &to).unwrap(), 1, "the next start moves it again");
+        assert_eq!(fs::read(to.join("1/config/b.toml")).unwrap(), b"mine too");
+        assert!(fs::read_dir(&to).unwrap().count() == 1, "no part of the copy is left");
+    }
+
+    #[test]
     fn a_busy_build_is_skipped_and_moved_next_time() {
         let (tmp, mc, config) = setup();
         let versions = VersionStore::open(&tmp.path().join("state"), &mc);
@@ -555,6 +635,111 @@ mod tests {
         );
         assert!(
             legacy.join("sodium.jar.backup").is_file() && old_default(&mc).join("aero/World/a.zip").is_file()
+        );
+    }
+
+    #[test]
+    fn backups_on_a_drive_that_is_away_move_once_it_is_back() {
+        let (tmp, mc, config) = setup();
+        let custom = tmp.path().join("Drive D").join("Бекапи");
+        config.set(DIR_KEY, json!(custom.to_string_lossy())).unwrap();
+        assert_eq!(move_world_backups(&config, &mc).unwrap(), 0);
+        assert!(!config.contains(LAYOUT_KEY), "a folder that is not there is not done with");
+        backup(&custom, "aero", "World");
+        assert_eq!(move_world_backups(&config, &mc).unwrap(), 1);
+        assert!(custom.join("aero/worlds/World/a.zip").is_file());
+        assert!(config.contains(LAYOUT_KEY));
+        config.delete(LAYOUT_KEY).unwrap();
+        config.delete(DIR_KEY).unwrap();
+        let away = tmp.path().join("away/minecraft");
+        assert_eq!(move_world_backups(&config, &away).unwrap(), 0);
+        assert!(!config.contains(LAYOUT_KEY), "nor is a Minecraft folder that is not there");
+    }
+
+    /// A backup made since the move began: `<root>/<build>/worlds/<world>/<zip>`.
+    fn new_backup(root: &Path, build: &str, world: &str, zip: &str, body: &[u8]) {
+        let folder = root.join(build).join("worlds").join(world);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join(zip), body).unwrap();
+        let meta =
+            json!({"schema": 1, "kind": "auto", "version_id": build, "world_folder": world, "zip_name": zip});
+        fs::write(folder.join(format!("{zip}.json")), meta.to_string()).unwrap();
+    }
+
+    #[test]
+    fn a_world_s_old_backups_join_the_ones_made_since() {
+        let (_tmp, mc, config) = setup();
+        backup(&old_default(&mc), "aero", "World");
+        new_backup(&default_root(&mc), "aero", "World", "b.zip", b"new");
+        assert_eq!(move_world_backups(&config, &mc).unwrap(), 1);
+        let world = default_root(&mc).join("aero/worlds/World");
+        assert!(
+            world.join("a.zip").is_file()
+                && world.join("a.zip.json").is_file()
+                && world.join("b.zip").is_file()
+        );
+        assert!(!old_default(&mc).join("aero").exists());
+        assert!(config.contains(LAYOUT_KEY));
+    }
+
+    #[test]
+    fn in_a_custom_root_old_worlds_join_a_build_s_new_folders() {
+        let (tmp, mc, config) = setup();
+        let custom = tmp.path().join("Мої бекапи");
+        config.set(DIR_KEY, json!(custom.to_string_lossy())).unwrap();
+        backup(&custom, "aero", "World");
+        new_backup(&custom, "aero", "Other", "b.zip", b"new");
+        fs::create_dir_all(custom.join("aero/mods")).unwrap();
+        fs::write(custom.join("aero/mods/sodium.jar.backup"), b"old").unwrap();
+        backup(&custom, "zeta", "worlds");
+        backup(&custom, "zeta", "mods");
+        assert_eq!(move_world_backups(&config, &mc).unwrap(), 3);
+        assert!(
+            custom.join("aero/worlds/World/a.zip").is_file()
+                && custom.join("aero/worlds/Other/b.zip").is_file()
+        );
+        assert!(
+            custom.join("aero/mods/sodium.jar.backup").is_file(),
+            "a build's other backups stay in place"
+        );
+        assert!(!custom.join("aero/worlds/worlds").exists() && !custom.join("aero/worlds/mods").exists());
+        assert!(
+            custom.join("zeta/worlds/worlds/a.zip").is_file()
+                && custom.join("zeta/worlds/mods/a.zip").is_file()
+        );
+        assert!(!custom.join("zeta/mods").exists());
+        assert!(config.contains(LAYOUT_KEY));
+    }
+
+    #[test]
+    fn a_backup_left_behind_keeps_the_move_going() {
+        let (_tmp, mc, config) = setup();
+        backup(&old_default(&mc), "aero", "World");
+        new_backup(&default_root(&mc), "aero", "World", "a.zip", b"another");
+        move_world_backups(&config, &mc).unwrap();
+        assert_eq!(
+            fs::read(old_default(&mc).join("aero/World/a.zip")).unwrap(),
+            b"zip",
+            "it stays where it was"
+        );
+        assert_eq!(fs::read(default_root(&mc).join("aero/worlds/World/a.zip")).unwrap(), b"another");
+        assert!(!config.contains(LAYOUT_KEY), "the next start tries again");
+    }
+
+    #[test]
+    fn an_unfinished_old_journal_stays_beside_a_new_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        fs::create_dir_all(game.join(".launcher/journal")).unwrap();
+        let applying =
+            json!({"schema_version": 2, "status": "applying", "transaction_id": "ab", "entries": []});
+        fs::write(game.join(".launcher-modrinth-sync.json"), applying.to_string()).unwrap();
+        let done = json!({"schema_version": 2, "status": "complete", "entries": []});
+        fs::write(game.join(".launcher/journal/modrinth-content.json"), done.to_string()).unwrap();
+        move_service_files(&game).unwrap();
+        assert!(
+            game.join(".launcher-modrinth-sync.json").is_file(),
+            "its change is undone where it is first"
         );
     }
 

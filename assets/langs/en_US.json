@@ -417,7 +417,7 @@
   "modpack_installing": "Installing modpack {name}",
   "modpack_updating": "Updating modpack {name}",
   "modpack_updated": "Modpack {name} updated to {version}",
-  "modpack_updated_backups": "Modpack {name} updated to {version}. Files you changed that the pack updated too ({count}) were saved in the build folder: {folder}",
+  "modpack_updated_backups": "Modpack {name} updated to {version}. Files you changed that the pack updated too ({count}) were saved in the backups folder: {folder}",
   "modpack_update_to": "Update the modpack to {version}",
   "modpack_update_title": "Update modpack {name}?",
   "modpack_update_note": "The modpack's files are replaced with the chosen version. Your mods, worlds and settings outside the modpack stay.",

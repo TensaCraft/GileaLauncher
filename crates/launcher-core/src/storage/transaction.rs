@@ -505,6 +505,25 @@ mod tests {
     }
 
     #[test]
+    fn an_unfinished_old_journal_beside_a_finished_new_one_is_undone_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let id = "0123456789abcdef0123456789abcdef";
+        put(root, &format!("{LEGACY_WORK_DIR}/{id}/backup/mods/a.jar"), b"old");
+        put(root, "mods/a.jar", b"half-applied");
+        let applying = json!({"schema_version": 2, "status": "applying", "transaction_id": id, "entries": [
+            {"path": "mods/a.jar", "kind": "replace", "state": "applied", "had_original": true}]});
+        fs::write(root.join(SYNC_JOURNAL.legacy), applying.to_string()).unwrap();
+        let done = json!({"schema_version": 2, "status": "complete",
+            "transaction_id": "fedcba9876543210fedcba9876543210", "entries": []});
+        put(root, &format!(".launcher/journal/{}", SYNC_JOURNAL.file), done.to_string().as_bytes());
+        let tx = FileTransaction::begin(root, SYNC_JOURNAL, plan(&["mods/a.jar"], &[]), None).unwrap();
+        assert_eq!(fs::read(root.join("mods/a.jar")).unwrap(), b"old", "the old change is undone");
+        assert!(!root.join(LEGACY_WORK_DIR).join(id).exists());
+        assert!(tx.stage_path("mods/a.jar").unwrap().starts_with(root.join(".launcher").join("work")));
+    }
+
+    #[test]
     fn a_finished_old_journal_does_not_hold_back_a_new_change() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

@@ -186,11 +186,11 @@ fn unfinished(path: &Path) -> bool {
 }
 
 impl SyncJournal {
-    /// Journal `name` of the build in `root`: in the service folder, unless only its old file is
-    /// there with a change not over yet (it is finished where it was).
+    /// Journal `name` of the build in `root`: in the service folder, unless its old file is there
+    /// with a change not over yet (it is finished where it was first, whatever the new one says).
     pub fn new(root: &Path, name: JournalName) -> SyncJournal {
         let (fresh, legacy) = (root.join(JOURNAL_DIR).join(name.file), root.join(name.legacy));
-        if !fresh.exists() && legacy.exists() && unfinished(&legacy) {
+        if legacy.exists() && unfinished(&legacy) {
             return SyncJournal::found(root, legacy);
         }
         SyncJournal::found(root, fresh)
