@@ -782,3 +782,17 @@ impl ContentProvider for CurseForgeService {
         Box::pin(async move { self.update_pack(&args).await })
     }
 }
+
+#[cfg(test)]
+mod journal_tests {
+    use launcher_core::storage::journal::KNOWN_JOURNALS;
+
+    use super::*;
+
+    /// The launcher moves the journals it knows from builds' roots: this one must be among them.
+    #[test]
+    fn the_journal_is_one_the_launcher_moves() {
+        assert!(KNOWN_JOURNALS.contains(&JOURNAL), "JOURNAL");
+        assert!(KNOWN_JOURNALS.contains(&PACK_JOURNAL), "PACK_JOURNAL");
+    }
+}

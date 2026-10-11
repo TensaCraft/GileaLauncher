@@ -1,7 +1,6 @@
 //! What the server lists for a build: its files and folders, read safely, the
 //! force-update manifest checked whole, and the rules that keep a player's own files.
 
-use launcher_core::content::backups::BACKUPS;
 use launcher_core::net::downloader::ExpectedHash;
 use launcher_core::storage::journal::normalized_path;
 use launcher_core::storage::versions::reserved_in_build;
@@ -10,12 +9,10 @@ use serde_json::Value;
 
 use super::pack::truthy;
 
-/// A file or folder the launcher keeps in a build: the build's record, everything `.launcher…`,
-/// and the mods a replacement took away (`mods/.backups`). A server never writes or removes them.
+/// A file or folder the launcher keeps in a build (`reserved_in_build`). A server never writes or
+/// removes them.
 pub fn launchers_own(path: &str) -> bool {
-    let lower = path.to_lowercase();
-    let backups = format!("mods/{BACKUPS}");
-    reserved_in_build(path) || lower == backups || lower.starts_with(&format!("{backups}/"))
+    reserved_in_build(path)
 }
 
 /// A path from the server as a path inside the build: `\` becomes `/`, a leading `/` goes; a drive

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
 use launcher_core::launch::process::{
-    GameCommand, GameProcess, LAUNCH_LOG, Spawner, SystemSpawner, crash_artifact, log_tail,
+    GameCommand, GameProcess, Spawner, SystemSpawner, crash_artifact, launch_log, log_tail,
     prepare_launch_log,
 };
 use serde_json::{Value, json};
@@ -35,7 +35,7 @@ fn the_game_runs_in_its_folder_with_output_in_the_launch_log() {
     let game = dir.path().join("games").join("aero");
     fs::create_dir_all(&game).unwrap();
     let log = prepare_launch_log(&game, "fabric-loader-0.16.5-1.21.1", "1.21.1").unwrap();
-    assert_eq!(log, game.join("logs").join(LAUNCH_LOG));
+    assert_eq!(log, launch_log(&game));
     let env = vec![
         ("DRI_PRIME".to_string(), "1".to_string()),
         ("JAVA_TOOL_OPTIONS".to_string(), "-Xmx1M".to_string()),
@@ -127,7 +127,8 @@ fn the_crash_artifact_is_the_freshest_explanation() {
     assert_eq!(crash_artifact(game, launched), None);
     fs::create_dir_all(game.join("logs")).unwrap();
     fs::create_dir_all(game.join("crash-reports")).unwrap();
-    let launch_log = game.join("logs").join(LAUNCH_LOG);
+    let launch_log = launch_log(game);
+    fs::create_dir_all(launch_log.parent().unwrap()).unwrap();
     fs::write(&launch_log, "header").unwrap();
     assert_eq!(crash_artifact(game, launched), Some(launch_log.clone()));
     let latest = game.join("logs").join("latest.log");

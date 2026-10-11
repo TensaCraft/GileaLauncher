@@ -153,7 +153,7 @@ fn inferred_scopes(entries: &[Entry<'_>]) -> BTreeSet<String> {
 
 /// The launcher's note, in the build, of the hashes it read of the managed files: a file whose
 /// size and time stay is not hashed again (each launch would read gigabytes).
-pub const CHECKED: &str = ".launcher-tensa-checked.json";
+pub const CHECKED: &str = ".launcher/tensa-checked.json";
 
 /// The hashes noted before (`known`) and those of this plan (`seen`), by path.
 struct Checked {
@@ -207,7 +207,12 @@ impl Checked {
             return;
         }
         let note = json!({"files": self.seen});
-        if let Err(e) = atomic_write(&self.path, note.to_string().as_bytes()) {
+        let written = self
+            .path
+            .parent()
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| atomic_write(&self.path, note.to_string().as_bytes()));
+        if let Err(e) = written {
             tracing::debug!("No note of the hashes read in {}: {e}", self.path.display());
         }
     }

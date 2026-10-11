@@ -21,6 +21,16 @@ pub struct JournalName {
     pub legacy: &'static str,
 }
 
+/// Every module's journal, for moving the old ones to the service folder (`storage::layout`).
+/// A module's test checks its own journal is here.
+pub const KNOWN_JOURNALS: [JournalName; 5] = [
+    JournalName { file: "modrinth-content.json", legacy: ".launcher-modrinth-sync.json" },
+    JournalName { file: "curseforge-content.json", legacy: ".launcher-curseforge-sync.json" },
+    JournalName { file: "modrinth-pack.json", legacy: ".launcher-pack-sync.json" },
+    JournalName { file: "curseforge-pack.json", legacy: ".launcher-curseforge-pack-sync.json" },
+    JournalName { file: "tensa.json", legacy: ".launcher-tensa-sync.json" },
+];
+
 /// Where a build's journals live, in its service folder.
 pub const JOURNAL_DIR: &str = ".launcher/journal";
 /// The default journal (tests use it).

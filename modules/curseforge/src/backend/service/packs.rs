@@ -33,7 +33,7 @@ use crate::types::MODPACKS_CLASS;
 pub const PACK_JOURNAL: JournalName =
     JournalName { file: "curseforge-pack.json", legacy: ".launcher-curseforge-pack-sync.json" };
 /// Where a pack's zip is downloaded to while it is read.
-const PACK_ARCHIVE: &str = ".launcher-curseforge-pack.zip";
+const PACK_ARCHIVE: &str = ".launcher/modpack.zip";
 
 /// CurseForge's modpack builds, as the core's pack engine tells them apart.
 pub const PACKS: PackKind = PackKind {
@@ -118,6 +118,9 @@ fn forget_old_packs(dir: &Path, wanted: &Path) {
 
 /// Moves `from` to `to`, by a copy when they are on different drives.
 fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if let Some(folder) = to.parent() {
+        fs::create_dir_all(folder)?;
+    }
     if rename_retrying(from, to).is_ok() {
         return Ok(());
     }

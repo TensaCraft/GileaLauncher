@@ -276,6 +276,7 @@
   "open_version_folder": "Open build folder",
   "open_version_logs": "Open logs folder",
   "open_latest_log": "Open latest.log",
+  "open_launch_log": "Launch log",
   "open_crash_report": "Open crash report",
   "open_crash_reports": "Open crash reports",
   "open_latest_crash": "Open latest crash",

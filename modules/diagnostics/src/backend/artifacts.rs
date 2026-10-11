@@ -1,5 +1,5 @@
 //! The files a crash leaves: the newest crash report, `latest.log`, the
-//! launcher's `logs/launch.log` and the newest `hs_err_*.log` — only those written since the
+//! launcher's launch log (`.launcher/launch.log`) and the newest `hs_err_*.log` — only those written since the
 //! launch — each read whole up to 4 MiB, else as its head and tail.
 
 use std::collections::HashSet;
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::Case;
-use launcher_core::launch::process::{FRESHNESS, LAUNCH_LOG};
+use launcher_core::launch::process::{FRESHNESS, launch_log};
 
 /// What is read of one file at most.
 pub const ARTIFACT_LIMIT: u64 = 4 * 1024 * 1024;
@@ -30,7 +30,7 @@ pub fn fresh_files(game_dir: &Path, launched_at: SystemTime) -> Vec<PathBuf> {
     let candidates = [
         newest(&game_dir.join("crash-reports"), ""),
         Some(game_dir.join("logs").join("latest.log")).filter(|p| fresh(p)),
-        Some(game_dir.join("logs").join(LAUNCH_LOG)).filter(|p| fresh(p)),
+        Some(launch_log(game_dir)).filter(|p| fresh(p)),
         newest(game_dir, "hs_err_"),
     ];
     let mut seen = HashSet::new();
@@ -113,7 +113,9 @@ mod tests {
             fs::OpenOptions::new().write(true).open(path).unwrap().set_modified(at).unwrap();
         };
         stamp(&old, launched - Duration::from_secs(60));
-        for name in ["crash-reports/crash-new.txt", "logs/latest.log", "logs/launch.log", "hs_err_pid42.log"]
+        fs::create_dir_all(game.join(".launcher")).unwrap();
+        for name in
+            ["crash-reports/crash-new.txt", "logs/latest.log", ".launcher/launch.log", "hs_err_pid42.log"]
         {
             fs::write(game.join(name), name).unwrap();
             stamp(&game.join(name), launched);

@@ -9,9 +9,11 @@ use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde_json::{Value, json};
 
 use crate::backups::{DIR_KEY, LAYOUT_KEY, default_root, old_default};
+use crate::launch::process::{LAUNCH_LOG, launch_log};
 use crate::lock::path_key;
 use crate::storage::atomic::rename_retrying;
 use crate::storage::config::ConfigStore;
+use crate::storage::journal::{JOURNAL_DIR, KNOWN_JOURNALS, LEGACY_WORK_DIR, SyncJournal};
 
 /// The layout `LAYOUT_KEY` names once every world backup sits in its build's `worlds/`.
 const LAYOUT: u64 = 2;
@@ -159,6 +161,36 @@ pub fn move_pack_backups(game: &Path, to: &Path) -> AppResult<usize> {
         }
     }
     let _ = fs::remove_dir(&legacy);
+    Ok(moved)
+}
+
+/// The launcher's files the version before kept in a build's root move into its service folder:
+/// finished journals (by their new names), the server build's note, and the launch log; an empty
+/// old work folder goes. A journal whose change is not over stays: it is finished where it is first.
+/// How many moved.
+pub fn move_service_files(game: &Path) -> AppResult<usize> {
+    let service = game.join(".launcher");
+    let mut moves: Vec<(PathBuf, PathBuf)> = KNOWN_JOURNALS
+        .iter()
+        .filter(|name| SyncJournal::new(game, **name).path() != game.join(name.legacy))
+        .map(|name| (game.join(name.legacy), game.join(JOURNAL_DIR).join(name.file)))
+        .collect();
+    moves.push((game.join(".launcher-tensa-checked.json"), service.join("tensa-checked.json")));
+    moves.push((game.join("logs").join(LAUNCH_LOG), launch_log(game)));
+    let mut moved = 0;
+    for (from, to) in moves {
+        if !from.is_file() {
+            continue;
+        }
+        if to.exists() {
+            // The new place has a newer one.
+            fs::remove_file(&from).map_err(|e| io_error(&from, e))?;
+        } else {
+            move_dir(&from, &to).map_err(|e| io_error(&from, e))?;
+            moved += 1;
+        }
+    }
+    let _ = fs::remove_dir(game.join(LEGACY_WORK_DIR));
     Ok(moved)
 }
 
@@ -339,6 +371,38 @@ mod tests {
         assert_eq!(fs::read(to.join("2026-10-01_10-00-00/config/a.toml")).unwrap(), b"mine");
         assert!(!game.join(".launcher/pack-backups").exists());
         assert!(game.join(".launcher/modrinth-pack.json").is_file(), "the pack's note stays");
+    }
+
+    #[test]
+    fn service_files_move_and_unfinished_journals_stay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        fs::create_dir_all(game.join("logs")).unwrap();
+        let done = json!({"schema_version": 2, "status": "complete", "operation": "tensacraft_sync"});
+        fs::write(game.join(".launcher-tensa-sync.json"), done.to_string()).unwrap();
+        let applying =
+            json!({"schema_version": 2, "status": "applying", "transaction_id": "ab", "entries": []});
+        fs::write(game.join(".launcher-modrinth-sync.json"), applying.to_string()).unwrap();
+        fs::write(game.join(".launcher-tensa-checked.json"), b"{\"files\":{}}").unwrap();
+        fs::write(game.join("logs/launch.log"), b"started").unwrap();
+        fs::write(game.join("logs/latest.log"), b"the game's").unwrap();
+        fs::create_dir_all(game.join(".launcher-sync")).unwrap();
+        assert_eq!(move_service_files(&game).unwrap(), 3);
+        let service = game.join(".launcher");
+        assert!(
+            service.join("journal/tensa.json").is_file() && !game.join(".launcher-tensa-sync.json").exists()
+        );
+        assert!(
+            game.join(".launcher-modrinth-sync.json").is_file(),
+            "an unfinished change is finished where it is"
+        );
+        assert!(
+            service.join("tensa-checked.json").is_file()
+                && !game.join(".launcher-tensa-checked.json").exists()
+        );
+        assert!(service.join("launch.log").is_file() && !game.join("logs/launch.log").exists());
+        assert!(game.join("logs/latest.log").is_file());
+        assert!(!game.join(".launcher-sync").exists(), "an empty old work folder goes");
     }
 
     #[test]

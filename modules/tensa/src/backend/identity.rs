@@ -176,3 +176,16 @@ mod tests {
         assert!(!is_managed(&b, dir.path()), "a blank pack id is none");
     }
 }
+
+#[cfg(test)]
+mod journal_tests {
+    use launcher_core::storage::journal::KNOWN_JOURNALS;
+
+    use super::*;
+
+    /// The launcher moves the journals it knows from builds' roots: this one must be among them.
+    #[test]
+    fn the_journal_is_one_the_launcher_moves() {
+        assert!(KNOWN_JOURNALS.contains(&JOURNAL), "JOURNAL");
+    }
+}

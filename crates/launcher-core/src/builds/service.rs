@@ -105,12 +105,35 @@ pub fn build_dto(build: &Build, mc_dir: &Path, running: bool) -> BuildDto {
     }
 }
 
-/// Copies everything inside `from` into `to`, except the top-level entries named in `skip`. Links
-/// are skipped (never followed) and an existing file in `to` is an error rather than overwritten.
-pub fn copy_dir_contents(from: &Path, to: &Path, skip: &[&str]) -> io::Result<()> {
+/// What a copy of a build leaves behind, by its path in the build: the record (the copy gets its
+/// own), the source's journals, work files, claim, launch log and downloaded modpack, and what the
+/// version before kept in the root and in `mods/.backups`. The notes in `.launcher/` go along: a
+/// copied modpack build stays one.
+pub fn copy_skips(relative: &str) -> bool {
+    let lower = relative.to_lowercase();
+    let under = |folder: &str| lower == folder || lower.starts_with(&format!("{folder}/"));
+    lower == RECORD_FILE.to_lowercase()
+        || under(".launcher/journal")
+        || under(".launcher/work")
+        || matches!(lower.as_str(), ".launcher/claim.json" | ".launcher/launch.log")
+        || lower.starts_with(".launcher/modpack.")
+        || lower.starts_with(".launcher-")
+        || under("mods/.backups")
+}
+
+/// Copies everything inside `from` into `to`, except what `skip` names by its path in `from`
+/// (relative, `/`-separated). Links are skipped (never followed); folders `to` has are filled, and
+/// an existing file in `to` is an error rather than overwritten.
+pub fn copy_dir_contents(from: &Path, to: &Path, skip: &dyn Fn(&str) -> bool) -> io::Result<()> {
+    copy_below(from, to, "", skip)
+}
+
+fn copy_below(from: &Path, to: &Path, prefix: &str, skip: &dyn Fn(&str) -> bool) -> io::Result<()> {
     for entry in fs::read_dir(from)? {
         let entry = entry?;
-        if entry.file_name().to_str().is_some_and(|name| skip.contains(&name)) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let relative = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
+        if skip(&relative) {
             continue;
         }
         let kind = entry.file_type()?;
@@ -118,8 +141,8 @@ pub fn copy_dir_contents(from: &Path, to: &Path, skip: &[&str]) -> io::Result<()
         if kind.is_symlink() {
             tracing::warn!("Not copying link {}", entry.path().display());
         } else if kind.is_dir() {
-            fs::create_dir(&target)?;
-            copy_dir_contents(&entry.path(), &target, &[])?;
+            fs::create_dir_all(&target)?;
+            copy_below(&entry.path(), &target, &relative, skip)?;
         } else {
             let mut source = fs::File::open(entry.path())?;
             let mut copy = fs::OpenOptions::new().write(true).create_new(true).open(&target)?;
@@ -315,7 +338,7 @@ impl BuildService {
         let to = self.versions.games_dir().join(&id);
         let (src, dst) = (from.to_path_buf(), to.clone());
         let registered = tokio::task::spawn_blocking(move || {
-            if src.is_dir() { copy_dir_contents(&src, &dst, &[RECORD_FILE]) } else { Ok(()) }
+            if src.is_dir() { copy_dir_contents(&src, &dst, &copy_skips) } else { Ok(()) }
         })
         .await
         .map_err(|e| AppError::internal(e.to_string()))
@@ -539,13 +562,13 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(dir.path(), from.join("escape")).unwrap();
         fs::write(from.join("version.json"), b"{}").unwrap();
-        let err = copy_dir_contents(&from, &to, &[]).unwrap_err();
+        let err = copy_dir_contents(&from, &to, &|_| false).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
         assert_eq!(fs::read(to.join("options.txt")).unwrap(), b"old");
         fs::remove_file(to.join("options.txt")).unwrap();
         fs::remove_dir_all(to.join("mods")).ok();
         fs::remove_file(to.join("version.json")).ok();
-        copy_dir_contents(&from, &to, &["version.json"]).unwrap();
+        copy_dir_contents(&from, &to, &|path| path == "version.json").unwrap();
         assert_eq!(fs::read(to.join("mods").join("nested").join("a.jar")).unwrap(), b"a");
         assert!(!to.join("version.json").exists(), "skipped names are not copied");
         assert!(!to.join("escape").exists(), "links are not followed");

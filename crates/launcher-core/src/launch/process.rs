@@ -1,5 +1,5 @@
 //! The game process: its folder as the working directory, without
-//! `JAVA_TOOL_OPTIONS`/`_JAVA_OPTIONS`, output appended to `logs/launch.log`, no
+//! `JAVA_TOOL_OPTIONS`/`_JAVA_OPTIONS`, output appended to the build's launch log, no
 //! console window on Windows. It outlives the launcher.
 
 use std::fs::{self, File, OpenOptions};
@@ -10,6 +10,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 pub const LAUNCH_LOG: &str = "launch.log";
+
+/// Build `game_dir`'s launch log, in its service folder: `.launcher/launch.log`.
+pub fn launch_log(game_dir: &Path) -> PathBuf {
+    game_dir.join(".launcher").join(LAUNCH_LOG)
+}
 /// The JVM's global options from the environment (`JDK_JAVA_OPTIONS`: the Java 9+ launcher's): the
 /// game and the installers run with their own options only.
 pub const JAVA_OPTION_VARIABLES: [&str; 3] = ["JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS"];
@@ -106,12 +111,13 @@ impl Spawner for SystemSpawner {
     }
 }
 
-/// Starts `logs/launch.log` with the original's header. When another copy of the build still plays
-/// (`game_open`), its log is kept and the new header goes after it.
+/// Starts the launch log (`launch_log`) with the original's header. When another copy of the build
+/// still plays (`game_open`), its log is kept and the new header goes after it.
 pub fn prepare_launch_log(game_dir: &Path, component: &str, minecraft: &str) -> io::Result<PathBuf> {
-    let logs = game_dir.join("logs");
-    fs::create_dir_all(&logs)?;
-    let path = logs.join(LAUNCH_LOG);
+    let path = launch_log(game_dir);
+    if let Some(folder) = path.parent() {
+        fs::create_dir_all(folder)?;
+    }
     let started = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let header = format!(
         "Minecraft process diagnostics\nloader={component}\nminecraft={minecraft}\ngame_dir={}\nstarted_at={started}\n\n",
@@ -156,7 +162,7 @@ pub fn crash_artifact(game_dir: &Path, launched_at: SystemTime) -> Option<PathBu
     newest(&game_dir.join("crash-reports"), "")
         .or_else(|| newest(game_dir, "hs_err_"))
         .or_else(|| Some(game_dir.join("logs").join("latest.log")).filter(|p| fresh(p)))
-        .or_else(|| Some(game_dir.join("logs").join(LAUNCH_LOG)).filter(|p| fresh(p)))
+        .or_else(|| Some(launch_log(game_dir)).filter(|p| fresh(p)))
 }
 
 /// What Java writes when the computer has no memory left for it.
@@ -169,7 +175,7 @@ const OUT_OF_MEMORY: [&str; 3] = [
 /// The game stopped for want of memory, by the end of the crash's own file or of the launch log
 /// (where Java prints it).
 pub fn ran_out_of_memory(game_dir: &Path, artifact: Option<&Path>) -> bool {
-    let launch_log = game_dir.join("logs").join(LAUNCH_LOG);
+    let launch_log = launch_log(game_dir);
     artifact
         .into_iter()
         .chain([launch_log.as_path()])
@@ -221,5 +227,20 @@ pub(crate) mod fake {
             self.killed = true;
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod launch_log_tests {
+    use super::*;
+
+    #[test]
+    fn the_launch_log_is_in_the_service_folder() {
+        let game = tempfile::tempdir().unwrap();
+        let path = prepare_launch_log(game.path(), "1.21.1", "1.21.1").unwrap();
+        assert_eq!(path, game.path().join(".launcher").join("launch.log"));
+        assert_eq!(launch_log(game.path()), path);
+        assert!(path.is_file());
+        assert!(!game.path().join("logs").join("launch.log").exists(), "the game's logs stay the game's");
     }
 }

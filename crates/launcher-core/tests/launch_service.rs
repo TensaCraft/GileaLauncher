@@ -16,7 +16,7 @@ use launcher_core::launch::hooks::{
 };
 use launcher_core::launch::ledger::{Entry, LEDGER_FILE, Ledger, process_started};
 use launcher_core::launch::options::game_dir;
-use launcher_core::launch::process::{LAUNCH_LOG, SystemSpawner};
+use launcher_core::launch::process::{LAUNCH_LOG, SystemSpawner, launch_log};
 use launcher_core::launch::service::{LaunchDeps, LaunchRequest, LaunchService, LaunchTimings};
 use launcher_core::loaders::ComponentInstaller;
 use launcher_core::lock::Coordinator;
@@ -284,7 +284,7 @@ async fn a_build_starts_with_its_command_and_reports_its_exit() {
     assert!(game.windows(2).any(|pair| pair == ["--clientId", MS_CLIENT_ID]), "{game:?}");
     let classpath = &args[args.iter().position(|a| a == "-cp").unwrap() + 1];
     assert!(classpath.contains("core-1.0.jar") && classpath.contains("1.21.1.jar"), "{classpath}");
-    let log = std::fs::read_to_string(started.game_dir.join("logs").join(LAUNCH_LOG)).unwrap();
+    let log = std::fs::read_to_string(launch_log(&started.game_dir)).unwrap();
     assert!(log.starts_with("Minecraft process diagnostics\nloader=1.21.1\n"), "{log}");
     assert!(log.contains("fake game started"), "{log}");
     let starting = Text::key("version_starting").param("version", "Aero");
@@ -311,7 +311,12 @@ async fn an_early_exit_is_a_crash_with_an_alert() {
     assert_eq!(alerts.len(), 1);
     assert!(matches!(&alerts[0].message, Text::Key { key, .. } if key == "version_crashed_open_logs"));
     let dir = game_dir(&w.versions.get(&key).unwrap(), &w.mc);
-    assert!(!dir.join(".launcher").exists(), "nothing is kept beside the build");
+    let kept: Vec<String> = std::fs::read_dir(dir.join(".launcher"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(kept, ["launch.log"], "the launch keeps only its log beside the build");
 }
 
 /// Sees that a game cannot go on once its launch log says so; remembers the games it watched.
@@ -325,7 +330,7 @@ struct MarkerWatch(PathBuf);
 impl GameWatcher for MarkerWatcher {
     fn watch(&self, game: &WatchedGame) -> Box<dyn GameWatch> {
         self.watched.lock().unwrap().push(game.clone());
-        Box::new(MarkerWatch(game.game_dir.join("logs").join(LAUNCH_LOG)))
+        Box::new(MarkerWatch(launch_log(&game.game_dir)))
     }
 }
 

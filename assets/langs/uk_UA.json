@@ -276,6 +276,7 @@
   "open_version_folder": "Відкрити папку збірки",
   "open_version_logs": "Відкрити папку логів",
   "open_latest_log": "Відкрити latest.log",
+  "open_launch_log": "Журнал запуску",
   "open_crash_report": "Відкрити краш-репорт",
   "open_crash_reports": "Відкрити crash-reports",
   "open_latest_crash": "Відкрити останній краш",

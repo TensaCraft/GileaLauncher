@@ -6,14 +6,14 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use launcher_core::launch::process::{FRESHNESS, LAUNCH_LOG};
+use launcher_core::launch::process::{FRESHNESS, launch_log};
 
 /// What Fabric and Quilt write just before they show their error window: their handler exits
 /// once the window is closed.
 const LOADER_GAVE_UP: [&str; 2] =
     ["net.fabricmc.loader.impl.formattedexception", "org.quiltmc.loader.impl.formattedexception"];
 
-/// Reads what the game adds to `logs/launch.log` since the last look.
+/// Reads what the game adds to its launch log (`.launcher/launch.log`) since the last look.
 pub(crate) struct LaunchLog {
     path: PathBuf,
     since: SystemTime,
@@ -25,7 +25,7 @@ pub(crate) struct LaunchLog {
 impl LaunchLog {
     pub(crate) fn new(game_dir: &Path, launched_at: SystemTime) -> LaunchLog {
         LaunchLog {
-            path: game_dir.join("logs").join(LAUNCH_LOG),
+            path: launch_log(game_dir),
             since: launched_at.checked_sub(FRESHNESS).unwrap_or(launched_at),
             read: 0,
             carry: String::new(),
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn a_marker_written_in_two_goes_is_still_seen() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("logs").join(LAUNCH_LOG);
+        let path = launch_log(dir.path());
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut log = LaunchLog::new(dir.path(), SystemTime::now());
         std::fs::write(&path, "header\nnet.fabricmc.loader.impl.Format").unwrap();

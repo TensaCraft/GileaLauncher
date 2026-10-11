@@ -166,6 +166,45 @@ async fn the_snapshot_lists_builds_by_name_with_their_state() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_modpack_build_copies_with_its_notes_but_not_its_journals() {
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    let w = world(&fake);
+    w.service.install_vanilla("Aero", "1.21.1").await.unwrap();
+    let from = w.games.join("aero");
+    for (file, body) in [
+        (".launcher/modrinth-pack.json", "{}"),
+        (".launcher/modrinth-content.json", "{}"),
+        (".launcher/journal/modrinth-pack.json", "{}"),
+        (".launcher/work/abc/stage/a.jar", "half"),
+        (".launcher/launch.log", "started"),
+        (".launcher/modpack.mrpack", "zip"),
+        (".launcher-pack-sync.json", "{}"),
+        ("mods/.backups/a.jar.backup", "old"),
+        ("mods/a.jar", "jar"),
+    ] {
+        std::fs::create_dir_all(from.join(file).parent().unwrap()).unwrap();
+        std::fs::write(from.join(file), body).unwrap();
+    }
+    let copy = w.service.copy("aero", "Aero copy", || false).await.unwrap();
+    let to = w.games.join(&copy.key);
+    for kept in [".launcher/modrinth-pack.json", ".launcher/modrinth-content.json", "mods/a.jar"] {
+        assert!(to.join(kept).is_file(), "{kept} is copied");
+    }
+    for left in [
+        ".launcher/journal",
+        ".launcher/work",
+        ".launcher/launch.log",
+        ".launcher/modpack.mrpack",
+        ".launcher/claim.json",
+        ".launcher-pack-sync.json",
+        "mods/.backups",
+    ] {
+        assert!(!to.join(left).exists(), "{left} is the source's own");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_copy_gets_its_own_folder_and_settings() {
     let fake = FakeMojang::start().await;
     fake.add_vanilla("1.21.1");

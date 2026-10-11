@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 use launcher_shared::{AlertFile, GameEvent, GameState, Level, Text};
 
 use super::hooks::GameWatch;
-use super::process::{LAUNCH_LOG, SharedProcess, crash_artifact, log_tail, ran_out_of_memory};
+use super::process::{SharedProcess, crash_artifact, launch_log, log_tail, ran_out_of_memory};
 use super::registry::LaunchRegistry;
 use crate::feedback::{EventSink, FeedbackService};
 
@@ -45,12 +45,17 @@ fn crash_files(watch: &Watch, artifact: Option<&Path>) -> Vec<AlertFile> {
         path: path.to_string_lossy().into_owned(),
         folder,
     };
+    let launch = launch_log(&watch.game_dir);
     let mut files = Vec::new();
-    if let Some(own) = artifact.filter(|a| *a != latest && *a != logs.join(LAUNCH_LOG)) {
+    if let Some(own) = artifact.filter(|a| *a != latest && *a != launch) {
         files.push(file("open_crash_report", own, false));
     }
     if latest.is_file() {
         files.push(file("open_latest_log", &latest, false));
+    }
+    // The service folder is hidden: the launch log, Java's own words, gets a button.
+    if launch.is_file() {
+        files.push(file("open_launch_log", &launch, false));
     }
     if logs.is_dir() {
         files.push(file("open_version_logs", &logs, true));
@@ -350,6 +355,25 @@ mod tests {
                 ("open_latest_log".to_string(), path(&logs.join("latest.log")), false),
                 ("open_version_logs".to_string(), path(&logs), true),
             ]
+        );
+    }
+
+    #[test]
+    fn a_crash_offers_the_launch_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path().join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("latest.log"), "java.lang.IllegalStateException").unwrap();
+        let launch = super::super::process::launch_log(dir.path());
+        std::fs::create_dir_all(launch.parent().unwrap()).unwrap();
+        std::fs::write(&launch, "Exception in thread main").unwrap();
+        let run = run(FakeProcess::exiting_after(1, Duration::from_millis(600), Some(1)), dir.path(), None);
+        let alert = run.recorder.alerts.lock().unwrap()[0].clone();
+        let path = |p: &Path| p.to_string_lossy().into_owned();
+        assert!(
+            opened(&alert).contains(&("open_launch_log".to_string(), path(&launch), false)),
+            "{:?}",
+            opened(&alert)
         );
     }
 

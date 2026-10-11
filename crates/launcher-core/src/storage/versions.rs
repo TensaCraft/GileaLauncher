@@ -21,13 +21,12 @@ pub const VERSIONS_FILE: &str = "versions.json";
 /// The record in each build folder.
 pub const RECORD_FILE: &str = "version.json";
 /// Whether `path` (relative, `/`-separated) is one the launcher keeps in a build folder — the
-/// build's record and everything named `.launcher…` — so content from outside never lands there.
+/// build's record, its service folder `.launcher/`, and what the version before kept elsewhere
+/// (`.launcher-…` in the root, `mods/.backups`) — so content from outside never lands there.
 pub fn reserved_in_build(path: &str) -> bool {
     let lower = path.to_lowercase();
-    lower == RECORD_FILE
-        || lower == ".launcher"
-        || lower.starts_with(".launcher/")
-        || lower.starts_with(".launcher-")
+    let under = |folder: &str| lower == folder || lower.starts_with(&format!("{folder}/"));
+    lower == RECORD_FILE || under(".launcher") || lower.starts_with(".launcher-") || under("mods/.backups")
 }
 
 /// An imported `versions.json` is kept under this suffix.
@@ -35,9 +34,12 @@ pub const IMPORTED_SUFFIX: &str = ".imported";
 /// The folder of build folders inside the Minecraft folder.
 pub const GAMES_DIR: &str = "games";
 const CREATE_ATTEMPTS: usize = 8;
-/// In a new build's folder while its files are put in place: the launcher that claimed it (`pid`,
-/// and when that process started), so a folder an install that never finished left is told apart.
-pub const CLAIM_FILE: &str = ".launcher-claim.json";
+/// In a new build's service folder while its files are put in place: the launcher that claimed it
+/// (`pid`, and when that process started), so a folder an install that never finished left is told
+/// apart.
+pub const CLAIM_FILE: &str = ".launcher/claim.json";
+/// Where the version before wrote the claim: the build's root.
+const LEGACY_CLAIM_FILE: &str = ".launcher-claim.json";
 /// A folder being removed is first renamed with this prefix: hidden from the list at once.
 const REMOVING_PREFIX: &str = ".removing-";
 
@@ -45,7 +47,10 @@ const REMOVING_PREFIX: &str = ".removing-";
 fn write_claim(folder: &Path) {
     let me = std::process::id();
     let claim = json!({"pid": me, "started": crate::launch::ledger::process_started(me)});
-    if let Err(e) = fs::write(folder.join(CLAIM_FILE), claim.to_string()) {
+    let path = folder.join(CLAIM_FILE);
+    let written =
+        path.parent().map_or(Ok(()), fs::create_dir_all).and_then(|()| fs::write(&path, claim.to_string()));
+    if let Err(e) = written {
         tracing::warn!("Cannot mark {} as claimed: {e}", folder.display());
     }
 }
@@ -53,7 +58,9 @@ fn write_claim(folder: &Path) {
 /// The claim in `folder` was made by a launcher that runs no more (its process gone, or the id
 /// now another process's). A folder with no claim, or one being written, is nobody's to clear.
 fn claim_abandoned(folder: &Path) -> bool {
-    let Ok(raw) = fs::read(folder.join(CLAIM_FILE)) else { return false };
+    let Some(raw) = [CLAIM_FILE, LEGACY_CLAIM_FILE].iter().find_map(|f| fs::read(folder.join(f)).ok()) else {
+        return false;
+    };
     let Ok(claim) = serde_json::from_slice::<Value>(&raw) else { return false };
     let Some(pid) = claim["pid"].as_u64().and_then(|pid| u32::try_from(pid).ok()) else { return false };
     match crate::launch::ledger::process_started(pid) {
@@ -423,6 +430,7 @@ impl VersionStore {
         build.snapshot = Snapshot(None);
         self.save_locked(build)?;
         let _ = fs::remove_file(self.games_dir.join(id).join(CLAIM_FILE));
+        let _ = fs::remove_file(self.games_dir.join(id).join(LEGACY_CLAIM_FILE));
         Ok(())
     }
 
@@ -920,6 +928,39 @@ mod tests {
     }
 
     #[test]
+    fn the_service_folder_is_the_launchers_own() {
+        for own in [
+            "version.json",
+            ".launcher",
+            ".launcher/journal/tensa.json",
+            ".Launcher/Work/abc",
+            ".launcher-tensa-sync.json",
+            "mods/.backups",
+            "mods/.backups/sodium.jar.backup",
+        ] {
+            assert!(reserved_in_build(own), "{own}");
+        }
+        for theirs in ["config/a.toml", "mods/sodium.jar", "launcher.txt", "mods/.backupsx/a.jar"] {
+            assert!(!reserved_in_build(theirs), "{theirs}");
+        }
+    }
+
+    #[test]
+    fn a_claim_lives_in_the_service_folder() {
+        let d = dirs();
+        let store = VersionStore::open(&d.state, &d.mc);
+        let id = store.claim_folder("Claimed").unwrap();
+        assert!(d.games.join(&id).join(".launcher").join("claim.json").is_file());
+        assert!(!d.games.join(&id).join(".launcher-claim.json").exists());
+        // A claim the version before wrote in the root still tells an abandoned install.
+        let old = store.claim_folder("Old").unwrap();
+        fs::remove_dir_all(d.games.join(&old).join(".launcher")).unwrap();
+        fs::write(d.games.join(&old).join(".launcher-claim.json"), r#"{"pid": 0, "started": "1"}"#).unwrap();
+        assert_eq!(store.clear_abandoned_claims(), 1);
+        assert!(!d.games.join(&old).exists() && d.games.join(&id).exists());
+    }
+
+    #[test]
     fn a_folder_an_install_that_ended_left_behind_is_cleared() {
         let d = dirs();
         let store = VersionStore::open(&d.state, &d.mc);
@@ -932,7 +973,7 @@ mod tests {
         store.create(&mut done).unwrap();
         assert!(!d.games.join(&done.key).join(CLAIM_FILE).exists(), "a build's folder is no claim");
         fs::create_dir_all(d.games.join("mine")).unwrap();
-        fs::create_dir_all(d.games.join("broken_record")).unwrap();
+        fs::create_dir_all(d.games.join("broken_record").join(".launcher")).unwrap();
         fs::write(d.games.join("broken_record/version.json"), b"{ broken").unwrap();
         fs::write(d.games.join("broken_record").join(CLAIM_FILE), r#"{"pid": 0}"#).unwrap();
 

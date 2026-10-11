@@ -56,7 +56,7 @@ const PACK_UPDATE_OPERATION: &str = "modrinth-pack-update";
 const PACK_JOURNAL: JournalName =
     JournalName { file: "modrinth-pack.json", legacy: ".launcher-pack-sync.json" };
 /// Where the downloaded `.mrpack` waits (always removed after).
-const PACK_ARCHIVE: &str = ".launcher-pack.mrpack";
+const PACK_ARCHIVE: &str = ".launcher/modpack.mrpack";
 
 /// Modrinth's modpack builds, as the core's pack engine tells them apart.
 const PACKS: PackKind = PackKind {
@@ -732,5 +732,19 @@ impl ContentProvider for ModrinthService {
 
     fn update_modpack(&self, args: PackUpdateArgs) -> ProviderFuture<'_, PackUpdated> {
         Box::pin(async move { ModrinthService::update_pack(self, &args).await })
+    }
+}
+
+#[cfg(test)]
+mod journal_tests {
+    use launcher_core::storage::journal::KNOWN_JOURNALS;
+
+    use super::*;
+
+    /// The launcher moves the journals it knows from builds' roots: this one must be among them.
+    #[test]
+    fn the_journal_is_one_the_launcher_moves() {
+        assert!(KNOWN_JOURNALS.contains(&JOURNAL), "JOURNAL");
+        assert!(KNOWN_JOURNALS.contains(&PACK_JOURNAL), "PACK_JOURNAL");
     }
 }

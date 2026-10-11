@@ -70,7 +70,7 @@ mod tests {
     use std::sync::Mutex;
     use std::time::{Duration, SystemTime};
 
-    use launcher_core::launch::process::LAUNCH_LOG;
+    use launcher_core::launch::process::launch_log as service_log;
     use launcher_shared::{ActivityEntry, Alert, OpsSnapshot, Toast};
     use serde_json::Value;
 
@@ -103,7 +103,7 @@ mod tests {
     }
 
     fn launch_log(dir: &std::path::Path) -> std::path::PathBuf {
-        let log = dir.join("logs").join(LAUNCH_LOG);
+        let log = service_log(dir);
         std::fs::create_dir_all(log.parent().unwrap()).unwrap();
         log
     }

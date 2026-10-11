@@ -56,7 +56,7 @@ fn recent_of(markers: &LogMarkers, key: &str, minecraft: Option<&str>, game: &Pa
     let found = worlds(game);
     let logs = game.join("logs");
     let played_ms = [
-        modified_ms(&logs.join("launch.log")),
+        modified_ms(&crate::launch::process::launch_log(game)),
         modified_ms(&logs.join("latest.log")),
         found.first().map_or(0, |w| w.last_played_ms),
     ]
@@ -203,5 +203,20 @@ mod tests {
         let recent = recent_of(&LogMarkers::default(), "k", Some("1.21.1"), game.path()).unwrap();
         assert_eq!(recent.activity, None);
         assert!(recent.played_ms > 0);
+    }
+}
+
+#[cfg(test)]
+mod launch_log_tests {
+    use super::*;
+
+    #[test]
+    fn played_time_reads_the_launch_log() {
+        let game = tempfile::tempdir().unwrap();
+        let launch = crate::launch::process::launch_log(game.path());
+        std::fs::create_dir_all(launch.parent().unwrap()).unwrap();
+        std::fs::write(&launch, "started").unwrap();
+        let recent = recent_of(&LogMarkers::default(), "k", Some("1.21.1"), game.path()).unwrap();
+        assert!(recent.played_ms > 0, "a launch alone counts as played");
     }
 }

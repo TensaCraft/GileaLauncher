@@ -47,7 +47,7 @@ pub fn of_build(game_dir: &std::path::Path) -> crate::dto::BuildDiagnostics {
         crash_reports_dir: text(&crash_reports),
         latest_log: text(&game_dir.join("logs").join("latest.log")),
         latest_crash,
-        launch_log: text(&game_dir.join("logs").join(launcher_core::launch::process::LAUNCH_LOG)),
+        launch_log: text(&launcher_core::launch::process::launch_log(game_dir)),
         last: last(game_dir),
     }
 }
