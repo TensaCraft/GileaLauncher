@@ -3,6 +3,7 @@ mod support;
 use std::fs;
 
 use launcher_core::providers::ContentProvider;
+use launcher_core::storage::journal::JOURNAL_DIR;
 use launcher_shared::provider::{InstallArgs, NewerVersion, OverviewArgs, SearchArgs, UpdatesStatus};
 use launcher_shared::{ContentKind, ErrorCode};
 use module_curseforge::backend::provenance::PROVENANCE;
@@ -59,7 +60,8 @@ async fn a_mod_and_its_dependencies_come_in_one_go_with_the_key() {
     let downloads: Vec<_> = w.server.seen().into_iter().filter(|s| s.path.starts_with("/files/")).collect();
     assert_eq!(downloads.len(), 2);
     assert!(downloads.iter().all(|s| s.key.as_deref() == Some(TEST_KEY)), "the CDN gets the key");
-    let journal: Value = serde_json::from_slice(&fs::read(dir.join(JOURNAL)).unwrap()).unwrap();
+    let journal: Value =
+        serde_json::from_slice(&fs::read(dir.join(JOURNAL_DIR).join(JOURNAL.file)).unwrap()).unwrap();
     assert_eq!(journal["status"], "complete");
     assert!(w.said.keys().contains(&"mod_installed".to_string()), "{:?}", w.said.keys());
 }

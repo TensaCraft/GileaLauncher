@@ -1,16 +1,17 @@
 //! Which builds are the server's: a managed build follows the server at every
 //! launch; its catalog id is kept apart from the component it runs.
 
+use std::fs;
 use std::path::Path;
 
-use launcher_core::storage::journal::SyncJournal;
+use launcher_core::storage::journal::{JOURNAL_DIR, JournalName};
 use launcher_core::storage::versions::Build;
 use serde_json::{Value, json};
 
 /// The client a server build names (the original launcher's, so its builds are recognised).
 pub const CLIENT: &str = "TensaCraft";
 /// The journal of a server build's file changes.
-pub const JOURNAL: &str = ".launcher-tensa-sync.json";
+pub const JOURNAL: JournalName = JournalName { file: "tensa.json", legacy: ".launcher-tensa-sync.json" };
 const PACK_OPTION_KEYS: [&str; 2] = ["tensacraftPackId", "tensacraft_pack_id"];
 
 /// A string or a number, trimmed; nothing when blank.
@@ -48,8 +49,12 @@ pub fn is_managed(build: &Build, game_dir: &Path) -> bool {
     {
         return true;
     }
-    let journal = SyncJournal::new(game_dir, JOURNAL).read();
-    let operation = journal.as_ref().and_then(|j| j.get("operation")).and_then(Value::as_str);
+    // The journal in the service folder, else the one the version before kept in the root.
+    let operation = [game_dir.join(JOURNAL_DIR).join(JOURNAL.file), game_dir.join(JOURNAL.legacy)]
+        .iter()
+        .find_map(|path| fs::read(path).ok())
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+        .and_then(|journal| journal.get("operation").and_then(Value::as_str).map(str::to_string));
     operation.is_some_and(|op| op.trim().to_lowercase().starts_with("tensacraft_"))
 }
 
@@ -116,15 +121,24 @@ mod tests {
         b.options.insert("tensacraftPackId".into(), json!("aero"));
         assert!(is_managed(&b, dir.path()));
         b.options.remove("tensacraftPackId");
-        std::fs::write(dir.path().join(JOURNAL), r#"{"status":"complete","operation":"tensacraft_sync"}"#)
-            .unwrap();
+        let fresh = dir.path().join(JOURNAL_DIR).join(JOURNAL.file);
+        std::fs::create_dir_all(fresh.parent().unwrap()).unwrap();
+        std::fs::write(&fresh, r#"{"status":"complete","operation":"tensacraft_sync"}"#).unwrap();
         assert!(is_managed(&b, dir.path()), "its last file change was the server's");
-        std::fs::write(
-            dir.path().join(JOURNAL),
-            r#"{"status":"complete","operation":"modrinth-content-install"}"#,
-        )
-        .unwrap();
+        std::fs::write(&fresh, r#"{"status":"complete","operation":"modrinth-content-install"}"#).unwrap();
         assert!(!is_managed(&b, dir.path()));
+    }
+
+    #[test]
+    fn a_server_build_known_by_its_old_journal_stays_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = build();
+        b.client = Some("Fabric".into());
+        let legacy = dir.path().join(JOURNAL.legacy);
+        std::fs::write(&legacy, r#"{"status":"complete","operation":"tensacraft_sync"}"#).unwrap();
+        assert!(is_managed(&b, dir.path()), "the journal of the version before still tells");
+        std::fs::write(&legacy, r#"{"status":"applying","operation":"tensacraft_sync"}"#).unwrap();
+        assert!(is_managed(&b, dir.path()));
     }
 
     #[test]

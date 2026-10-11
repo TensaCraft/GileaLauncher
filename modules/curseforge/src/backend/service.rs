@@ -22,6 +22,7 @@ use launcher_core::lock::Coordinator;
 use launcher_core::net::downloader::{Credential, DownloadProgress, DownloadTask, Downloader};
 use launcher_core::packs::engine::PackDeps;
 use launcher_core::providers::{ContentProvider, ProviderFuture};
+use launcher_core::storage::journal::JournalName;
 use launcher_core::storage::json::write_json_file;
 use launcher_core::storage::transaction::{ApplyHooks, FileTransaction, TransactionPlan};
 use launcher_core::storage::versions::{Build, VersionStore};
@@ -46,7 +47,8 @@ use crate::types::{class_id, loader_types};
 use launcher_core::packs::PackRecord;
 
 /// The journal of CurseForge installs.
-pub const JOURNAL: &str = ".launcher-curseforge-sync.json";
+pub const JOURNAL: JournalName =
+    JournalName { file: "curseforge-content.json", legacy: ".launcher-curseforge-sync.json" };
 const OPERATION: &str = "curseforge-content-install";
 /// Held on the build's folder for the whole install.
 const LEASE: &str = "curseforge_content_install";

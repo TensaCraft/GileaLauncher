@@ -13,10 +13,24 @@ use serde_json::{Map, Value, json};
 use super::atomic::rename_retrying;
 use super::json::write_json_file;
 
-/// The default journal in a build's folder.
-pub const SYNC_JOURNAL: &str = ".launcher-sync.json";
+/// A journal's file in a build's service folder (`JOURNAL_DIR`), and the name it had in the
+/// build's root before: an old journal is still found while its change is unfinished.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JournalName {
+    pub file: &'static str,
+    pub legacy: &'static str,
+}
+
+/// Where a build's journals live, in its service folder.
+pub const JOURNAL_DIR: &str = ".launcher/journal";
+/// The default journal (tests use it).
+pub const SYNC_JOURNAL: JournalName = JournalName { file: "sync.json", legacy: ".launcher-sync.json" };
 /// Where transactions stage new files and back up the ones they replace.
-pub const SYNC_WORK_DIR: &str = ".launcher-sync";
+pub const SYNC_WORK_DIR: &str = ".launcher/work";
+/// Where an old journal's transaction did that, in the build's root.
+pub const LEGACY_WORK_DIR: &str = ".launcher-sync";
+/// A journal whose change is over.
+const FINISHED: [&str; 3] = ["complete", "rolled_back", "recovered"];
 const REPAIR_STATUSES: [&str; 8] = [
     "running",
     "staging",
@@ -151,11 +165,32 @@ fn restore_copy(backup: &Path, destination: &Path) -> AppResult<()> {
 pub struct SyncJournal {
     root: PathBuf,
     path: PathBuf,
+    /// Its transactions' work folder, beside the journal: the service folder's, or the old root's.
+    work: PathBuf,
+}
+
+/// The journal at `path` tells of a change that is not over (or cannot be read).
+fn unfinished(path: &Path) -> bool {
+    let read = fs::read_to_string(path).ok().and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    read.and_then(|v| v.as_object().map(status_of)).is_none_or(|status| !FINISHED.contains(&status.as_str()))
 }
 
 impl SyncJournal {
-    pub fn new(root: &Path, file: &str) -> SyncJournal {
-        SyncJournal { root: root.to_path_buf(), path: root.join(file) }
+    /// Journal `name` of the build in `root`: in the service folder, unless only its old file is
+    /// there with a change not over yet (it is finished where it was).
+    pub fn new(root: &Path, name: JournalName) -> SyncJournal {
+        let (fresh, legacy) = (root.join(JOURNAL_DIR).join(name.file), root.join(name.legacy));
+        if !fresh.exists() && legacy.exists() && unfinished(&legacy) {
+            return SyncJournal::found(root, legacy);
+        }
+        SyncJournal::found(root, fresh)
+    }
+
+    /// The journal file `path` of the build in `root`, wherever it is.
+    pub fn found(root: &Path, path: PathBuf) -> SyncJournal {
+        let in_root = path.parent().is_some_and(|parent| parent == root);
+        let work = root.join(if in_root { LEGACY_WORK_DIR } else { SYNC_WORK_DIR });
+        SyncJournal { root: root.to_path_buf(), path, work }
     }
 
     pub fn path(&self) -> &Path {
@@ -209,6 +244,9 @@ impl SyncJournal {
     }
 
     fn write(&self, payload: &Payload) -> AppResult<()> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).map_err(|e| io_error(parent, e))?;
+        }
         write_json_file(&self.path, &Value::Object(payload.clone()), 2).map_err(|e| io_error(&self.path, e))
     }
 
@@ -232,7 +270,7 @@ impl SyncJournal {
         if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(journal_error("the file transaction ID is invalid"));
         }
-        Ok(self.root.join(SYNC_WORK_DIR).join(id))
+        Ok(self.work.join(id))
     }
 
     /// Recovers what an earlier transaction left, then plans a new one: `replacements` (staged,
@@ -254,7 +292,7 @@ impl SyncJournal {
             contained(&self.root, path)?;
         }
         let id = uuid::Uuid::new_v4().simple().to_string();
-        let transaction = self.root.join(SYNC_WORK_DIR).join(&id);
+        let transaction = self.work.join(&id);
         for sub in ["stage", "backup"] {
             fs::create_dir_all(transaction.join(sub)).map_err(|e| io_error(&transaction, e))?;
         }
@@ -613,8 +651,14 @@ mod tests {
                 {"path": "mods/b.jar", "kind": "replace", "state": "applied", "had_original": false}
             ]
         });
-        fs::write(journal.path(), payload.to_string()).unwrap();
+        write_raw(&journal, payload.to_string()).unwrap();
         journal
+    }
+
+    /// Writes `text` as `journal`'s file, its folder made first.
+    fn write_raw(journal: &SyncJournal, text: impl AsRef<[u8]>) -> std::io::Result<()> {
+        fs::create_dir_all(journal.path().parent().unwrap())?;
+        fs::write(journal.path(), text)
     }
 
     fn saved(journal: &SyncJournal) -> Value {
@@ -717,7 +761,7 @@ mod tests {
         fs::create_dir_all(root.path().join(SYNC_WORK_DIR).join(ID).join("stage")).unwrap();
         let journal = SyncJournal::new(root.path(), SYNC_JOURNAL);
         let payload = json!({"schema_version": 2, "status": "committing", "commit_key": "sync:abc", "transaction_id": ID, "entries": []});
-        fs::write(journal.path(), payload.to_string()).unwrap();
+        write_raw(&journal, payload.to_string()).unwrap();
         let commits = Cell::new(0);
         let commit = || -> AppResult<()> {
             commits.set(commits.get() + 1);
@@ -738,7 +782,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let journal = SyncJournal::new(root.path(), SYNC_JOURNAL);
         assert!(!journal.needs_repair() && !journal.recover(None, None).unwrap());
-        fs::write(journal.path(), "{not json").unwrap();
+        write_raw(&journal, "{not json").unwrap();
         assert!(journal.needs_repair());
         journal.mark_repair_required("crash", Some(json!({"log": "latest.log"}))).unwrap();
         let marker = saved(&journal);
@@ -749,7 +793,7 @@ mod tests {
         assert!(marker["marked_at"].as_str().unwrap().ends_with("+00:00"));
         assert!(journal.needs_repair());
         assert!(journal.recover(None, None).unwrap(), "a legacy marker stays for its owner");
-        fs::write(journal.path(), json!({"schema_version": 2, "status": "complete"}).to_string()).unwrap();
+        write_raw(&journal, json!({"schema_version": 2, "status": "complete"}).to_string()).unwrap();
         assert!(!journal.needs_repair());
     }
 
@@ -770,7 +814,7 @@ mod tests {
                 {"path": "mods/b.jar", "kind": "replace", "state": "backing_up", "had_original": true}
             ]
         });
-        fs::write(journal.path(), payload.to_string()).unwrap();
+        write_raw(&journal, payload.to_string()).unwrap();
         assert!(journal.recover(None, None).unwrap());
         assert_eq!(fs::read(root.join("mods/a.jar")).unwrap(), b"old-a", "moved: put back");
         assert_eq!(fs::read(root.join("mods/b.jar")).unwrap(), b"old-b", "not reached: untouched");

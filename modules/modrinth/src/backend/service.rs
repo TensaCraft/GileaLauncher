@@ -18,6 +18,7 @@ use launcher_core::net::downloader::{DownloadProgress, DownloadTask, Downloader}
 use launcher_core::packs::engine::{PackDeps, PackKind, PackVersionMeta};
 use launcher_core::packs::flow::{self, Fetched, HeldChoice, PackFuture, PackSource};
 use launcher_core::providers::{ContentProvider, ProviderFuture};
+use launcher_core::storage::journal::JournalName;
 use launcher_core::storage::json::write_json_file;
 use launcher_core::storage::transaction::{ApplyHooks, FileTransaction, TransactionPlan};
 use launcher_core::storage::versions::{Build, VersionStore};
@@ -40,7 +41,8 @@ use launcher_shared::provider::{
 };
 
 /// The journal of Modrinth installs.
-pub const JOURNAL: &str = ".launcher-modrinth-sync.json";
+pub const JOURNAL: JournalName =
+    JournalName { file: "modrinth-content.json", legacy: ".launcher-modrinth-sync.json" };
 const OPERATION: &str = "modrinth-content-install";
 /// Held on the build's folder for the whole install.
 const LEASE: &str = "modrinth_content_install";
@@ -51,7 +53,8 @@ const PACK_OPERATION: &str = "modrinth-pack-install";
 const PACK_LEASE: &str = "modrinth_pack_install";
 /// A modpack update's transaction and its journal (reserved in a build: packs cannot write it).
 const PACK_UPDATE_OPERATION: &str = "modrinth-pack-update";
-const PACK_JOURNAL: &str = ".launcher-pack-sync.json";
+const PACK_JOURNAL: JournalName =
+    JournalName { file: "modrinth-pack.json", legacy: ".launcher-pack-sync.json" };
 /// Where the downloaded `.mrpack` waits (always removed after).
 const PACK_ARCHIVE: &str = ".launcher-pack.mrpack";
 

@@ -2,6 +2,7 @@ mod support;
 
 use launcher_core::feedback::{OperationHandle, OperationSpec};
 use launcher_core::launch::options::game_dir;
+use launcher_core::storage::journal::JOURNAL_DIR;
 use launcher_core::storage::journal::SyncJournal;
 use launcher_core::storage::versions::Build;
 use launcher_shared::{ErrorCode, Text};
@@ -350,7 +351,9 @@ async fn an_interrupted_commit_does_not_block_later_syncs() {
         "commit_key": "tensacraft-build:an-older-target", "transaction_id": "0123456789abcdef0123456789abcdef",
         "entries": []
     });
-    std::fs::write(dir.join(JOURNAL), journal.to_string()).unwrap();
+    let fresh = dir.join(JOURNAL_DIR).join(JOURNAL.file);
+    std::fs::create_dir_all(fresh.parent().unwrap()).unwrap();
+    std::fs::write(&fresh, journal.to_string()).unwrap();
     assert_eq!(run(&w, &build, false).await.unwrap(), Synced::Updated);
     assert_eq!(std::fs::read_to_string(dir.join("mods/a.jar")).unwrap(), "jar-a");
     assert_eq!(SyncJournal::new(&dir, JOURNAL).status().as_deref(), Some("complete"));

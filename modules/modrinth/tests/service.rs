@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 use support::*;
 
 use launcher_core::providers::ContentProvider;
+use launcher_core::storage::journal::JOURNAL_DIR;
 use launcher_shared::provider::{Action, InstallAnswer, InstallArgs, Pick, SearchArgs};
 use launcher_shared::provider::{PACKS_LIMIT, PacksArgs};
 use launcher_shared::{ContentKind, ErrorCode};
@@ -66,7 +67,9 @@ fn provenance(dir: &std::path::Path) -> Value {
 }
 
 fn journal_status(dir: &std::path::Path) -> Value {
-    serde_json::from_str::<Value>(&fs::read_to_string(dir.join(JOURNAL)).unwrap()).unwrap()["status"].clone()
+    serde_json::from_str::<Value>(&fs::read_to_string(dir.join(JOURNAL_DIR).join(JOURNAL.file)).unwrap())
+        .unwrap()["status"]
+        .clone()
 }
 
 fn downloads(w: &World) -> Vec<String> {
@@ -184,7 +187,7 @@ async fn a_file_already_there_is_not_replaced() {
         (ErrorCode::ContentConflict, Some("sodium-0.6.jar"))
     );
     assert!(downloads(&w).is_empty());
-    assert!(!dir.join(PROVENANCE).exists() && !dir.join(JOURNAL).exists());
+    assert!(!dir.join(PROVENANCE).exists() && !dir.join(JOURNAL_DIR).join(JOURNAL.file).exists());
     assert_eq!(fs::read(dir.join("mods/sodium-0.6.jar.disabled")).unwrap(), b"mine");
 }
 
@@ -283,7 +286,7 @@ async fn an_unsafe_file_name_downloads_nothing() {
     );
     assert_eq!(install(&w, sodium(&key)).await.unwrap_err().code, ErrorCode::InvalidInput);
     assert!(downloads(&w).is_empty());
-    assert!(!dir.join("evil.jar").exists() && !dir.join(JOURNAL).exists());
+    assert!(!dir.join("evil.jar").exists() && !dir.join(JOURNAL_DIR).join(JOURNAL.file).exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -412,7 +415,11 @@ async fn a_changed_plan_comes_back_to_the_user() {
         .unwrap();
     let InstallAnswer::Replanned(again) = answer else { panic!("installed without approval") };
     assert_eq!(*again, plan);
-    assert!(downloads(&w).is_empty() && mods(&dir).is_empty() && !dir.join(JOURNAL).exists());
+    assert!(
+        downloads(&w).is_empty()
+            && mods(&dir).is_empty()
+            && !dir.join(JOURNAL_DIR).join(JOURNAL.file).exists()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

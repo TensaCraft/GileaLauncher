@@ -12,6 +12,7 @@ use launcher_core::packs::Limits;
 use launcher_core::packs::engine::{PackKind, PackVersionMeta};
 use launcher_core::packs::flow::{self, Fetched, HeldChoice, PackFuture, PackSource};
 use launcher_core::storage::atomic::rename_retrying;
+use launcher_core::storage::journal::JournalName;
 use launcher_shared::provider::{
     ModpackBuild, PACKS_LIMIT, PackArgs, PackInstallArgs, PackInstalled, PackUpdateArgs, PackUpdated,
     PackVersion, PacksArgs, SearchPage, held_error,
@@ -29,7 +30,8 @@ use crate::backend::resolver::version_label;
 use crate::types::MODPACKS_CLASS;
 
 /// The journal of a CurseForge pack's update.
-pub const PACK_JOURNAL: &str = ".launcher-curseforge-pack-sync.json";
+pub const PACK_JOURNAL: JournalName =
+    JournalName { file: "curseforge-pack.json", legacy: ".launcher-curseforge-pack-sync.json" };
 /// Where a pack's zip is downloaded to while it is read.
 const PACK_ARCHIVE: &str = ".launcher-curseforge-pack.zip";
 

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use launcher_shared::{AppError, AppResult, ErrorCode};
 
-use super::journal::{SyncJournal, contained, normalized_path};
+use super::journal::{JOURNAL_DIR, JournalName, SyncJournal, contained, normalized_path};
 use crate::net::preflight::{SpaceRequest, preflight};
 
 /// What a transaction changes.
@@ -71,10 +71,11 @@ pub struct FileTransaction {
 
 impl FileTransaction {
     /// Checks there is room for the staged files and the backups, finishes what an earlier
-    /// transaction of `journal_file` left (`commit_recovery` resumes its commit), and opens this one.
+    /// transaction of journal `name` left (`commit_recovery` resumes its commit), and opens this one
+    /// in the build's service folder.
     pub fn begin(
         root: &Path,
-        journal_file: &str,
+        name: JournalName,
         plan: TransactionPlan,
         commit_recovery: Option<&dyn Fn() -> AppResult<()>>,
     ) -> AppResult<FileTransaction> {
@@ -83,7 +84,9 @@ impl FileTransaction {
         }
         let bytes = plan.staged_bytes.saturating_add(rollback_bytes(root, &plan));
         preflight(&[SpaceRequest { dir: root.to_path_buf(), bytes, label: plan.operation.clone() }])?;
-        let journal = SyncJournal::new(root, journal_file);
+        // An old journal's unfinished change is finished where it is; this one goes to the new place.
+        SyncJournal::new(root, name).recover(commit_recovery, plan.commit_key.as_deref())?;
+        let journal = SyncJournal::new(root, name);
         let stage = journal.begin(
             &plan.operation,
             &plan.replacements,
@@ -151,7 +154,7 @@ impl FileTransaction {
 /// `begin`, `stage` (a stage that needs no `await`) and `apply` in one go.
 pub fn execute(
     root: &Path,
-    journal_file: &str,
+    name: JournalName,
     plan: TransactionPlan,
     stage: impl FnOnce(&FileTransaction) -> AppResult<()>,
     hooks: ApplyHooks<'_>,
@@ -159,34 +162,49 @@ pub fn execute(
     if hooks.commit.is_some() != plan.commit_key.is_some() {
         return Err(commit_mismatch());
     }
-    let transaction = FileTransaction::begin(root, journal_file, plan, hooks.commit)?;
+    let transaction = FileTransaction::begin(root, name, plan, hooks.commit)?;
     if let Err(e) = stage(&transaction) {
         return Err(transaction.abort(e));
     }
     transaction.apply(hooks)
 }
 
-/// Transaction journals are `.launcher-<name>sync.json`.
-fn is_journal(name: &str) -> bool {
+/// Old transaction journals, in a build's root: `.launcher-<name>sync.json`.
+fn is_legacy_journal(name: &str) -> bool {
     name.starts_with(".launcher-") && name.ends_with("sync.json")
+}
+
+/// The journal files of the build in `dir`: those in its service folder, and old ones in its root.
+fn journal_files(dir: &Path) -> Vec<PathBuf> {
+    let names = |folder: &Path, take: &dyn Fn(&str) -> bool| -> Vec<PathBuf> {
+        let Ok(read) = fs::read_dir(folder) else { return Vec::new() };
+        let mut found: Vec<PathBuf> = read
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .filter(|e| e.file_name().to_str().is_some_and(take))
+            .map(|e| e.path())
+            .collect();
+        found.sort();
+        found
+    };
+    let mut all = names(&dir.join(JOURNAL_DIR), &|n| n.ends_with(".json"));
+    all.extend(names(dir, &is_legacy_journal));
+    all
 }
 
 /// Undoes every interrupted transaction in `dir` (a build's folder) before its game starts; one in
 /// its commit step is left to the operation that owns it. Returns what could not be undone — each
 /// such journal is set aside once reported (see `SyncJournal::set_aside`).
 pub fn recover_interrupted(dir: &Path) -> Vec<AppError> {
-    let Ok(read) = fs::read_dir(dir) else { return Vec::new() };
-    let mut journals: Vec<String> =
-        read.flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| is_journal(n)).collect();
-    journals.sort();
-    journals
-        .iter()
-        .filter_map(|name| {
-            let journal = SyncJournal::new(dir, name);
+    journal_files(dir)
+        .into_iter()
+        .filter_map(|path| {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let journal = SyncJournal::found(dir, path);
             if journal.status().as_deref() == Some("committing") {
                 return None;
             }
-            let error = journal.recover(None, None).err()?.with_param("journal", name);
+            let error = journal.recover(None, None).err()?.with_param("journal", &name);
             Some(match journal.set_aside() {
                 Ok(kept) => {
                     AppError { detail: format!("{}; its record is kept as {kept}", error.detail), ..error }
@@ -204,7 +222,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::storage::journal::{SYNC_JOURNAL, SYNC_WORK_DIR};
+    use crate::storage::journal::{LEGACY_WORK_DIR, SYNC_JOURNAL, SYNC_WORK_DIR};
 
     fn plan(replacements: &[&str], stale: &[&str]) -> TransactionPlan {
         TransactionPlan {
@@ -228,7 +246,7 @@ mod tests {
     }
 
     fn journal(root: &Path) -> Value {
-        serde_json::from_str(&fs::read_to_string(root.join(SYNC_JOURNAL)).unwrap()).unwrap()
+        Value::Object(SyncJournal::new(root, SYNC_JOURNAL).read().unwrap())
     }
 
     #[test]
@@ -378,7 +396,9 @@ mod tests {
                 execute(root, SYNC_JOURNAL, plan(bad, &[]), |_| Ok(()), ApplyHooks::default()).unwrap_err();
             assert_eq!(err.code, ErrorCode::InvalidInput, "{bad:?}");
         }
-        assert!(!root.join(SYNC_JOURNAL).exists() && !root.join(SYNC_WORK_DIR).exists());
+        assert!(
+            !root.join(JOURNAL_DIR).join(SYNC_JOURNAL.file).exists() && !root.join(SYNC_WORK_DIR).exists()
+        );
         #[cfg(unix)]
         {
             let outside = tempfile::tempdir().unwrap();
@@ -405,7 +425,7 @@ mod tests {
         let huge = TransactionPlan { staged_bytes: u64::MAX / 4, ..plan(&["a.jar"], &[]) };
         let err = execute(dir.path(), SYNC_JOURNAL, huge, |_| Ok(()), ApplyHooks::default()).unwrap_err();
         assert_eq!(err.code, ErrorCode::NotEnoughSpace);
-        assert!(!dir.path().join(SYNC_JOURNAL).exists());
+        assert!(!dir.path().join(JOURNAL_DIR).join(SYNC_JOURNAL.file).exists());
     }
 
     /// An antivirus scans a staged file just written and holds it for a moment: the swap waits.
@@ -459,18 +479,57 @@ mod tests {
     }
 
     #[test]
+    fn a_new_journal_and_its_work_live_in_the_service_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put(root, "mods/a.jar", b"old");
+        let tx = FileTransaction::begin(root, SYNC_JOURNAL, plan(&["mods/a.jar"], &[]), None).unwrap();
+        assert!(tx.stage_path("mods/a.jar").unwrap().starts_with(root.join(".launcher").join("work")));
+        assert!(root.join(".launcher").join("journal").join(SYNC_JOURNAL.file).is_file());
+        assert!(!root.join(SYNC_JOURNAL.legacy).exists() && !root.join(LEGACY_WORK_DIR).exists());
+    }
+
+    #[test]
+    fn an_unfinished_old_journal_is_undone_in_its_old_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let id = "0123456789abcdef0123456789abcdef";
+        put(root, &format!("{LEGACY_WORK_DIR}/{id}/backup/mods/a.jar"), b"old");
+        put(root, "mods/a.jar", b"new");
+        let applying = json!({"schema_version": 2, "status": "applying", "transaction_id": id, "entries": [
+            {"path": "mods/a.jar", "kind": "replace", "state": "applied", "had_original": true}]});
+        fs::write(root.join(".launcher-modrinth-sync.json"), applying.to_string()).unwrap();
+        assert!(recover_interrupted(root).is_empty());
+        assert_eq!(fs::read(root.join("mods/a.jar")).unwrap(), b"old");
+        assert!(!root.join(LEGACY_WORK_DIR).join(id).exists(), "its work is cleared");
+    }
+
+    #[test]
+    fn a_finished_old_journal_does_not_hold_back_a_new_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put(root, "mods/a.jar", b"old");
+        let done = json!({"schema_version": 2, "status": "complete",
+            "transaction_id": "0123456789abcdef0123456789abcdef", "entries": []});
+        fs::write(root.join(SYNC_JOURNAL.legacy), done.to_string()).unwrap();
+        let tx = FileTransaction::begin(root, SYNC_JOURNAL, plan(&["mods/a.jar"], &[]), None).unwrap();
+        assert!(tx.stage_path("mods/a.jar").unwrap().starts_with(root.join(".launcher").join("work")));
+        assert!(root.join(".launcher").join("journal").join(SYNC_JOURNAL.file).is_file());
+    }
+
+    #[test]
     fn launches_undo_interrupted_changes_but_leave_commits() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let id = "0123456789abcdef0123456789abcdef";
-        put(root, &format!("{SYNC_WORK_DIR}/{id}/backup/mods/a.jar"), b"old");
+        put(root, &format!("{LEGACY_WORK_DIR}/{id}/backup/mods/a.jar"), b"old");
         put(root, "mods/a.jar", b"new");
         let applying = json!({"schema_version": 2, "status": "applying", "transaction_id": id, "entries": [
             {"path": "mods/a.jar", "kind": "replace", "state": "applied", "had_original": true}]});
         fs::write(root.join(".launcher-modrinth-sync.json"), applying.to_string()).unwrap();
         let committing = json!({"schema_version": 2, "status": "committing", "commit_key": "sync:a",
             "transaction_id": "ffffffffffffffffffffffffffffffff", "entries": []});
-        fs::write(root.join(SYNC_JOURNAL), committing.to_string()).unwrap();
+        fs::write(root.join(SYNC_JOURNAL.legacy), committing.to_string()).unwrap();
         fs::write(root.join(".launcher-notes.json"), "{").unwrap();
         assert!(recover_interrupted(root).is_empty());
         assert_eq!(fs::read(root.join("mods/a.jar")).unwrap(), b"old");
@@ -488,7 +547,7 @@ mod tests {
         let id = "0123456789abcdef0123456789abcdef";
         // The backup of mods/a.jar is gone: this undo can never finish.
         put(root, "mods/a.jar", b"new");
-        put(root, &format!("{SYNC_WORK_DIR}/{id}/stage/keep.txt"), b"work");
+        put(root, &format!("{LEGACY_WORK_DIR}/{id}/stage/keep.txt"), b"work");
         let applying = json!({"schema_version": 2, "status": "applying", "transaction_id": id, "entries": [
             {"path": "mods/a.jar", "kind": "replace", "state": "applied", "had_original": true}]});
         let name = ".launcher-modrinth-sync.json";
@@ -509,11 +568,12 @@ mod tests {
         );
         assert!(!root.join(name).exists());
         assert_eq!(fs::read(root.join("mods/a.jar")).unwrap(), b"new", "nothing is guessed");
-        assert!(root.join(SYNC_WORK_DIR).join(id).is_dir(), "the work folder, with any backups, stays");
+        assert!(root.join(LEGACY_WORK_DIR).join(id).is_dir(), "the work folder, with any backups, stays");
         assert!(recover_interrupted(root).is_empty(), "one warning, not one per launch");
         // The operation that owns the journal works again.
         let files: [(&str, &[u8]); 1] = [("mods/b.jar", b"b")];
-        execute(root, name, plan(&["mods/b.jar"], &[]), |tx| stage(tx, &files), ApplyHooks::default())
+        let modrinth = JournalName { file: "modrinth-content.json", legacy: name };
+        execute(root, modrinth, plan(&["mods/b.jar"], &[]), |tx| stage(tx, &files), ApplyHooks::default())
             .unwrap();
         assert_eq!(fs::read(root.join("mods/b.jar")).unwrap(), b"b");
     }
@@ -595,7 +655,7 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code, ErrorCode::InvalidInput);
-        assert!(!staged.get() && !root.join(SYNC_JOURNAL).exists());
+        assert!(!staged.get() && !root.join(JOURNAL_DIR).join(SYNC_JOURNAL.file).exists());
         assert_eq!(fs::read(outside.path().join("a.jar")).unwrap(), b"outside");
     }
 

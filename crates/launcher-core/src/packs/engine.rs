@@ -25,7 +25,7 @@ use crate::minecraft::InstallProgress;
 use crate::minecraft::install::InstalledVersion;
 use crate::net::downloader::{DownloadProgress, DownloadTask, Downloader, HashKind, hash_file};
 use crate::net::preflight::{SpaceRequest, preflight};
-use crate::storage::journal::SyncJournal;
+use crate::storage::journal::{JournalName, SyncJournal};
 use crate::storage::json::write_json_file;
 use crate::storage::transaction::{ApplyHooks, FileTransaction, TransactionPlan};
 use crate::storage::versions::{Build, VersionStore};
@@ -40,8 +40,8 @@ pub struct PackKind {
     pub provider: &'static str,
     /// The build's record of its pack (`.launcher/<provider>-pack.json`).
     pub record: &'static str,
-    /// The update's journal (reserved in a build: packs cannot write it).
-    pub journal: &'static str,
+    /// The update's journal (in the build's service folder: packs cannot write it).
+    pub journal: JournalName,
     /// Where the pack's archive is downloaded to in the build while it is read (reserved too).
     pub archive: &'static str,
     /// Held on the build's folder while a pack fills or updates it.
