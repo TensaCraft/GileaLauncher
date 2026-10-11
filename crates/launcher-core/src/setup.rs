@@ -21,7 +21,7 @@ pub const SETUP_VERSION_KEY: &str = "setup_wizard_version";
 pub const SETUP_VERSION: u64 = 1;
 
 const MINECRAFT_DIR_KEY: &str = "minecraft_game_dir";
-const BACKUPS_DIR_KEY: &str = "world_backups_dir";
+use crate::backups::DIR_KEY as BACKUPS_DIR_KEY;
 
 const STATE_FILES: &[&str] = &["config.json", "profiles.json", "versions.json", "profile-token.key"];
 

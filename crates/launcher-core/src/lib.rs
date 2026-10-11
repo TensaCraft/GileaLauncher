@@ -1,6 +1,7 @@
 //! Launcher core: all launcher logic, independent of Tauri.
 
 pub mod auth;
+pub mod backups;
 pub mod builds;
 pub mod content;
 pub mod core_app;
