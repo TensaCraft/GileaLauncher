@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
+use launcher_core::backups::BuildBackups;
 use launcher_core::net::preflight::{SpaceRequest, preflight};
 use launcher_core::storage::json::write_json_file;
 use launcher_core::storage::versions::Build;
@@ -137,8 +138,9 @@ impl Store {
         Store { root: root.into() }
     }
 
+    /// `<backups>/<build>/worlds/<world>`.
     pub fn world_dir(&self, build_folder: &str, world: &str) -> PathBuf {
-        self.root.join(safe_name(build_folder)).join(safe_name(world))
+        BuildBackups::of(&self.root, &safe_name(build_folder)).worlds().join(safe_name(world))
     }
 
     /// Backs world `world` of the game folder `game` up: a zip beside its metadata, written under
@@ -311,7 +313,8 @@ impl Store {
     /// backups, with that metadata, then the folders left empty. Nothing else there is touched:
     /// the backups folder may be one the player keeps other things in.
     pub fn delete_build(&self, build: &Build) -> AppResult<()> {
-        let dir = self.root.join(build_folder(build));
+        let backups = BuildBackups::of(&self.root, &build_folder(build));
+        let dir = backups.worlds();
         let Ok(worlds) = fs::read_dir(&dir) else { return Ok(()) };
         for world in worlds.flatten() {
             if !world.file_type().is_ok_and(|t| t.is_dir()) {
@@ -339,6 +342,7 @@ impl Store {
             let _ = fs::remove_dir(&world_dir);
         }
         let _ = fs::remove_dir(&dir);
+        let _ = fs::remove_dir(backups.dir());
         Ok(())
     }
 }
@@ -471,6 +475,15 @@ mod tests {
         assert_eq!(method(&mut zip, "region/r.0.0.mca"), zip::CompressionMethod::Stored);
         assert_eq!(method(&mut zip, "level.dat"), zip::CompressionMethod::Stored);
         assert_eq!(method(&mut zip, "stats.json"), zip::CompressionMethod::Deflated);
+    }
+
+    #[test]
+    fn a_world_s_backups_sit_in_its_build_s_worlds_folder() {
+        let store = Store::new("/backups");
+        assert_eq!(
+            store.world_dir("aeronautics", "Мій світ"),
+            Path::new("/backups").join("aeronautics").join("worlds").join(safe_name("Мій світ"))
+        );
     }
 
     #[test]

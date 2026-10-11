@@ -4,6 +4,7 @@ pub mod atomic;
 pub mod config;
 pub mod journal;
 pub mod json;
+pub mod layout;
 pub mod transaction;
 pub mod versions;
 

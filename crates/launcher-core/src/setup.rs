@@ -9,6 +9,7 @@ use launcher_shared::{
 };
 use serde_json::json;
 
+use crate::backups::DIR_KEY as BACKUPS_DIR_KEY;
 use crate::paths::{
     LauncherPaths, PathEnv, default_app_state_dir, default_minecraft_dir, is_protected_dir, probe_writable,
     write_pointer,
@@ -21,7 +22,6 @@ pub const SETUP_VERSION_KEY: &str = "setup_wizard_version";
 pub const SETUP_VERSION: u64 = 1;
 
 const MINECRAFT_DIR_KEY: &str = "minecraft_game_dir";
-use crate::backups::DIR_KEY as BACKUPS_DIR_KEY;
 
 const STATE_FILES: &[&str] = &["config.json", "profiles.json", "versions.json", "profile-token.key"];
 
@@ -105,7 +105,7 @@ pub fn setup_state(env: &PathEnv, paths: &LauncherPaths, config: &ConfigStore, l
         app_state_dir: display(&paths.app_state_dir),
         default_app_state_dir: display(&default_app_state_dir(env)),
         derived_minecraft_dir: display(&minecraft),
-        derived_backups_dir: display(&minecraft.join("backups").join("worlds")),
+        derived_backups_dir: display(&crate::backups::default_root(&minecraft)),
         issues,
     }
 }
@@ -127,7 +127,7 @@ pub fn preview(env: &PathEnv, dir: &str) -> AppResult<SetupPreview> {
     let minecraft = default_minecraft_dir(env, &target);
     Ok(SetupPreview {
         app_state_dir: display(&target),
-        backups_dir: display(&minecraft.join("backups").join("worlds")),
+        backups_dir: display(&crate::backups::default_root(&minecraft)),
         minecraft_dir: display(&minecraft),
         issue: dir_issue(env, &target, "setup_issue_app_state_protected", "setup_issue_app_state_unwritable"),
     })
@@ -146,12 +146,7 @@ pub fn preview_current(
         return Ok(derived);
     }
     let minecraft = paths.minecraft_dir.clone();
-    let backups = config
-        .get_str(BACKUPS_DIR_KEY)
-        .map(|dir| dir.trim().to_string())
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| minecraft.join("backups").join("worlds"));
+    let backups = crate::backups::root(config, &minecraft);
     Ok(SetupPreview {
         app_state_dir: derived.app_state_dir,
         minecraft_dir: display(&minecraft),
@@ -392,10 +387,7 @@ mod tests {
         let p = preview(&env, docs.to_str().unwrap()).unwrap();
         assert_eq!(p.app_state_dir, docs.join(APP_NAME).to_string_lossy());
         assert_eq!(p.minecraft_dir, docs.join(APP_NAME).join("minecraft").to_string_lossy());
-        assert_eq!(
-            p.backups_dir,
-            docs.join(APP_NAME).join("minecraft").join("backups").join("worlds").to_string_lossy()
-        );
+        assert_eq!(p.backups_dir, docs.join(APP_NAME).join("minecraft").join("backups").to_string_lossy());
     }
 
     #[test]
@@ -424,7 +416,7 @@ mod tests {
         assert_eq!(p.backups_dir, home.path().join("saves-copies").to_string_lossy());
         cfg.delete("world_backups_dir").unwrap();
         let p = preview_current(&env, &paths, &cfg, paths.app_state_dir.to_str().unwrap()).unwrap();
-        assert_eq!(p.backups_dir, custom.join("backups").join("worlds").to_string_lossy());
+        assert_eq!(p.backups_dir, custom.join("backups").to_string_lossy());
     }
 
     #[test]

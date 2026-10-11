@@ -3,12 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
+use launcher_core::backups;
 use launcher_core::storage::config::ConfigStore;
-use serde_json::Value;
 
 pub const ENABLED: &str = "world_backups_enabled";
 pub const KEEP: &str = "world_backups_keep_count";
-pub const DIR: &str = "world_backups_dir";
+pub const DIR: &str = backups::DIR_KEY;
 pub const DEFAULT_KEEP: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,9 +19,9 @@ pub struct Settings {
     pub default_dir: PathBuf,
 }
 
-/// Where backups go when the config names no folder.
+/// The backups folder when the config names none (every build's backups, worlds among them).
 pub fn default_dir(mc_dir: &Path) -> PathBuf {
-    mc_dir.join("backups").join("worlds")
+    backups::default_root(mc_dir)
 }
 
 pub fn read(config: &ConfigStore, mc_dir: &Path) -> Settings {
@@ -32,13 +32,5 @@ pub fn read(config: &ConfigStore, mc_dir: &Path) -> Settings {
         .and_then(|n| u32::try_from(n).ok())
         .filter(|n| *n >= 1)
         .unwrap_or(DEFAULT_KEEP);
-    let default_dir = default_dir(mc_dir);
-    let dir = config
-        .get(DIR)
-        .and_then(|v| match v {
-            Value::String(s) if !s.trim().is_empty() => Some(PathBuf::from(s.trim())),
-            _ => None,
-        })
-        .unwrap_or_else(|| default_dir.clone());
-    Settings { enabled, keep, dir, default_dir }
+    Settings { enabled, keep, dir: backups::root(config, mc_dir), default_dir: default_dir(mc_dir) }
 }

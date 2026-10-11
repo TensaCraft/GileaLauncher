@@ -476,7 +476,7 @@
   "setup_wizard_title": "Initial setup",
   "setup_wizard_launcher_data": "Launcher data",
   "setup_wizard_minecraft_dir": "Minecraft directory",
-  "setup_wizard_backups_dir": "World backups directory",
+  "setup_wizard_backups_dir": "Backups folder",
   "setup_wizard_storage_issue": "The selected storage folder cannot be prepared. Choose another path.",
   "setup_wizard_storage_ready": "The folder is ready for writing",
   "setup_wizard_create_paths": "Create folders",

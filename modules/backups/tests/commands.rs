@@ -146,7 +146,7 @@ async fn deleting_a_builds_backups_touches_only_its_backups() {
     let made = w.service.create(&w.key, "World").await.unwrap();
     let folders: Vec<PathBuf> = fs::read_dir(&games).unwrap().map(|e| e.unwrap().path()).collect();
     let [build_dir] = folders.as_slice() else { panic!("one build folder: {folders:?}") };
-    let world_dir = build_dir.join("World");
+    let world_dir = build_dir.join("worlds").join("World");
     assert!(world_dir.join(&made.zip_name).is_file());
     fs::write(build_dir.join("notes.txt"), b"mine").unwrap();
     fs::create_dir_all(build_dir.join("Other")).unwrap();
@@ -162,7 +162,13 @@ async fn deleting_a_builds_backups_touches_only_its_backups() {
 
     assert!(!world_dir.join(&made.zip_name).exists(), "its backup is gone");
     assert!(!world_dir.join(format!("{}.json", made.zip_name)).exists(), "with its metadata");
-    for kept in ["notes.txt", "Other/keep.txt", "World/mine.zip", "World/readme.txt", "World/theirs.zip"] {
+    for kept in [
+        "notes.txt",
+        "Other/keep.txt",
+        "worlds/World/mine.zip",
+        "worlds/World/readme.txt",
+        "worlds/World/theirs.zip",
+    ] {
         assert!(build_dir.join(kept).is_file(), "{kept} stays");
     }
 }

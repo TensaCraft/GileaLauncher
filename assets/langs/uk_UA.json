@@ -472,7 +472,7 @@
   "setup_wizard_title": "Початкове налаштування",
   "setup_wizard_launcher_data": "Дані лаунчера",
   "setup_wizard_minecraft_dir": "Каталог Minecraft",
-  "setup_wizard_backups_dir": "Каталог бекапів світів",
+  "setup_wizard_backups_dir": "Каталог бекапів",
   "setup_wizard_storage_issue": "Вибраний каталог даних неможливо підготувати. Виберіть інший шлях.",
   "setup_wizard_storage_ready": "Каталог готовий до запису",
   "setup_wizard_create_paths": "Створити каталоги",

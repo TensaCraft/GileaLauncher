@@ -7,7 +7,7 @@ use module_backups::dto::{BackupDto, BackupSettings, Kind, WorldDto};
 use serde_json::{Value, to_value};
 
 const WORLDS: [&str; 2] = ["New World", "Хардкор"];
-const DEFAULT_DIR: &str = "C:\\Users\\Steve\\AppData\\Roaming\\Launcher\\minecraft\\backups\\worlds";
+const DEFAULT_DIR: &str = "C:\\Users\\Steve\\AppData\\Roaming\\Launcher\\minecraft\\backups";
 /// 2026-09-29 10:00 UTC.
 const START: i64 = 1_790_676_000;
 

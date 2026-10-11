@@ -119,7 +119,7 @@ mod tests {
         config.set("world_backups_enabled", json!("yes")).unwrap();
         config.set("world_backups_keep_count", json!(1)).unwrap();
         let build = Build::new("Aero");
-        let store = Store::new(mc.join("backups").join("worlds"));
+        let store = Store::new(mc.join("backups"));
         launch(&game, &mc, &config, &build).await;
         launch(&game, &mc, &config, &build).await;
         assert_eq!(
@@ -145,7 +145,7 @@ mod tests {
         let lock = fs::File::create(game.join("saves/W/session.lock")).unwrap();
         lock.lock().unwrap();
         launch(&game, &mc, &config, &build).await;
-        let store = Store::new(mc.join("backups").join("worlds"));
+        let store = Store::new(mc.join("backups"));
         assert!(store.list(&build_folder(&build), "W").is_empty(), "a world mid-write is no backup");
         drop(lock);
         launch(&game, &mc, &config, &build).await;
