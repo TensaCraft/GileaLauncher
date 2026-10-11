@@ -28,6 +28,8 @@ modules/<id>/
 - **Registration.** `launcher-app` and `launcher-ui` have a `mod-<id>` feature per module. The lists of a build's modules are in `crates/launcher-app/src/modules.rs` and `crates/launcher-ui/src/modules.rs`.
 - **Default features.** Modules outside the default features (`tensa`, `diagnostics`) are checked separately by `cargo xtask check` and `test`: the `EXTRA_MODULES` list in `xtask/src/cmd.rs`.
 - **The CurseForge key.** `curseforge` works only with the launcher's CurseForge API key. The release workflow passes it from the repository secret `CURSE_FORGE_KEY` to the Package step as `CURSEFORGE_API_KEY`; only the module's backend reads it (`option_env!`), and the interface build never gets it. A build without the key (CI, forks) compiles and passes its tests and simply shows no CurseForge. The key never goes into the repository: a guard in `xtask` fails on any key-shaped string.
+- **The backups folder.** The core resolves it (`launcher_core::backups`): the setting `world_backups_dir`, by default `backups` in the games folder. Each build has one folder there, named by its id: `worlds/` (the `backups` module), `mods/` (the mods an update replaced) and `modpacks/` (a folder per pack update). Modules ask the core for a build's folder (`BuildBackups::of_build`) and never write backups into a build.
+- **The service folder.** A module keeps its files in a build only in `.launcher/` (its journal in `.launcher/journal/<module>.json`, see `storage::journal`). `storage::layout` moves what older versions kept elsewhere.
 
 ## Backend: `Module`
 

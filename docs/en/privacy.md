@@ -9,6 +9,8 @@ GileaLauncher is a Minecraft launcher that runs on your computer. It has no acco
 - **Settings, builds, worlds and mods** are kept in the launcher's folders (see "Where data is kept" in the [README](../../README.md#where-data-is-kept)).
 - **Accounts.** For a Microsoft account the launcher keeps your player name, UUID and the sign-in tokens Microsoft gives it. The tokens are encrypted, and the key sits in the same folder. This keeps them unreadable in a copied or shared file, not from someone who can use your computer account. Offline profiles keep only a name.
 - **Logs** of the launcher and of the game stay in those folders until you delete them.
+- **Backups.** World backups, the mods an update replaced and the modpack files a pack update replaced are kept in one backups folder, a folder per build. By default it is `backups` in the games folder; the setup wizard and the backups settings let you choose another.
+- **The launcher's own files in a build** (change journals, the launch log, notes about the build) are in the build's service folder `.launcher`.
 - **The launcher's own crashes.** If the launcher crashes, it keeps a short note (the error's text and its place in the launcher's code, without your home folder) in its cache folder, to ask you at the next start whether to report it. The note goes once it is reported or you choose not to; at most the five newest are kept, for 30 days.
 
 Nothing of this leaves your computer unless a step below says so.
@@ -73,6 +75,7 @@ To have a report you sent deleted, ask on [Discord](https://discord.com/invite/m
 ## Deleting your data
 
 - Delete an account on the launcher's Profiles page to delete its tokens.
+- Delete a build with "Delete build backups" ticked to delete its backups too.
 - Delete the launcher's folders to delete everything it keeps.
 
 ## Contact

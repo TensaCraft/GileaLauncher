@@ -22,6 +22,7 @@
 | Part | What it does |
 |---|---|
 | `paths`, `storage`, `settings`, `setup` | folders, atomic writes, config, the first-run wizard |
+| `backups` | the backups folder and each build's folder in it |
 | `auth` | Microsoft and offline profiles |
 | `minecraft`, `loaders`, `java` | versions, libraries, assets, Forge/NeoForge/Fabric/Quilt, Mojang's Java |
 | `builds`, `content` | builds and their content: mods, resource packs, shaders, screenshots |
@@ -70,6 +71,12 @@ launcher-ui (wasm) ──ui-kit::ipc──▶ Tauri commands (launcher-app) ─�
 | macOS | `~/Library/Application Support/<name>` | `…/<name>/minecraft` | `~/Library/Caches/<name>` |
 
 The first-run wizard can move the state and the games to another folder. The pointer to it (`storage.json`) stays in the default state folder.
+
+Inside the games folder:
+
+- **`games/<build>/`** is a build's game folder. The launcher's own files in it are in `.launcher/`: change journals and their work files, the launch log, the claim of a build being installed, a server build's notes. `version.json` stays in the root. Copying a build leaves out the journals, work files, claim and launch log.
+- **The backups folder** (`launcher_core::backups`, by default `backups/`) holds a folder per build: `worlds/`, `mods/`, `modpacks/`.
+- **`storage::layout`** moves what older versions kept in the old places. It runs in the background at each start until nothing is left; a build in play waits for a later start.
 
 ## Network
 
