@@ -574,7 +574,7 @@
   "version_delete_directory": "Delete the full build directory",
   "version_delete_directory_desc": "Deletes this build's game folder including mods, resource packs, shaders, worlds, logs, and settings.",
   "version_delete_backups": "Delete build backups",
-  "version_delete_backups_desc": "Deletes all world backups that belong to this build.",
+  "version_delete_backups_desc": "Deletes all backups of this build: worlds, mods and modpacks.",
   "delete_version_action": "Delete build",
   "confirm_delete_version": "Delete build {version}? Review the switches below to choose which data should be removed.",
   "version_delete_close_game_first": "Minecraft of this build is still running, maybe in the background without a window. Stop the game and try again.",

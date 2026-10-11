@@ -341,7 +341,7 @@ impl ModrinthService {
         if kind == ContentKind::Mods {
             for item in pending.iter().filter_map(|c| c.replaced()) {
                 let (root, relative, name) = (game.clone(), item.relative.clone(), item.filename.clone());
-                let shelf = BuildBackups::of(&(self.deps.backups)(), &target.build.key).mods();
+                let shelf = BuildBackups::of_build(&(self.deps.backups)(), &target.build).mods();
                 blocking(move || back_up(&shelf, &root, &relative, &name)).await?;
             }
         }

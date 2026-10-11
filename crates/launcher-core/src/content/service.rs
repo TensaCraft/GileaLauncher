@@ -166,7 +166,7 @@ impl ContentService {
 
     /// Build `build`'s mods' backups.
     fn mod_backups(&self, build: &Build) -> PathBuf {
-        BuildBackups::of(&(self.backups)(), &build.key).mods()
+        BuildBackups::of_build(&(self.backups)(), build).mods()
     }
 
     fn scan(&self, build: &Build, kind: ContentKind) -> (bool, Vec<Entry>) {

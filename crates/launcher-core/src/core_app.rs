@@ -232,6 +232,26 @@ impl CoreApp {
             instances.clone(),
         ));
         let backups = resolver(config.clone(), paths.minecraft_dir.clone());
+        // What the version before kept in the old places moves in the background: a copy to another
+        // drive may be large. A build in play, or busy with a change, waits for a later start.
+        let (moving, settings, holding) = (versions.clone(), config.clone(), instances.clone());
+        let _ = std::thread::Builder::new().name("layout".into()).spawn(move || {
+            let mc_dir = moving.minecraft_dir().to_path_buf();
+            let report = crate::storage::layout::move_all(&settings, &moving, |build| {
+                let game = crate::launch::options::game_dir(build, &mc_dir);
+                if crate::launch::alive::game_open(&game) {
+                    return None;
+                }
+                holding.try_acquire(&game, "layout").ok()
+            });
+            if report.moved > 0 || !report.skipped.is_empty() {
+                tracing::info!(
+                    "Moved {} of the launcher's files to their new places; busy builds: {:?}",
+                    report.moved,
+                    report.skipped
+                );
+            }
+        });
         let content = Arc::new(ContentService::new(
             versions.clone(),
             instances.clone(),

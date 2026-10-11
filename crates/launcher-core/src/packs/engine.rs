@@ -270,7 +270,7 @@ pub async fn update(
     .await?;
     new_record.managed_files = choice.managed.clone();
     // The player's copies of what the update replaces go to the build's modpack backups first.
-    let folder = backup_folder(&BuildBackups::of(&(deps.backups)(), &build.key).modpacks());
+    let folder = backup_folder(&BuildBackups::of_build(&(deps.backups)(), build).modpacks());
     if !choice.backups.is_empty() {
         let (root, paths, to) = (game.to_path_buf(), choice.backups.clone(), folder.clone());
         blocking(move || back_up_players_files(&root, &paths, &to)).await?;

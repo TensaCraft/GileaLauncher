@@ -1,5 +1,6 @@
-//! The launcher's own files moved, once, to where they live now: every backup in its build's
-//! folder of the backups folder (`crate::backups`).
+//! The launcher's own files moved to where they live now: every backup in its build's folder of
+//! the backups folder (`crate::backups`), every other file of the launcher's in its build's service
+//! folder (`.launcher/`). `move_all` runs at each start until nothing is left in the old places.
 
 use std::fs;
 use std::io;
@@ -8,12 +9,14 @@ use std::path::{Path, PathBuf};
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde_json::{Value, json};
 
-use crate::backups::{DIR_KEY, LAYOUT_KEY, default_root, old_default};
+use crate::backups::{BuildBackups, DIR_KEY, LAYOUT_KEY, default_root, old_default};
+use crate::launch::options::game_dir;
 use crate::launch::process::{LAUNCH_LOG, launch_log};
 use crate::lock::path_key;
 use crate::storage::atomic::rename_retrying;
 use crate::storage::config::ConfigStore;
 use crate::storage::journal::{JOURNAL_DIR, KNOWN_JOURNALS, LEGACY_WORK_DIR, SyncJournal};
+use crate::storage::versions::{Build, VersionStore};
 
 /// The layout `LAYOUT_KEY` names once every world backup sits in its build's `worlds/`.
 const LAYOUT: u64 = 2;
@@ -107,14 +110,16 @@ fn remove_any(path: &Path) -> io::Result<()> {
 /// Moves `from` (a file or a folder) to `to`, its folder made first: a rename, or across drives
 /// a copy, with `from` removed only once the copy is whole (a copy cut short is removed instead).
 pub fn move_dir(from: &Path, to: &Path) -> io::Result<()> {
-    move_with(from, to, &copy_all)
+    move_with(from, to, &rename_retrying, &copy_all)
 }
 
-fn move_with(from: &Path, to: &Path, copy: &dyn Fn(&Path, &Path) -> io::Result<()>) -> io::Result<()> {
+type Step = dyn Fn(&Path, &Path) -> io::Result<()>;
+
+fn move_with(from: &Path, to: &Path, rename: &Step, copy: &Step) -> io::Result<()> {
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent)?;
     }
-    match rename_retrying(from, to) {
+    match rename(from, to) {
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
             if let Err(e) = copy(from, to) {
                 let _ = remove_any(to);
@@ -124,6 +129,75 @@ fn move_with(from: &Path, to: &Path, copy: &dyn Fn(&Path, &Path) -> io::Result<(
         }
         other => other,
     }
+}
+
+/// What `move_all` did: how many files and folders moved, the builds that were busy, and what
+/// failed with why. Both of the last wait for the next start.
+#[derive(Debug, Default)]
+pub struct LayoutReport {
+    pub moved: usize,
+    pub skipped: Vec<String>,
+    pub failed: Vec<(String, String)>,
+}
+
+/// The game folder `game` has something of the launcher's in the old places.
+fn has_old_files(game: &Path) -> bool {
+    let old = [
+        game.join("mods").join(crate::content::backups::BACKUPS),
+        game.join(".launcher").join("pack-backups"),
+        game.join(".launcher-tensa-checked.json"),
+        game.join("logs").join(LAUNCH_LOG),
+        game.join(LEGACY_WORK_DIR),
+    ];
+    old.iter().chain(&KNOWN_JOURNALS.map(|name| game.join(name.legacy))).any(|path| path.exists())
+}
+
+/// Moves everything the version before kept in the old places: the world backups (once), then
+/// each build's mods' and modpack's backups and service files. A build is moved only while `hold`
+/// holds it (its guard is kept until its files are in place); one `hold` cannot hold (it is in play
+/// or changing) waits for a later start, and so does one whose move failed. A build with nothing
+/// left in the old places is not held. Nothing moves while `config.json` is damaged.
+pub fn move_all<G>(
+    config: &ConfigStore,
+    versions: &VersionStore,
+    hold: impl Fn(&Build) -> Option<G>,
+) -> LayoutReport {
+    let mc_dir = versions.minecraft_dir();
+    let mut report = LayoutReport::default();
+    if !config.is_healthy() {
+        // The backups folder it names is not known, and the file is never rewritten by a start.
+        let why = "config.json is damaged: nothing moves until it is fixed or a setting changes";
+        tracing::warn!("Unable to move the launcher's files to their new places: {why}");
+        report.failed.push(("settings".into(), why.into()));
+        return report;
+    }
+    match move_world_backups(config, mc_dir) {
+        Ok(moved) => report.moved += moved,
+        Err(e) => report.failed.push(("worlds".into(), e.to_string())),
+    }
+    let root = crate::backups::root(config, mc_dir);
+    for build in versions.list() {
+        let game = game_dir(&build, mc_dir);
+        if !has_old_files(&game) {
+            continue;
+        }
+        let Some(_held) = hold(&build) else {
+            report.skipped.push(build.key.clone());
+            continue;
+        };
+        let backups = BuildBackups::of_build(&root, &build);
+        let moved = move_mod_backups(&game, &backups.mods()).and_then(|mods| {
+            Ok(mods + move_pack_backups(&game, &backups.modpacks())? + move_service_files(&game)?)
+        });
+        match moved {
+            Ok(moved) => report.moved += moved,
+            Err(e) => report.failed.push((build.key.clone(), e.to_string())),
+        }
+    }
+    for (what, why) in &report.failed {
+        tracing::warn!("Unable to move the launcher's files of {what} to their new place: {why}");
+    }
+    report
 }
 
 /// The mods' backups a build kept in `mods/.backups/` move to `to` (its build's `mods/` of the
@@ -270,6 +344,7 @@ mod tests {
     use super::*;
     use crate::backups::{DIR_KEY, LAYOUT_KEY, default_root, old_default};
     use crate::storage::config::ConfigStore;
+    use crate::storage::versions::{Build, VersionStore};
 
     /// A world backup as the backups module writes it: a zip beside its metadata.
     fn backup(dir: &Path, build: &str, world: &str) {
@@ -403,6 +478,84 @@ mod tests {
         assert!(service.join("launch.log").is_file() && !game.join("logs/launch.log").exists());
         assert!(game.join("logs/latest.log").is_file());
         assert!(!game.join(".launcher-sync").exists(), "an empty old work folder goes");
+    }
+
+    #[test]
+    fn a_move_across_drives_that_fails_leaves_the_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (from, to) =
+            (tmp.path().join("game/.launcher/pack-backups/1"), tmp.path().join("d/aero/modpacks/1"));
+        fs::create_dir_all(from.join("config")).unwrap();
+        fs::write(from.join("config/a.toml"), b"mine").unwrap();
+        let elsewhere = |_: &Path, _: &Path| Err(io::Error::from(io::ErrorKind::CrossesDevices));
+        let cut_short = |from: &Path, to: &Path| {
+            copy_all(from, to)?;
+            Err(io::Error::other("the drive is full"))
+        };
+        assert!(move_with(&from, &to, &elsewhere, &cut_short).is_err());
+        assert_eq!(fs::read(from.join("config/a.toml")).unwrap(), b"mine", "the source stays whole");
+        assert!(!to.exists(), "a copy cut short is removed");
+        move_with(&from, &to, &elsewhere, &copy_all).unwrap();
+        assert_eq!(fs::read(to.join("config/a.toml")).unwrap(), b"mine");
+        assert!(!from.exists(), "a whole copy takes the source's place");
+    }
+
+    #[test]
+    fn a_busy_build_is_skipped_and_moved_next_time() {
+        let (tmp, mc, config) = setup();
+        let versions = VersionStore::open(&tmp.path().join("state"), &mc);
+        for name in ["Aero", "Zeta", "Clean"] {
+            let mut build = Build::new(name);
+            versions.create(&mut build).unwrap();
+            if name != "Clean" {
+                let legacy = game_dir(&build, &mc).join("mods/.backups");
+                fs::create_dir_all(&legacy).unwrap();
+                fs::write(legacy.join("sodium.jar.backup"), name).unwrap();
+            }
+        }
+        backup(&old_default(&mc), "aero", "World");
+        let asked = std::cell::RefCell::new(Vec::new());
+        let report = move_all(&config, &versions, |build: &Build| {
+            asked.borrow_mut().push(build.key.clone());
+            (build.key != "aero").then_some(())
+        });
+        assert_eq!(report.skipped, vec!["aero".to_string()]);
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert_eq!(report.moved, 2, "the world and Zeta's mod");
+        assert!(!asked.borrow().contains(&"clean".to_string()), "a build with nothing to move is not held");
+        let root = default_root(&mc);
+        assert_eq!(fs::read(root.join("zeta/mods/sodium.jar.backup")).unwrap(), b"Zeta");
+        assert!(root.join("aero/worlds/World/a.zip").is_file(), "world backups move whatever the builds do");
+        assert!(!root.join("aero/mods").exists(), "a busy build's files wait");
+        let again = move_all(&config, &versions, |_: &Build| Some(()));
+        assert!(again.skipped.is_empty() && again.failed.is_empty());
+        assert_eq!(fs::read(root.join("aero/mods/sodium.jar.backup")).unwrap(), b"Aero");
+        assert!(!versions.games_dir().join("aero/mods/.backups").exists());
+    }
+
+    #[test]
+    fn nothing_moves_while_the_settings_file_is_damaged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mc = tmp.path().join("minecraft");
+        fs::write(tmp.path().join("config.json"), b"{ broken").unwrap();
+        let config = ConfigStore::open(tmp.path().join("config.json"));
+        let versions = VersionStore::open(&tmp.path().join("state"), &mc);
+        let mut build = Build::new("Aero");
+        versions.create(&mut build).unwrap();
+        let legacy = game_dir(&build, &mc).join("mods/.backups");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("sodium.jar.backup"), b"old").unwrap();
+        backup(&old_default(&mc), "aero", "World");
+        let report = move_all(&config, &versions, |_: &Build| Some(()));
+        assert_eq!((report.moved, report.failed.len()), (0, 1), "{report:?}");
+        assert_eq!(
+            fs::read(tmp.path().join("config.json")).unwrap(),
+            b"{ broken",
+            "the file is never rewritten"
+        );
+        assert!(
+            legacy.join("sodium.jar.backup").is_file() && old_default(&mc).join("aero/World/a.zip").is_file()
+        );
     }
 
     #[test]

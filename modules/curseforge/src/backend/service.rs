@@ -453,7 +453,7 @@ impl CurseForgeService {
                     let name =
                         now.rsplit('/').next().unwrap_or(now).trim_end_matches(".disabled").to_string();
                     let (root, relative) = (game.clone(), now.clone());
-                    let shelf = BuildBackups::of(&(self.deps.backups)(), &target.build.key).mods();
+                    let shelf = BuildBackups::of_build(&(self.deps.backups)(), &target.build).mods();
                     blocking(move || back_up(&shelf, &root, &relative, &name)).await?;
                 }
             }

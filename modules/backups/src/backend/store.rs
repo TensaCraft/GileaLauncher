@@ -309,14 +309,14 @@ impl Store {
         Ok(())
     }
 
-    /// Deletes every backup of `build`: in its folder, the zips whose metadata says they are its
-    /// backups, with that metadata, then the folders left empty. Nothing else there is touched:
-    /// the backups folder may be one the player keeps other things in.
+    /// Deletes every backup of `build`, its folder of the backups folder with them: in `worlds/`,
+    /// the zips whose metadata says they are its backups, with that metadata; its mods' and
+    /// modpack's backups; then the folders left empty. Nothing else there is touched: the backups
+    /// folder may be one the player keeps other things in.
     pub fn delete_build(&self, build: &Build) -> AppResult<()> {
         let backups = BuildBackups::of(&self.root, &build_folder(build));
         let dir = backups.worlds();
-        let Ok(worlds) = fs::read_dir(&dir) else { return Ok(()) };
-        for world in worlds.flatten() {
+        for world in fs::read_dir(&dir).into_iter().flatten().flatten() {
             if !world.file_type().is_ok_and(|t| t.is_dir()) {
                 continue;
             }
@@ -342,6 +342,7 @@ impl Store {
             let _ = fs::remove_dir(&world_dir);
         }
         let _ = fs::remove_dir(&dir);
+        backups.remove_mods_and_modpacks().map_err(|e| io_err(&backups.dir(), e))?;
         let _ = fs::remove_dir(backups.dir());
         Ok(())
     }
@@ -587,5 +588,24 @@ mod tests {
         store.create(&build("b"), &game, "W", Kind::Manual, Utc::now()).unwrap();
         store.delete_build(&build("b")).unwrap();
         assert!(!tmp.path().join("backups").join("b").exists());
+    }
+
+    #[test]
+    fn deleting_a_build_with_its_backups_removes_its_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        world(&game, "W");
+        let root = tmp.path().join("backups");
+        let store = Store::new(&root);
+        store.create(&build("b"), &game, "W", Kind::Manual, Utc::now()).unwrap();
+        store.create(&build("c"), &game, "W", Kind::Manual, Utc::now()).unwrap();
+        let mine = BuildBackups::of(&root, &build_folder(&build("b")));
+        fs::create_dir_all(mine.mods()).unwrap();
+        fs::write(mine.mods().join("sodium.jar.backup"), b"old").unwrap();
+        fs::create_dir_all(mine.modpacks().join("2026-10-01_10-00-00/config")).unwrap();
+        fs::write(mine.modpacks().join("2026-10-01_10-00-00/config/a.toml"), b"mine").unwrap();
+        store.delete_build(&build("b")).unwrap();
+        assert!(!mine.dir().exists(), "its worlds', mods' and modpack's backups go together");
+        assert_eq!(store.list("c", "W").len(), 1, "another build's stay");
     }
 }
