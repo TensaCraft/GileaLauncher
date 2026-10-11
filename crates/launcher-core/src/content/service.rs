@@ -20,6 +20,7 @@ use super::packs::{
 };
 use super::screenshots::{SCREENSHOTS, ScreenshotFile, find_screenshot, list_screenshots, rename_screenshot};
 use super::thumbs::Thumbs;
+use crate::backups::{BackupsRoot, BuildBackups};
 use crate::feedback::FeedbackService;
 use crate::launch::options::{component_id, game_dir};
 use crate::lock::Coordinator;
@@ -34,6 +35,7 @@ pub struct ContentService {
     backup_cache: MetadataCache,
     /// Screenshot thumbnails for the Screenshots page.
     thumbs: Thumbs,
+    backups: BackupsRoot,
 }
 
 fn io_error(path: &Path, e: io::Error) -> AppError {
@@ -139,11 +141,13 @@ impl ContentService {
         instances: Arc<Coordinator>,
         feedback: Arc<FeedbackService>,
         thumbs_dir: PathBuf,
+        backups: BackupsRoot,
     ) -> ContentService {
         ContentService {
             versions,
             instances,
             feedback,
+            backups,
             cache: MetadataCache::default(),
             backup_cache: MetadataCache::default(),
             thumbs: Thumbs::new(thumbs_dir),
@@ -160,13 +164,18 @@ impl ContentService {
         game_dir(build, self.versions.minecraft_dir())
     }
 
+    /// Build `build`'s mods' backups.
+    fn mod_backups(&self, build: &Build) -> PathBuf {
+        BuildBackups::of(&(self.backups)(), &build.key).mods()
+    }
+
     fn scan(&self, build: &Build, kind: ContentKind) -> (bool, Vec<Entry>) {
         let dir = self.folder(build);
         let loader = component_id(build).and_then(LoaderKind::of_component);
         match kind {
             ContentKind::Mods if !mods_supported(build.client.as_deref()) => (false, Vec::new()),
             ContentKind::Mods => {
-                let found = backups(&dir, loader, &self.backup_cache);
+                let found = backups(&self.mod_backups(build), loader, &self.backup_cache);
                 (true, scan_mods(&dir, loader, &self.cache, &found))
             }
             ContentKind::ResourcePacks => {
@@ -315,9 +324,11 @@ impl ContentService {
         if kind != ContentKind::Mods {
             return Err(AppError::new(ErrorCode::Unsupported, "only mods have backups"));
         }
-        let loader = component_id(&self.build(key)?).and_then(LoaderKind::of_component);
+        let build = self.build(key)?;
+        let (loader, shelf) =
+            (component_id(&build).and_then(LoaderKind::of_component), self.mod_backups(&build));
         self.change(key, kind, file, |game, entry, _| {
-            let found = backups(game, loader, &self.backup_cache);
+            let found = backups(&shelf, loader, &self.backup_cache);
             let backup = backup_of(&found, &entry.item.filename, entry.item.mod_id.as_deref(), &entry.path)
                 .ok_or_else(|| {
                 AppError::new(ErrorCode::BackupNotFound, format!("no backup of {}", entry.item.filename))

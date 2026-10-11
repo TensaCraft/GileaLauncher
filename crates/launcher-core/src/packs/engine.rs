@@ -13,6 +13,7 @@ use launcher_shared::{AppError, AppResult, ErrorCode, LoaderKind, Text};
 use serde_json::{Value, json};
 
 use super::{Override, Pack, PackFile, PackRecord, extract, override_sha1s};
+use crate::backups::{BackupsRoot, BuildBackups};
 use crate::content::held::take_copy;
 use crate::content::inventory::{MetadataCache, scan_mods};
 use crate::content::jar::inspect_mod_jar;
@@ -66,6 +67,8 @@ pub struct PackDeps {
     pub gpu_mode: Arc<dyn Fn() -> String + Send + Sync>,
     /// Whether build `key`'s game runs.
     pub running: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    /// Where a pack update keeps the player's copies of what it replaces.
+    pub backups: BackupsRoot,
 }
 
 /// The pack version a build gets.
@@ -266,19 +269,20 @@ pub async fn update(
     })
     .await?;
     new_record.managed_files = choice.managed.clone();
-    // The player's copies of what the update replaces go to a folder of their own first.
-    let folder = backup_folder(game);
-    let backups: Vec<(String, String)> =
-        choice.backups.iter().map(|p| (p.clone(), format!("{folder}/{p}"))).collect();
-    let backup_bytes: u64 =
-        backups.iter().filter_map(|(p, _)| fs::metadata(game.join(p)).ok()).map(|m| m.len()).sum();
+    // The player's copies of what the update replaces go to the build's modpack backups first.
+    let folder = backup_folder(&BuildBackups::of(&(deps.backups)(), &build.key).modpacks());
+    if !choice.backups.is_empty() {
+        let (root, paths, to) = (game.to_path_buf(), choice.backups.clone(), folder.clone());
+        blocking(move || back_up_players_files(&root, &paths, &to)).await?;
+    }
+    let backups: Vec<(String, PathBuf)> =
+        choice.backups.iter().map(|p| (p.clone(), folder.join(p))).collect();
     let plan = TransactionPlan {
         replacements: choice
             .files
             .iter()
             .map(|f| f.path.clone())
             .chain(choice.overrides.iter().map(|o| o.path.clone()))
-            .chain(backups.iter().map(|(_, saved)| saved.clone()))
             .chain([kind.record.to_string()])
             .collect(),
         stale: choice.stale.clone(),
@@ -287,7 +291,6 @@ pub async fn update(
             .iter()
             .map(|f| f.size)
             .chain(choice.overrides.iter().map(|o| o.size))
-            .chain([backup_bytes])
             .fold(METADATA_RESERVE, u64::saturating_add),
         commit_key: Some(commit_key(kind, &build.key)),
         ..TransactionPlan::new(kind.update_operation)
@@ -295,8 +298,7 @@ pub async fn update(
     let commit = committer(&deps.versions, kind, &build.key, game);
     let (root, recover_with, journal) = (game.to_path_buf(), commit.clone(), kind.journal);
     let tx = blocking(move || FileTransaction::begin(&root, journal, plan, Some(&*recover_with))).await?;
-    let staged =
-        stage_update(deps, kind, &tx, game, archive, &choice, &backups, new_record.clone(), op).await;
+    let staged = stage_update(deps, kind, &tx, archive, &choice, new_record.clone(), op).await;
     let loader = pack.loader.as_ref().map(|(kind, _)| *kind);
     let (root, mods, stale) = (game.to_path_buf(), plan_mods(&choice), choice.stale.clone());
     blocking(move || {
@@ -307,43 +309,33 @@ pub async fn update(
             Err(e) => Err(tx.abort(e)),
         }
     })
-    .await?;
+    .await
+    .inspect_err(|_| {
+        // The update did not happen: nothing it replaced needs its copy.
+        let _ = fs::remove_dir_all(&folder);
+    })?;
     for (path, saved) in &backups {
-        tracing::info!("The update replaced {path} of {}; the copy there is in {saved}", build.name);
+        tracing::info!("The update replaced {path} of {}; the copy is {}", build.name, saved.display());
     }
     Ok(Swapped {
         number: new_record.version_number,
-        backups: backups.into_iter().map(|(_, saved)| saved).collect(),
-        folder,
+        backups: backups.into_iter().map(|(_, saved)| saved.to_string_lossy().into_owned()).collect(),
+        folder: folder.to_string_lossy().into_owned(),
     })
 }
 
-/// Stages the copies of the player's files in `backups` (path, where it is saved), the
-/// overrides and files `choice` puts, and the record with each file's hash, with progress.
+/// Stages the overrides and files `choice` puts, and the record with each file's hash, with
+/// progress.
 #[allow(clippy::too_many_arguments)]
 async fn stage_update(
     deps: &PackDeps,
     kind: &PackKind,
     tx: &FileTransaction,
-    game: &Path,
     archive: &Path,
     choice: &UpdateChoice,
-    backups: &[(String, String)],
     mut record: PackRecord,
     op: &OperationHandle,
 ) -> AppResult<()> {
-    let copies: Vec<(PathBuf, PathBuf)> = backups
-        .iter()
-        .map(|(path, saved)| Ok((game.join(path), tx.stage_path(saved)?)))
-        .collect::<AppResult<_>>()?;
-    blocking(move || {
-        for (from, to) in &copies {
-            fs::copy(from, to)
-                .map_err(|e| AppError::new(ErrorCode::Io, format!("{}: {e}", from.display())))?;
-        }
-        Ok(())
-    })
-    .await?;
     let targets: Vec<(Override, PathBuf)> = choice
         .overrides
         .iter()
@@ -424,20 +416,30 @@ fn one_copy_each(
 /// them (the game rewrites them itself, so a hash cannot tell).
 const PLAYER_SETTINGS: [&str; 4] = ["options.txt", "optionsof.txt", "optionsshaders.txt", "servers.dat"];
 
-/// Where an update saves the player's copies of the files it replaces (in the build).
-const PACK_BACKUPS: &str = ".launcher/pack-backups";
-
-/// A new folder of `PACK_BACKUPS` for this update: its time, and a number when it is taken.
-fn backup_folder(game: &Path) -> String {
+/// A new folder in `modpacks` (a build's modpack backups) for this update's copies of the
+/// player's files: its time, and a number when it is taken.
+fn backup_folder(modpacks: &Path) -> PathBuf {
     let stamp = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     (1..)
-        .map(
-            |n| {
-                if n == 1 { format!("{PACK_BACKUPS}/{stamp}") } else { format!("{PACK_BACKUPS}/{stamp}-{n}") }
-            },
-        )
-        .find(|folder| !game.join(folder).exists())
-        .unwrap_or_default()
+        .map(|n| modpacks.join(if n == 1 { stamp.clone() } else { format!("{stamp}-{n}") }))
+        .find(|folder| !folder.exists())
+        .unwrap_or_else(|| modpacks.join(stamp))
+}
+
+/// Copies the player's files `paths` of `game` into `folder`, after making room for them.
+fn back_up_players_files(game: &Path, paths: &[String], folder: &Path) -> AppResult<()> {
+    let bytes: u64 = paths.iter().filter_map(|p| fs::metadata(game.join(p)).ok()).map(|m| m.len()).sum();
+    let label = folder.to_string_lossy().into_owned();
+    preflight(&[SpaceRequest { dir: folder.parent().unwrap_or(folder).to_path_buf(), bytes, label }])?;
+    for path in paths {
+        let (from, to) = (game.join(path), folder.join(path));
+        let copied = to.parent().map_or(Ok(()), fs::create_dir_all).and_then(|()| fs::copy(&from, &to));
+        if let Err(e) = copied {
+            let _ = fs::remove_dir_all(folder);
+            return Err(AppError::new(ErrorCode::Io, format!("{}: {e}", from.display())));
+        }
+    }
+    Ok(())
 }
 
 /// A path as the record compares paths: `/`-separated, lower case.

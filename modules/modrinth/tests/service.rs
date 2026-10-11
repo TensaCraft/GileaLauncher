@@ -446,7 +446,7 @@ async fn a_replaced_dependency_is_backed_up_and_removed() {
     );
     install(&w, extra(&key)).await.unwrap();
     assert_eq!(mods(&dir), ["extra-2.jar", "fapi-1.jar", "sodium-2.jar"]);
-    assert_eq!(fs::read(dir.join("mods/.backups/sodium-1.jar.backup")).unwrap(), b"sodium-1");
+    assert_eq!(fs::read(w.mod_backups(&key).join("sodium-1.jar.backup")).unwrap(), b"sodium-1");
     assert!(provenance(&dir)["files"].get("mods/sodium-1.jar").is_none());
 }
 
@@ -465,7 +465,7 @@ async fn a_running_game_takes_replacements_too() {
     w.server.know(b"sodium-1", &old);
     install(&w, extra(&key)).await.unwrap();
     assert_eq!(mods(&dir), ["extra-2.jar", "fapi-1.jar", "sodium-2.jar"], "sodium 1 is replaced");
-    assert_eq!(fs::read(dir.join("mods/.backups/sodium-1.jar.backup")).unwrap(), b"sodium-1");
+    assert_eq!(fs::read(w.mod_backups(&key).join("sodium-1.jar.backup")).unwrap(), b"sodium-1");
 }
 
 /// The game holds its loaded jar open and Windows refuses to move it: the whole plan is undone and

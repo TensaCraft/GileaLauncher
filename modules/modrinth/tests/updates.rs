@@ -140,7 +140,7 @@ async fn an_update_replaces_the_file_keeps_a_backup_and_says_updated() {
     let update = overview.notes[0].update_args(&key, ContentKind::Mods, "Sodium").unwrap();
     install(&w, update).await.unwrap();
     assert!(dir.join("mods/sod-2.jar").is_file() && !dir.join("mods/sod-1.jar").exists());
-    assert!(dir.join("mods/.backups/sod-1.jar.backup").is_file(), "the old file is backed up");
+    assert!(w.mod_backups(&key).join("sod-1.jar.backup").is_file(), "the old file is backed up");
     assert_eq!(w.said.keys().last().map(String::as_str), Some("mod_updated"));
     let after = w.service.overview(&args(&key, ContentKind::Mods)).await.unwrap();
     assert!(after.notes.iter().all(|n| n.update.is_none()), "{:?}", after.notes);

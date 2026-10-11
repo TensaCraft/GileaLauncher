@@ -85,6 +85,83 @@ fn put_back(entries: &[PathBuf], dir: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/// Copies `from` (a file, or a folder with everything in it) to `to`.
+fn copy_all(from: &Path, to: &Path) -> io::Result<()> {
+    if fs::symlink_metadata(from)?.is_dir() {
+        fs::create_dir_all(to)?;
+        for entry in fs::read_dir(from)?.flatten() {
+            copy_all(&entry.path(), &to.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        fs::copy(from, to).map(|_| ())
+    }
+}
+
+fn remove_any(path: &Path) -> io::Result<()> {
+    if fs::symlink_metadata(path)?.is_dir() { fs::remove_dir_all(path) } else { fs::remove_file(path) }
+}
+
+/// Moves `from` (a file or a folder) to `to`, its folder made first: a rename, or across drives
+/// a copy, with `from` removed only once the copy is whole (a copy cut short is removed instead).
+pub fn move_dir(from: &Path, to: &Path) -> io::Result<()> {
+    move_with(from, to, &copy_all)
+}
+
+fn move_with(from: &Path, to: &Path, copy: &dyn Fn(&Path, &Path) -> io::Result<()>) -> io::Result<()> {
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    match rename_retrying(from, to) {
+        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
+            if let Err(e) = copy(from, to) {
+                let _ = remove_any(to);
+                return Err(e);
+            }
+            remove_any(from)
+        }
+        other => other,
+    }
+}
+
+/// The mods' backups a build kept in `mods/.backups/` move to `to` (its build's `mods/` of the
+/// backups folder); the folder goes with what was left in it. How many moved.
+pub fn move_mod_backups(game: &Path, to: &Path) -> AppResult<usize> {
+    let legacy = game.join("mods").join(crate::content::backups::BACKUPS);
+    let Ok(entries) = fs::read_dir(&legacy) else { return Ok(0) };
+    let mut moved = 0;
+    for entry in entries.flatten() {
+        let (path, name) = (entry.path(), entry.file_name().to_string_lossy().into_owned());
+        let dest = to.join(&name);
+        if name.ends_with(".backup") && entry.file_type().is_ok_and(|t| t.is_file()) && !dest.exists() {
+            move_dir(&path, &dest).map_err(|e| io_error(&path, e))?;
+            moved += 1;
+        }
+    }
+    // A part of a copy cut short, or a backup the new place has already.
+    fs::remove_dir_all(&legacy).map_err(|e| io_error(&legacy, e))?;
+    Ok(moved)
+}
+
+/// The copies a modpack update kept in `.launcher/pack-backups/<time>/` move to `to` (its
+/// build's `modpacks/` of the backups folder). How many updates' copies moved.
+pub fn move_pack_backups(game: &Path, to: &Path) -> AppResult<usize> {
+    let legacy = game.join(".launcher").join("pack-backups");
+    let mut moved = 0;
+    for update in folders(&legacy) {
+        let dest = to.join(name_of(&update));
+        if dest.exists() {
+            // Moved before, by a move cut short.
+            fs::remove_dir_all(&update).map_err(|e| io_error(&update, e))?;
+        } else {
+            move_dir(&update, &dest).map_err(|e| io_error(&update, e))?;
+            moved += 1;
+        }
+    }
+    let _ = fs::remove_dir(&legacy);
+    Ok(moved)
+}
+
 /// World backups from `<old root>/<build>/<world>/` to `<root>/<build>/worlds/<world>/`, once.
 /// With the default folder (or the old default the wizard saved) they leave
 /// `<minecraft>/backups/worlds` for `<minecraft>/backups`; a folder of the player's own keeps its
@@ -232,6 +309,36 @@ mod tests {
         assert!(root.join("aero/worlds/mods/a.zip").is_file());
         assert!(root.join("aero/worlds/worlds/a.zip").is_file());
         assert!(root.join("worlds/worlds/World/a.zip").is_file(), "a build named worlds");
+    }
+
+    #[test]
+    fn legacy_mod_backups_move_and_their_folder_goes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (game, to) = (tmp.path().join("game"), tmp.path().join("backups/aero/mods"));
+        let legacy = game.join("mods").join(".backups");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("sodium.jar.backup"), b"old sodium").unwrap();
+        fs::write(legacy.join("iris.jar.backup.part"), b"half").unwrap();
+        fs::write(game.join("mods/sodium.jar"), b"new sodium").unwrap();
+        assert_eq!(move_mod_backups(&game, &to).unwrap(), 1);
+        assert_eq!(fs::read(to.join("sodium.jar.backup")).unwrap(), b"old sodium");
+        assert!(!legacy.exists(), "the build keeps no backups of its own");
+        assert!(game.join("mods/sodium.jar").is_file());
+        assert_eq!(move_mod_backups(&game, &to).unwrap(), 0, "nothing left to move");
+    }
+
+    #[test]
+    fn legacy_pack_backups_move() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (game, to) = (tmp.path().join("game"), tmp.path().join("backups/aero/modpacks"));
+        let update = game.join(".launcher/pack-backups/2026-10-01_10-00-00");
+        fs::create_dir_all(update.join("config")).unwrap();
+        fs::write(update.join("config/a.toml"), b"mine").unwrap();
+        fs::write(game.join(".launcher/modrinth-pack.json"), b"{}").unwrap();
+        assert_eq!(move_pack_backups(&game, &to).unwrap(), 1);
+        assert_eq!(fs::read(to.join("2026-10-01_10-00-00/config/a.toml")).unwrap(), b"mine");
+        assert!(!game.join(".launcher/pack-backups").exists());
+        assert!(game.join(".launcher/modrinth-pack.json").is_file(), "the pack's note stays");
     }
 
     #[test]

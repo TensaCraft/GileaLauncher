@@ -13,6 +13,7 @@ use serde_json::json;
 
 use crate::auth::service::AuthService;
 use crate::auth::{AuthConfig, UrlOpener};
+use crate::backups::{BackupsRoot, resolver};
 use crate::builds::components::ComponentManager;
 use crate::builds::service::BuildService;
 use crate::content::service::ContentService;
@@ -78,6 +79,8 @@ pub struct CoreApp {
     pub auth: Arc<AuthService>,
     /// Build records (`games/<id>/version.json`).
     pub versions: Arc<VersionStore>,
+    /// The backups folder, as the settings name it when asked.
+    pub backups: BackupsRoot,
     /// Locks on game folders.
     pub instances: Arc<Coordinator>,
     /// Lock on the shared Minecraft folder.
@@ -228,11 +231,13 @@ impl CoreApp {
             config.clone(),
             instances.clone(),
         ));
+        let backups = resolver(config.clone(), paths.minecraft_dir.clone());
         let content = Arc::new(ContentService::new(
             versions.clone(),
             instances.clone(),
             feedback.clone(),
             paths.cache_dir.join("thumbs"),
+            backups.clone(),
         ));
         let component_manager =
             Arc::new(ComponentManager::new(versions.clone(), components.clone(), feedback.clone()));
@@ -268,6 +273,7 @@ impl CoreApp {
         let recent = Arc::new(RecentService::new(versions.clone()));
         let settings = SettingsService::new(env.clone(), paths.clone(), config.clone(), opts.system_lang);
         Ok(CoreApp {
+            backups,
             env,
             paths,
             config,

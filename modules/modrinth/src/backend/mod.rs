@@ -34,6 +34,7 @@ impl ModrinthModule {
         }
         let api = ModrinthApi::new(BASE)?;
         let deps = Deps {
+            backups: core.backups.clone(),
             versions: core.versions.clone(),
             instances: core.instances.clone(),
             feedback: core.feedback.clone(),

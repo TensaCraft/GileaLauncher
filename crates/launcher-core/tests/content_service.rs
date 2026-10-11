@@ -3,6 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use launcher_core::backups::BuildBackups;
 use launcher_core::content::backups;
 use launcher_core::content::service::ContentService;
 use launcher_core::feedback::{FeedbackService, NullSink};
@@ -16,6 +17,8 @@ struct World {
     versions: Arc<VersionStore>,
     instances: Arc<Coordinator>,
     service: ContentService,
+    /// The backups folder.
+    backups: PathBuf,
 }
 
 fn world() -> World {
@@ -24,13 +27,21 @@ fn world() -> World {
     fs::create_dir_all(&state).unwrap();
     let versions = Arc::new(VersionStore::open(&state, &mc));
     let instances = Arc::new(Coordinator::instances());
+    let backups = tmp.path().join("backups");
+    let root = backups.clone();
     let service = ContentService::new(
         versions.clone(),
         instances.clone(),
         FeedbackService::new(Arc::new(NullSink)),
         tmp.path().join("cache").join("thumbs"),
+        Arc::new(move || root.clone()),
     );
-    World { _tmp: tmp, versions, instances, service }
+    World { _tmp: tmp, versions, instances, service, backups }
+}
+
+/// Build `key`'s mods' backups, in the backups folder.
+fn shelf(w: &World, key: &str) -> PathBuf {
+    BuildBackups::of(&w.backups, key).mods()
 }
 
 /// A build of `client` running `component`, and its game folder with `mods/`, `resourcepacks/`
@@ -389,7 +400,7 @@ fn a_mod_renamed_by_its_update_comes_back_from_its_backup() {
     let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
     let mods = dir.join("mods");
     versioned_mod(&mods.join("sodium-0.5.jar"), "sodium", "0.5");
-    backups::back_up(&dir, "mods/sodium-0.5.jar", "sodium-0.5.jar").unwrap();
+    backups::back_up(&shelf(&w, &key), &dir, "mods/sodium-0.5.jar", "sodium-0.5.jar").unwrap();
     fs::remove_file(mods.join("sodium-0.5.jar")).unwrap();
     versioned_mod(&mods.join("sodium-0.6.jar.disabled"), "sodium", "0.6");
     fabric_mod(&dir, "lithium.jar", "lithium", "Lithium");
@@ -399,7 +410,8 @@ fn a_mod_renamed_by_its_update_comes_back_from_its_backup() {
     assert_eq!(files(&after.items), [("lithium.jar", true), ("sodium-0.5.jar.disabled", false)]);
     assert_eq!(after.items[1].version.as_deref(), Some("0.5"));
     assert!(!mods.join("sodium-0.6.jar.disabled").exists());
-    assert!(mods.join(".backups/sodium-0.5.jar.backup").is_file(), "the backup stays");
+    assert!(shelf(&w, &key).join("sodium-0.5.jar.backup").is_file(), "the backup stays");
+    assert!(!mods.join(".backups").exists(), "the build keeps no backups of its own");
     assert!(after.items.iter().all(|i| !i.has_backup), "the same bytes again would change nothing");
 }
 
@@ -409,7 +421,7 @@ fn a_mod_updated_under_its_own_name_is_restored_in_place() {
     let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
     let mods = dir.join("mods");
     versioned_mod(&mods.join("iris.jar"), "iris", "1.7");
-    backups::back_up(&dir, "mods/iris.jar", "iris.jar").unwrap();
+    backups::back_up(&shelf(&w, &key), &dir, "mods/iris.jar", "iris.jar").unwrap();
     versioned_mod(&mods.join("iris.jar"), "iris", "1.8.0");
     let after = w.service.restore(&key, ContentKind::Mods, "iris.jar").unwrap();
     assert_eq!(files(&after.items), [("iris.jar", true)]);
@@ -425,7 +437,7 @@ fn restoring_needs_a_backup_a_quiet_build_and_a_free_name() {
     let none = w.service.restore(&key, ContentKind::Mods, "sodium.jar").unwrap_err();
     assert_eq!(none.code, ErrorCode::BackupNotFound);
     versioned_mod(&mods.join("sodium-0.5.jar"), "sodium", "0.5");
-    backups::back_up(&dir, "mods/sodium-0.5.jar", "sodium-0.5.jar").unwrap();
+    backups::back_up(&shelf(&w, &key), &dir, "mods/sodium-0.5.jar", "sodium-0.5.jar").unwrap();
     fs::rename(mods.join("sodium-0.5.jar"), mods.join("sodium-0.5.jar.disabled")).unwrap();
     versioned_mod(&mods.join("sodium-0.5.jar.disabled"), "sodium", "0.5-edited");
     let taken = w.service.restore(&key, ContentKind::Mods, "sodium.jar").unwrap_err();
@@ -433,9 +445,9 @@ fn restoring_needs_a_backup_a_quiet_build_and_a_free_name() {
     assert!(mods.join("sodium.jar").is_file() && mods.join("sodium-0.5.jar.disabled").is_file());
     let packs = w.service.restore(&key, ContentKind::ResourcePacks, "x.zip").unwrap_err();
     assert_eq!(packs.code, ErrorCode::Unsupported);
-    let lost = backups::back_up(&dir, "mods/missing.jar", "missing.jar").unwrap_err();
+    let lost = backups::back_up(&shelf(&w, &key), &dir, "mods/missing.jar", "missing.jar").unwrap_err();
     assert_eq!(lost.code, ErrorCode::BackupFailed);
-    assert!(!mods.join(".backups/missing.jar.backup.part").exists(), "no half copy stays");
+    assert!(!shelf(&w, &key).join("missing.jar.backup.part").exists(), "no half copy stays");
 }
 
 #[test]
@@ -449,11 +461,11 @@ fn a_mod_keeps_only_its_newest_backup_and_offers_it_once() {
         if !mods.join(&name).exists() {
             versioned_mod(&mods.join(&name), "sodium", from);
         }
-        backups::back_up(&dir, &format!("mods/{name}"), &name).unwrap();
+        backups::back_up(&shelf(&w, &key), &dir, &format!("mods/{name}"), &name).unwrap();
         fs::remove_file(mods.join(&name)).unwrap();
         versioned_mod(&mods.join(format!("sodium-{to}.jar")), "sodium", to);
     }
-    assert!(!mods.join(".backups/sodium-0.4.jar.backup").exists(), "one backup per mod: the newest");
+    assert!(!shelf(&w, &key).join("sodium-0.4.jar.backup").exists(), "one backup per mod: the newest");
     let after = w.service.restore(&key, ContentKind::Mods, "sodium-0.6.jar").unwrap();
     assert_eq!(files(&after.items), [("sodium-0.5.jar", true)]);
     assert!(!after.items[0].has_backup, "restored once, nothing older is offered");
@@ -463,7 +475,7 @@ fn a_mod_keeps_only_its_newest_backup_and_offers_it_once() {
 fn only_the_newest_backup_counts_even_beside_older_ones() {
     let w = world();
     let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
-    let (mods, shelf) = (dir.join("mods"), dir.join("mods/.backups"));
+    let (mods, shelf) = (dir.join("mods"), shelf(&w, &key));
     fs::create_dir_all(&shelf).unwrap();
     versioned_mod(&shelf.join("sodium-0.4.jar.backup"), "sodium", "0.4");
     versioned_mod(&shelf.join("sodium-0.5.jar.backup"), "sodium", "0.5");

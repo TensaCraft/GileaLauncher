@@ -507,6 +507,18 @@ pub struct World {
     pub components: Arc<FakeComponents>,
 }
 
+impl World {
+    /// The backups folder.
+    pub fn backups(&self) -> PathBuf {
+        self.tmp.path().join("backups")
+    }
+
+    /// Build `key`'s mods' backups.
+    pub fn mod_backups(&self, key: &str) -> PathBuf {
+        launcher_core::backups::BuildBackups::of(&self.backups(), key).mods()
+    }
+}
+
 pub async fn world() -> World {
     let tmp = tempfile::tempdir().unwrap();
     let (state, mc) = (tmp.path().join("state"), tmp.path().join("minecraft"));
@@ -528,6 +540,10 @@ pub async fn world() -> World {
         gpu_mode: Arc::new(|| "dgpu".to_string()),
         downloader: Arc::new(downloader),
         running: Arc::new(move |_: &str| flag.load(Ordering::SeqCst)),
+        backups: {
+            let root = tmp.path().join("backups");
+            Arc::new(move || root.clone())
+        },
     };
     let service = Arc::new(ModrinthService::new(ModrinthApi::new(&server.base).unwrap(), deps));
     World { tmp, versions, instances, service, server, running, said, feedback, components }

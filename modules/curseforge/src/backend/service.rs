@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use launcher_core::backups::{BackupsRoot, BuildBackups};
 use launcher_core::content::backups::back_up;
 use launcher_core::content::files::{destination, stage_listing};
 use launcher_core::content::held::take_copy;
@@ -64,6 +65,8 @@ pub struct Deps {
     pub components: Arc<dyn ComponentSource>,
     /// The default GPU mode of new builds.
     pub gpu_mode: Arc<dyn Fn() -> String + Send + Sync>,
+    /// The backups folder: a mod's copy before its update, a modpack's before its update.
+    pub backups: BackupsRoot,
     /// Where files CurseForge keeps from other apps are looked for.
     pub elsewhere: Elsewhere,
     /// Where a pack's zip waits while the files CurseForge keeps from other apps are downloaded by
@@ -190,6 +193,7 @@ impl CurseForgeService {
             components: deps.components.clone(),
             gpu_mode: deps.gpu_mode.clone(),
             running: deps.running.clone(),
+            backups: deps.backups.clone(),
         };
         let finder = Finder::new(deps.elsewhere.clone())
             .inspect_err(|e| tracing::warn!("held files cannot be looked for elsewhere: {}", e.detail))
@@ -447,7 +451,8 @@ impl CurseForgeService {
                     let name =
                         now.rsplit('/').next().unwrap_or(now).trim_end_matches(".disabled").to_string();
                     let (root, relative) = (game.clone(), now.clone());
-                    blocking(move || back_up(&root, &relative, &name)).await?;
+                    let shelf = BuildBackups::of(&(self.deps.backups)(), &target.build.key).mods();
+                    blocking(move || back_up(&shelf, &root, &relative, &name)).await?;
                 }
             }
         }

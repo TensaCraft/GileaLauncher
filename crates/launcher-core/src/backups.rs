@@ -2,6 +2,7 @@
 //! in it: world, mod and modpack backups, all of a build's together.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::lock::path_key;
 use crate::storage::config::ConfigStore;
@@ -32,6 +33,14 @@ pub fn root(config: &ConfigStore, mc_dir: &Path) -> PathBuf {
         .map(PathBuf::from)
         .filter(|dir| path_key(dir) != path_key(&old_default(mc_dir)))
         .unwrap_or_else(|| default_root(mc_dir))
+}
+
+/// The backups folder as it is when asked: the setting may change while the launcher runs.
+pub type BackupsRoot = Arc<dyn Fn() -> PathBuf + Send + Sync>;
+
+/// `root` of `config`, asked each time.
+pub fn resolver(config: Arc<ConfigStore>, mc_dir: PathBuf) -> BackupsRoot {
+    Arc::new(move || root(&config, &mc_dir))
 }
 
 /// One build's backups: `<backups>/<build key>/`.

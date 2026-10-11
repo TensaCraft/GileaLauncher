@@ -1,6 +1,7 @@
 mod support;
 
 use std::fs;
+use std::path::Path;
 
 use launcher_core::launch::options::game_dir;
 use launcher_shared::ErrorCode;
@@ -355,8 +356,10 @@ async fn a_file_the_pack_changes_too_is_replaced_after_the_players_copy_is_saved
     let updated = update_to(&w, &key, "sp-2", vec![], &[("overrides/config/a.txt", b"two")]).await;
     assert_eq!(fs::read(game.join("config/a.txt")).unwrap(), b"two", "the pack's new settings apply");
     let [saved] = updated.backups.as_slice() else { panic!("one copy saved: {:?}", updated.backups) };
-    assert!(saved.starts_with(".launcher/pack-backups/") && saved.ends_with("/config/a.txt"), "{saved}");
-    assert_eq!(fs::read(game.join(saved)).unwrap(), b"mine", "the player's copy is kept");
+    let modpacks = launcher_core::backups::BuildBackups::of(&w.backups(), &key).modpacks();
+    assert!(Path::new(saved).starts_with(&modpacks) && saved.ends_with("a.txt"), "{saved}");
+    assert_eq!(fs::read(saved).unwrap(), b"mine", "the player's copy is kept in the backups folder");
+    assert!(!game.join(".launcher/pack-backups").exists(), "the build keeps no copies of its own");
     assert!(w.said.keys().iter().any(|k| k == "modpack_updated_backups"), "{:?}", w.said.keys());
 }
 
@@ -369,7 +372,7 @@ async fn a_config_a_mod_wrote_gives_way_to_the_packs_after_it_is_saved() {
     let updated = update_to(&w, &key, "sp-2", vec![], &[("overrides/config/b.toml", b"tuned")]).await;
     assert_eq!(fs::read(game.join("config/b.toml")).unwrap(), b"tuned");
     assert_eq!(updated.backups.len(), 1);
-    assert_eq!(fs::read(game.join(&updated.backups[0])).unwrap(), b"defaults");
+    assert_eq!(fs::read(&updated.backups[0]).unwrap(), b"defaults");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use launcher_core::backups::{BackupsRoot, BuildBackups};
 use launcher_core::content::backups::back_up;
 use launcher_core::content::files::{destination, stage_listing};
 use launcher_core::content::packs::{legacy_pack_names, listing_file, lists_any};
@@ -80,6 +81,8 @@ pub struct Deps {
     pub components: Arc<dyn ComponentSource>,
     /// The default GPU mode of new builds.
     pub gpu_mode: Arc<dyn Fn() -> String + Send + Sync>,
+    /// The backups folder: a mod's copy before its update, a modpack's before its update.
+    pub backups: BackupsRoot,
 }
 
 pub struct ModrinthService {
@@ -149,6 +152,7 @@ impl ModrinthService {
             components: deps.components.clone(),
             gpu_mode: deps.gpu_mode.clone(),
             running: deps.running.clone(),
+            backups: deps.backups.clone(),
         };
         ModrinthService {
             api,
@@ -334,7 +338,8 @@ impl ModrinthService {
         if kind == ContentKind::Mods {
             for item in pending.iter().filter_map(|c| c.replaced()) {
                 let (root, relative, name) = (game.clone(), item.relative.clone(), item.filename.clone());
-                blocking(move || back_up(&root, &relative, &name)).await?;
+                let shelf = BuildBackups::of(&(self.deps.backups)(), &target.build.key).mods();
+                blocking(move || back_up(&shelf, &root, &relative, &name)).await?;
             }
         }
         let records: Vec<(String, Record)> =

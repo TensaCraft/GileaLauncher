@@ -567,6 +567,18 @@ mod world {
         pub downloads: PathBuf,
     }
 
+    impl World {
+        /// The backups folder.
+        pub fn backups(&self) -> PathBuf {
+            self.tmp.path().join("backups")
+        }
+
+        /// Build `key`'s mods' backups.
+        pub fn mod_backups(&self, key: &str) -> PathBuf {
+            launcher_core::backups::BuildBackups::of(&self.backups(), key).mods()
+        }
+    }
+
     pub async fn world() -> World {
         let tmp = tempfile::tempdir().unwrap();
         let (state, mc) = (tmp.path().join("state"), tmp.path().join("minecraft"));
@@ -592,6 +604,10 @@ mod world {
             gpu_mode: Arc::new(|| "dgpu".to_string()),
             elsewhere: Elsewhere { modrinth: Some(server.base.clone()), downloads: Some(downloads.clone()) },
             kept_packs: tmp.path().join("kept-packs"),
+            backups: {
+                let root = tmp.path().join("backups");
+                Arc::new(move || root.clone())
+            },
         };
         let key = ApiKey::new(TEST_KEY).unwrap();
         let api = CurseForgeApi::new(&server.base, key.clone()).unwrap();

@@ -42,6 +42,7 @@ impl CurseForgeModule {
         let key = self.key.clone().ok_or_else(|| AppError::new(ErrorCode::NotFound, "no CurseForge key"))?;
         let api = CurseForgeApi::new(BASE, key.clone())?;
         let deps = Deps {
+            backups: core.backups.clone(),
             versions: core.versions.clone(),
             instances: core.instances.clone(),
             feedback: core.feedback.clone(),

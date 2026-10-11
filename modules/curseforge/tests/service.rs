@@ -109,7 +109,7 @@ async fn a_newer_file_replaces_the_installed_one_with_a_backup() {
     assert_eq!(plan.main.as_ref().unwrap().current.as_deref(), Some("0.9.jar"));
     install(&w, args(&key, ContentKind::Mods, 1, "Create")).await.unwrap();
     assert_eq!(files(&dir, "mods"), ["create-1.0.jar"]);
-    assert!(dir.join("mods/.backups/create-0.9.jar.backup").is_file());
+    assert!(w.mod_backups(&key).join("create-0.9.jar.backup").is_file());
     let records = provenance(&dir)["files"].as_object().unwrap().keys().cloned().collect::<Vec<_>>();
     assert_eq!(records, ["mods/create-1.0.jar"]);
 }
@@ -182,7 +182,7 @@ async fn an_older_file_put_by_hand_is_replaced_by_the_newer_one() {
     );
     install(&w, args(&key, ContentKind::Mods, 1, "Create")).await.unwrap();
     assert_eq!(files(&dir, "mods"), ["create-1.0.jar"]);
-    assert!(dir.join("mods/.backups/old-create.jar.backup").is_file());
+    assert!(w.mod_backups(&key).join("old-create.jar.backup").is_file());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -307,7 +307,7 @@ async fn a_newer_file_is_offered_and_installed_as_an_update() {
     let update = note.update_args(&key, ContentKind::Mods, "Create").unwrap();
     install(&w, update).await.unwrap();
     assert_eq!(files(&dir, "mods"), ["create-1.0.jar"]);
-    assert!(dir.join("mods/.backups/create-0.9.jar.backup").is_file());
+    assert!(w.mod_backups(&key).join("create-0.9.jar.backup").is_file());
     let after = w.service.overview(&checking(&key)).await.unwrap().updates.unwrap();
     assert_eq!(after.status, UpdatesStatus::Current);
 }

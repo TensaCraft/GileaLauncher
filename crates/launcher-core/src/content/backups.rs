@@ -1,4 +1,4 @@
-//! Mods a replacement took away: `mods/.backups/<old name>.backup` — one per
+//! Mods a replacement took away: `<backups>/<build>/mods/<old name>.backup` — one per
 //! mod, the newest: backing a mod up drops its older backups (by the JAR's mod id), so updates
 //! that rename the file do not pile them up. A listed mod offers its newest backup — the same
 //! file name or the same mod id — unless that holds the same bytes.
@@ -14,23 +14,19 @@ use super::inventory::MetadataCache;
 use super::jar::inspect_mod_jar;
 use crate::storage::atomic::rename_retrying;
 
+/// Where a build kept its mods' backups before they moved to the backups folder.
 pub const BACKUPS: &str = ".backups";
 const SUFFIX: &str = ".backup";
-
-/// `<game>/mods/.backups`.
-pub fn backups_dir(game: &Path) -> PathBuf {
-    game.join("mods").join(BACKUPS)
-}
 
 fn io_error(code: ErrorCode, path: &Path, e: io::Error) -> AppError {
     AppError::new(code, format!("{}: {e}", path.display())).with_param("path", path.to_string_lossy())
 }
 
-/// Copies mod `relative` of `game` to `mods/.backups/<filename>.backup` over an older one and drops
-/// the other backups of the same mod; a failed copy leaves no part behind.
-pub fn back_up(game: &Path, relative: &str, filename: &str) -> AppResult<()> {
-    let dir = backups_dir(game);
-    fs::create_dir_all(&dir).map_err(|e| io_error(ErrorCode::BackupFailed, &dir, e))?;
+/// Copies mod `relative` of `game` to `<dir>/<filename>.backup` (`dir`: the build's mods' backups)
+/// over an older one and drops the other backups of the same mod; a failed copy leaves no part
+/// behind.
+pub fn back_up(dir: &Path, game: &Path, relative: &str, filename: &str) -> AppResult<()> {
+    fs::create_dir_all(dir).map_err(|e| io_error(ErrorCode::BackupFailed, dir, e))?;
     let target = dir.join(format!("{filename}{SUFFIX}"));
     let part = dir.join(format!("{filename}{SUFFIX}.part"));
     fs::copy(game.join(relative), &part).and_then(|_| rename_retrying(&part, &target)).map_err(|e| {
@@ -38,7 +34,7 @@ pub fn back_up(game: &Path, relative: &str, filename: &str) -> AppResult<()> {
         io_error(ErrorCode::BackupFailed, &target, e)
     })?;
     if let Ok(mine) = inspect_mod_jar(&target, None) {
-        drop_older(&dir, &target, &mine.mod_id);
+        drop_older(dir, &target, &mine.mod_id);
     }
     Ok(())
 }
@@ -66,9 +62,9 @@ pub struct Backup {
     modified: Option<SystemTime>,
 }
 
-/// The backups of `game`'s mods, newest first.
-pub fn backups(game: &Path, loader: Option<LoaderKind>, cache: &MetadataCache) -> Vec<Backup> {
-    let Ok(read) = fs::read_dir(backups_dir(game)) else { return Vec::new() };
+/// The mods' backups in `dir` (a build's), newest first.
+pub fn backups(dir: &Path, loader: Option<LoaderKind>, cache: &MetadataCache) -> Vec<Backup> {
+    let Ok(read) = fs::read_dir(dir) else { return Vec::new() };
     let mut found: Vec<Backup> = read
         .flatten()
         .filter_map(|entry| {
@@ -151,7 +147,8 @@ pub fn restore(game: &Path, backup: &Backup, current: &Path, enabled: bool) -> A
             .with_param("name", backup.filename.clone()));
         }
     }
-    let part = backups_dir(game).join(format!("{}.restore.part", backup.filename));
+    // Beside its place: the backups folder may be on another drive, where no rename reaches.
+    let part = mods.join(format!(".{}.restore.part", backup.filename));
     fs::copy(&backup.path, &part).and_then(|_| rename_retrying(&part, &target)).map_err(|e| {
         let _ = fs::remove_file(&part);
         io_error(ErrorCode::of_io(&e), &target, e)
