@@ -19,7 +19,9 @@ use super::manifest::{
     PreserveRule, expected_hash, launchers_own, preserve_rules, preserved, relative_path, safe_relative,
     size, under, validate,
 };
+use super::optional::{Note, Optional, for_sync, hasher, read_note, recognize};
 use super::pack::{Pack, truthy};
+use super::whitelist::Item;
 
 const FORCE_KEYS: [&str; 2] = ["force_update", "forceUpdate"];
 const LOCKED_KEYS: [&str; 2] = ["force_update_locked", "forceUpdateLocked"];
@@ -58,6 +60,8 @@ pub struct SyncPlan {
     pub stale: Vec<String>,
     /// Every managed file was planned, changed or not.
     pub force: bool,
+    /// The optional mods' note to leave once the sync is done (`None`: leave it as it is).
+    pub note: Option<Note>,
 }
 
 impl SyncPlan {
@@ -319,6 +323,18 @@ fn stale_files(
 /// What to change in `root` (a build's folder) to match `source`; `force` plans every managed
 /// file again, changed or not.
 pub fn plan(root: &Path, source: &Source, preserve: &[PreserveRule], force: bool) -> SyncPlan {
+    plan_with(root, source, preserve, force, &Optional::default())
+}
+
+/// `plan`, the optional mods' part (`optional`) added: their files kept, their newer versions
+/// downloaded (unless the server's own list has them), their older ones removed.
+pub fn plan_with(
+    root: &Path,
+    source: &Source,
+    preserve: &[PreserveRule],
+    force: bool,
+    optional: &Optional,
+) -> SyncPlan {
     let (files, manifest_mode, mut managed): (&[Value], bool, BTreeSet<String>) = match source {
         Source::Manifest(manifest) => {
             let directories =
@@ -382,15 +398,34 @@ pub fn plan(root: &Path, source: &Source, preserve: &[PreserveRule], force: bool
     }
     checked.dirs = json!(managed.iter().collect::<Vec<_>>());
     checked.save();
-    let stale = stale_files(root, &managed, &expected, preserve);
-    SyncPlan { managed_dirs: managed.into_iter().collect(), downloads, stale, force }
+    for relative in &optional.keep {
+        expected.insert(name_key(relative));
+    }
+    for file in &optional.downloads {
+        if expected.insert(name_key(&file.relative)) && reachable(root, &file.relative) {
+            downloads.push(file.clone());
+        }
+    }
+    let mut stale = stale_files(root, &managed, &expected, preserve);
+    for relative in &optional.replaced {
+        if !expected.contains(&name_key(relative)) && !stale.contains(relative) && reachable(root, relative) {
+            stale.push(relative.clone());
+        }
+    }
+    SyncPlan {
+        managed_dirs: managed.into_iter().collect(),
+        downloads,
+        stale,
+        force,
+        note: optional.note.clone(),
+    }
 }
 
 /// Plans a sync of `pack` into `root` from what the server lists: its force-update manifest when
 /// it is whole, else its older list of files — unless the build names its force-update endpoint.
 /// The server unavailable is a `Network` error naming the build (`pack`).
 pub async fn prepare(api: &TensaApi, pack: &Pack, root: &Path, force: bool) -> AppResult<SyncPlan> {
-    planned(listed(api, pack).await?, pack, root, force).await
+    planned(listed(api, pack).await?, pack, root, force, None).await
 }
 
 /// What the server lists of `pack` (the asking part of `prepare`).
@@ -422,15 +457,27 @@ pub async fn listed(api: &TensaApi, pack: &Pack) -> AppResult<Source> {
     Ok(source)
 }
 
-/// The sync of `pack` into `root` from what the server listed (the files' part of `prepare`).
-pub async fn planned(source: Source, pack: &Pack, root: &Path, force: bool) -> AppResult<SyncPlan> {
+/// The sync of `pack` into `root` from what the server listed (the files' part of `prepare`), and
+/// of the optional mods of `whitelist` (`None`: it could not be read).
+pub async fn planned(
+    source: Source,
+    pack: &Pack,
+    root: &Path,
+    force: bool,
+    whitelist: Option<Vec<Item>>,
+) -> AppResult<SyncPlan> {
     let own_rules = pack.preserve_rules.as_ref().filter(|rules| !rules.is_null());
     let rules = preserve_rules(own_rules.or(match &source {
         Source::Manifest(manifest) => manifest.get("preserve_rules"),
         Source::Files(_) => None,
     }));
     let root = root.to_path_buf();
-    tokio::task::spawn_blocking(move || plan(&root, &source, &rules, force))
-        .await
-        .map_err(|e| AppError::internal(e.to_string()))
+    tokio::task::spawn_blocking(move || {
+        let note = read_note(&root);
+        let found = whitelist.map(|items| recognize(&root, &items, &rules, &note, &mut hasher(&root, &note)));
+        let optional = for_sync(&root, found.as_deref(), &note);
+        plan_with(&root, &source, &rules, force, &optional)
+    })
+    .await
+    .map_err(|e| AppError::internal(e.to_string()))
 }

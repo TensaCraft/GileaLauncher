@@ -22,6 +22,7 @@ use tokio::time::Instant;
 use super::api::TensaApi;
 use super::icon;
 use super::identity::{self, CLIENT, JOURNAL};
+use super::optional::{read_note, write_note};
 use super::pack::{Pack, find};
 use super::plan::{SyncPlan, listed, planned};
 use super::profile;
@@ -219,8 +220,16 @@ pub async fn sync(
     };
     let root = game_dir(build, deps.versions.minecraft_dir());
     finish_interrupted_commit(&root)?;
+    let endpoint = pack.whitelist_endpoint.as_deref();
+    let whitelist = match in_time(deadline, deps.api.whitelist(&pack.id, endpoint, true)).await {
+        Ok(items) => Some(items),
+        Err(e) => {
+            tracing::info!("No whitelist of {} this time: {}", pack.id, e.detail);
+            None
+        }
+    };
     let plan = match in_time(deadline, listed(deps.api, &pack)).await {
-        Ok(source) => planned(source, &pack, &root, force).await,
+        Ok(source) => planned(source, &pack, &root, force, whitelist).await,
         Err(e) => Err(e),
     };
     let plan = match plan {
@@ -264,6 +273,11 @@ pub async fn sync(
         apply(deps, &root, &plan, &target, op).await?;
     } else if target != *build {
         deps.versions.save(&mut target)?;
+    }
+    if let Some(note) = plan.note.as_ref().filter(|note| **note != read_note(&root))
+        && let Err(e) = write_note(&root, note)
+    {
+        tracing::warn!("The optional mods of {} are not noted: {}", build.name, e.detail);
     }
     Ok(if loader_changed || plan.has_changes() { Synced::Updated } else { Synced::Unchanged })
 }

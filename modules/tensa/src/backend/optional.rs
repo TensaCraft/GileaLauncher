@@ -6,13 +6,13 @@ use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
-use launcher_core::net::downloader::{HashKind, hash_file};
+use launcher_core::net::downloader::{ExpectedHash, HashKind, hash_file};
 use launcher_core::storage::atomic::atomic_write;
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{PreserveKind, PreserveRule, preserved};
-use super::plan::name_key;
+use super::plan::{PlannedFile, name_key};
 use super::whitelist::Item;
 
 /// The launcher's note of the optional mods it put in a build, by whitelist id.
@@ -207,6 +207,70 @@ pub fn hasher<'a>(root: &'a Path, note: &'a Note) -> impl FnMut(&str) -> Option<
             None => hash_file(&path, HashKind::Sha256).ok(),
         }
     }
+}
+
+/// What a server sync does for the optional mods: the files it keeps, the newer versions it
+/// downloads, the older ones it removes, and the note it leaves (`None`: the note stays as it is).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Optional {
+    pub keep: Vec<String>,
+    pub downloads: Vec<PlannedFile>,
+    pub replaced: Vec<String>,
+    pub note: Option<Note>,
+}
+
+/// The sync's part for the optional mods of `found` (`None`: the whitelist could not be read, so
+/// what the note names stays and nothing changes).
+pub fn for_sync(root: &Path, found: Option<&[Found]>, note: &Note) -> Optional {
+    let Some(found) = found else {
+        let keep = note
+            .values()
+            .map(|noted| format!("{MODS}/{}", noted.file))
+            .filter(|relative| root.join(relative).is_file())
+            .collect();
+        return Optional { keep, ..Optional::default() };
+    };
+    let mut out = Optional::default();
+    let mut next = note_after(found, root);
+    for f in found {
+        match f.state {
+            State::Missing => {}
+            State::Current => {
+                // The server's version stays; another copy of it would load the mod twice.
+                for file in &f.files {
+                    if Some(file) == f.current.as_ref() {
+                        out.keep.push(file.clone());
+                    } else {
+                        out.replaced.push(file.clone());
+                    }
+                }
+            }
+            State::Outdated => {
+                let dest = if f.disabled {
+                    format!("{}{DISABLED}", f.item.relative)
+                } else {
+                    f.item.relative.clone()
+                };
+                out.replaced.extend(f.files.iter().filter(|file| !file.eq_ignore_ascii_case(&dest)).cloned());
+                out.downloads.push(PlannedFile {
+                    relative: dest.clone(),
+                    url: f.item.url.clone(),
+                    size: f.item.size,
+                    hash: Some(ExpectedHash { kind: HashKind::Sha256, hex: f.item.sha256.clone() }),
+                });
+                let file = dest.strip_prefix("mods/").unwrap_or(&dest).to_string();
+                let noted = Noted {
+                    file,
+                    sha256: f.item.sha256.clone(),
+                    size: f.item.size.unwrap_or(0),
+                    modified_ms: 0,
+                };
+                next.insert(f.item.id.clone(), noted);
+            }
+        }
+    }
+    out.note = Some(next);
+    out
 }
 
 /// The note of `found`'s items that are the server's version, with their files' size and time now.

@@ -360,3 +360,136 @@ async fn an_interrupted_commit_does_not_block_later_syncs() {
     let saved = w.deps.versions.get(&build.key).unwrap();
     assert_eq!(saved.loader_version.as_deref(), Some("0.19.6"));
 }
+
+/// The server allows `items` (id, name, body) as optional mods of `aero`.
+fn whitelist(w: &World, items: &[(&str, &str, &str)]) {
+    let entries: Vec<Value> = items
+        .iter()
+        .map(|(id, name, body)| {
+            json!({
+                "id": id, "title": id, "type": "mod", "name": name, "relative_path": format!("mods/{name}"),
+                "download_url": w.file(name, body), "sha256": sha256(body), "size": body.len()
+            })
+        })
+        .collect();
+    w.server.json("/api/mods/aero/whitelist", json!({"items": entries}));
+}
+
+fn mods(w: &World, build: &Build) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(folder(w, build).join("mods"))
+        .map(|dir| dir.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+fn note_of(w: &World, build: &Build, id: &str, file: &str) {
+    let mut note = module_tensa::backend::optional::Note::new();
+    note.insert(
+        id.into(),
+        module_tensa::backend::optional::Noted { file: file.into(), ..Default::default() },
+    );
+    module_tensa::backend::optional::write_note(&folder(w, build), &note).unwrap();
+}
+
+fn goggles_glob() -> Value {
+    json!({"preserve_rules": [{"type": "glob", "path": "mods/goggles-*.jar", "enabled": true}]})
+}
+
+#[tokio::test]
+async fn an_outdated_optional_mod_is_replaced_by_the_whitelists() {
+    let w = World::start().await;
+    catalog(&w, goggles_glob());
+    manifest(&w, &[("core.jar", "core")]);
+    whitelist(&w, &[("g", "goggles-2.jar", "goggles 2")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-1.jar", "goggles 1");
+    assert_eq!(run(&w, &build, false).await.unwrap(), Synced::Updated);
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-2.jar"]);
+    let note = module_tensa::backend::optional::read_note(&folder(&w, &build));
+    assert_eq!(note["g"].file, "goggles-2.jar");
+}
+
+#[tokio::test]
+async fn a_current_optional_mod_stays_without_a_rule() {
+    let w = World::start().await;
+    catalog(&w, json!({}));
+    manifest(&w, &[("core.jar", "core")]);
+    whitelist(&w, &[("g", "goggles-2.jar", "goggles 2")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-2.jar", "goggles 2");
+    run(&w, &build, false).await.unwrap();
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-2.jar"]);
+}
+
+#[tokio::test]
+async fn an_optional_mod_gone_from_the_whitelist_is_removed() {
+    let w = World::start().await;
+    catalog(&w, json!({}));
+    manifest(&w, &[("core.jar", "core")]);
+    whitelist(&w, &[]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-2.jar", "goggles 2");
+    note_of(&w, &build, "g", "goggles-2.jar");
+    run(&w, &build, false).await.unwrap();
+    assert_eq!(mods(&w, &build), ["core.jar"]);
+    assert!(module_tensa::backend::optional::read_note(&folder(&w, &build)).is_empty(), "its note goes too");
+}
+
+#[tokio::test]
+async fn noted_optional_mods_stay_when_the_whitelist_cannot_be_read() {
+    let w = World::start().await;
+    catalog(&w, json!({}));
+    manifest(&w, &[("core.jar", "core")]);
+    w.server.reply("/api/mods/aero/whitelist", 500, "down");
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-2.jar", "goggles 2");
+    note_of(&w, &build, "g", "goggles-2.jar");
+    run(&w, &build, false).await.unwrap();
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-2.jar"]);
+}
+
+#[tokio::test]
+async fn a_disabled_optional_mod_is_updated_and_stays_disabled() {
+    let w = World::start().await;
+    catalog(&w, goggles_glob());
+    manifest(&w, &[("core.jar", "core")]);
+    whitelist(&w, &[("g", "goggles-2.jar", "goggles 2")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-1.jar.disabled", "goggles 1");
+    run(&w, &build, false).await.unwrap();
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-2.jar.disabled"]);
+}
+
+#[tokio::test]
+async fn nothing_changes_when_the_optional_mods_are_current() {
+    let w = World::start().await;
+    catalog(&w, json!({}));
+    manifest(&w, &[("core.jar", "core")]);
+    whitelist(&w, &[("g", "goggles-2.jar", "goggles 2")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-2.jar", "goggles 2");
+    assert_eq!(run(&w, &build, false).await.unwrap(), Synced::Unchanged);
+    assert_eq!(downloads(&w), 0);
+}
+
+#[tokio::test]
+async fn a_whitelisted_file_the_manifest_also_lists_is_planned_once() {
+    let w = World::start().await;
+    catalog(&w, goggles_glob());
+    manifest(&w, &[("core.jar", "core"), ("goggles-2.jar", "goggles 2")]);
+    whitelist(&w, &[("g", "goggles-2.jar", "goggles 2")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-1.jar", "goggles 1");
+    run(&w, &build, false).await.unwrap();
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-2.jar"]);
+    let fetched = w.server.seen().iter().filter(|s| s.as_str() == "/files/goggles-2.jar").count();
+    assert_eq!(fetched, 1, "one download of it");
+}
