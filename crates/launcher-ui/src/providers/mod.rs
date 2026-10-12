@@ -31,7 +31,12 @@ pub fn content_providers(all: &[ProviderInfo], kind: ContentKind, client: Option
     if kind != ContentKind::ResourcePacks && !mods_supported(client) {
         return Vec::new();
     }
-    all.iter().filter(|p| p.offers(Need::Content(kind))).cloned().collect()
+    all.iter().filter(|p| p.offers(Need::Content(kind)) && p.serves(client)).cloned().collect()
+}
+
+/// What a content source is called: its label (`t` translates it) when it has one, else its name.
+pub fn source_label(provider: &ProviderInfo, t: impl Fn(&str) -> String) -> String {
+    provider.content_label.as_deref().map_or_else(|| provider.name.clone(), t)
 }
 
 /// Who offers modpacks.
@@ -142,7 +147,29 @@ mod tests {
             updates: vec![ContentKind::Mods],
             modpacks,
             modpack_updates: modpacks,
+            content_clients: Vec::new(),
+            content_label: None,
         }
+    }
+
+    #[test]
+    fn content_goes_only_to_the_builds_a_provider_serves() {
+        let mut tensa = provider("tensa", vec![ContentKind::Mods], true);
+        tensa.content_clients = vec!["TensaCraft".into()];
+        let all = vec![provider("modrinth", vec![ContentKind::Mods], false), tensa];
+        let ids = |client| {
+            content_providers(&all, ContentKind::Mods, client).into_iter().map(|p| p.id).collect::<Vec<_>>()
+        };
+        assert_eq!(ids(Some("TensaCraft")), ["modrinth", "tensa"]);
+        assert_eq!(ids(Some("neoforge")), ["modrinth"]);
+    }
+
+    #[test]
+    fn a_source_is_named_by_its_label_when_it_has_one() {
+        let mut tensa = provider("tensa", vec![ContentKind::Mods], true);
+        assert_eq!(source_label(&tensa, |k| format!("t:{k}")), tensa.name);
+        tensa.content_label = Some("tensa_optional_source".into());
+        assert_eq!(source_label(&tensa, |k| format!("t:{k}")), "t:tensa_optional_source");
     }
 
     #[test]

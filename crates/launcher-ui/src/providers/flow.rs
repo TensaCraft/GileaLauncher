@@ -282,6 +282,8 @@ mod tests {
             updates: Vec::new(),
             modpacks: false,
             modpack_updates: false,
+            content_clients: Vec::new(),
+            content_label: None,
         }
     }
 

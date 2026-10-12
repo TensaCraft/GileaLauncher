@@ -29,6 +29,13 @@ pub struct ProviderInfo {
     /// It finds the builds it installed from modpacks and updates them to another version.
     #[serde(default)]
     pub modpack_updates: bool,
+    /// The clients of the builds it gives content and updates to (empty: every build); modpacks
+    /// are not limited.
+    #[serde(default)]
+    pub content_clients: Vec<String>,
+    /// The translation key its content source is named by, instead of its name.
+    #[serde(default)]
+    pub content_label: Option<String>,
 }
 
 /// What the app asks a provider for.
@@ -41,6 +48,12 @@ pub enum Need {
 }
 
 impl ProviderInfo {
+    /// It gives content to a build of `client`.
+    pub fn serves(&self, client: Option<&str>) -> bool {
+        let client = client.unwrap_or_default().trim();
+        self.content_clients.is_empty() || self.content_clients.iter().any(|c| c.eq_ignore_ascii_case(client))
+    }
+
     pub fn offers(&self, need: Need) -> bool {
         match need {
             Need::Content(kind) => self.content.contains(&kind),
@@ -873,7 +886,17 @@ mod tests {
             updates: vec![ContentKind::Mods],
             modpacks: false,
             modpack_updates: false,
+            content_clients: Vec::new(),
+            content_label: None,
         }
+    }
+
+    #[test]
+    fn a_provider_serves_the_clients_it_names() {
+        let tensa = ProviderInfo { content_clients: vec!["TensaCraft".into()], ..info() };
+        assert!(tensa.serves(Some("TensaCraft")) && tensa.serves(Some(" tensacraft ")));
+        assert!(!tensa.serves(Some("neoforge")) && !tensa.serves(None));
+        assert!(info().serves(None) && info().serves(Some("fabric")), "no list: every build");
     }
 
     #[test]

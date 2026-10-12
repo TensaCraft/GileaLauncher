@@ -235,6 +235,8 @@ mod tests {
             updates: Vec::new(),
             modpacks: true,
             modpack_updates: true,
+            content_clients: Vec::new(),
+            content_label: None,
         }
     }
 

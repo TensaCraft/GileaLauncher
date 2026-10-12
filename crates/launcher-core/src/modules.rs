@@ -367,6 +367,8 @@ mod tests {
                 updates: Vec::new(),
                 modpacks: false,
                 modpack_updates: false,
+                content_clients: Vec::new(),
+                content_label: None,
             })
         }
         fn provider(&self, _core: &Arc<CoreApp>) -> AppResult<Arc<dyn ContentProvider>> {

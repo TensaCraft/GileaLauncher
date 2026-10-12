@@ -26,6 +26,8 @@ pub fn info() -> ProviderInfo {
         updates: Vec::new(),
         modpacks: true,
         modpack_updates: false,
+        content_clients: Vec::new(),
+        content_label: None,
     }
 }
 

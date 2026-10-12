@@ -60,6 +60,8 @@ pub fn provider_info() -> ProviderInfo {
         updates: ContentKind::ALL.to_vec(),
         modpacks: true,
         modpack_updates: true,
+        content_clients: Vec::new(),
+        content_label: None,
     }
 }
 

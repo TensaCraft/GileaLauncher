@@ -306,6 +306,8 @@ mod tests {
             updates: Vec::new(),
             modpacks: false,
             modpack_updates: false,
+            content_clients: Vec::new(),
+            content_label: None,
         };
         assert_eq!(super::page_icon(&provider), "brand:modrinth");
         provider.icon = "search".into();

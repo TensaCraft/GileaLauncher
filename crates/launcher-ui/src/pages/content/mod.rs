@@ -23,7 +23,7 @@ use crate::builds::query_escape;
 use crate::modules::use_module_parts;
 use crate::pages::build_settings::BuildSettingsPanel;
 use crate::providers::panel::ProviderPanel;
-use crate::providers::{content_providers, providers};
+use crate::providers::{content_providers, providers, source_label};
 use crate::shell::{PageHeader, use_header};
 use crate::store::use_store;
 
@@ -286,7 +286,10 @@ pub fn ContentPage(key: String) -> impl IntoView {
                 .with_icon("inventory_2")
                 .with_count(installed_count.get()),
         ];
-        options.extend(offered.get().into_iter().map(|p| SegOption::new(p.id, p.name).with_icon(p.icon)));
+        options.extend(offered.get().into_iter().map(|p| {
+            let label = source_label(&p, |key| i18n.t(key));
+            SegOption::new(p.id, label).with_icon(p.icon)
+        }));
         options
     });
     // Where to look, in the panel's own toolbar right after its search (the tab bar keeps the
