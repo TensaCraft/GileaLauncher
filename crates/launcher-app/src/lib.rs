@@ -10,6 +10,7 @@ pub mod modules;
 pub mod provider_commands;
 pub mod screenshot_protocol;
 pub mod smoke;
+pub mod storage_commands;
 pub mod tray;
 pub mod window;
 
@@ -278,6 +279,10 @@ pub fn run() -> i32 {
             game_commands::build_settings_get,
             game_commands::build_settings_save,
             game_commands::build_change_component,
+            storage_commands::storage_snapshot,
+            storage_commands::storage_clear,
+            storage_commands::storage_clear_unneeded,
+            storage_commands::storage_set_rule,
             component_commands::components_list,
             component_commands::component_install,
             component_commands::component_verify,

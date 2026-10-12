@@ -267,6 +267,7 @@ pub fn install() {
     ));
     let components = Rc::new(RefCell::new(crate::mock_components::MockComponents::new()));
     let content = Rc::new(RefCell::new(crate::mock_content::MockContent::new()));
+    let storage = Rc::new(RefCell::new(crate::mock_storage::MockStorage::new()));
     #[cfg(feature = "mod-backups")]
     let backups = Rc::new(RefCell::new(crate::mock_backups::MockBackups::default()));
     #[cfg(feature = "mod-diagnostics")]
@@ -570,6 +571,7 @@ pub fn install() {
             .handle(other, &args)
             .or_else(|| components.borrow_mut().handle(other, &args))
             .or_else(|| content.borrow_mut().handle(other, &args))
+            .or_else(|| storage.borrow_mut().handle(other, &args))
             .unwrap_or_else(|| Err(AppError::internal(format!("mock: unknown command {other}")))),
     });
     ipc::set_mock(handler);

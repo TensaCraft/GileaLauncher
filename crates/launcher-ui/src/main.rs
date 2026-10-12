@@ -15,6 +15,7 @@ mod mock_modrinth;
 mod mock_ops;
 #[cfg(feature = "mod-reports")]
 mod mock_reports;
+mod mock_storage;
 #[cfg(feature = "mod-tensa")]
 mod mock_tensa;
 mod modules;
