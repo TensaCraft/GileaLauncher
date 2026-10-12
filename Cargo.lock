@@ -3488,12 +3488,17 @@ dependencies = [
 name = "module-sync"
 version = "0.0.11-beta.1"
 dependencies = [
+ "chrono",
+ "hex",
  "launcher-core",
  "launcher-shared",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
+ "tracing",
  "ui-kit",
+ "uuid",
 ]
 
 [[package]]
