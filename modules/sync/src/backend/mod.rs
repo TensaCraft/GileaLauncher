@@ -2,6 +2,7 @@
 
 pub mod blacklist;
 pub mod paths;
+pub mod scan;
 pub mod store;
 
 use launcher_core::modules::Module;
