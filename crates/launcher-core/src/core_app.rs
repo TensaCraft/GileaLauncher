@@ -461,6 +461,21 @@ mod tests {
         }
     }
 
+    /// Counts the cores it is attached to.
+    struct Attached(Arc<std::sync::atomic::AtomicUsize>);
+    impl Module for Attached {
+        fn id(&self) -> &'static str {
+            "attached"
+        }
+        fn version(&self) -> &'static str {
+            "0.1.0"
+        }
+        fn attach(&self, core: &Arc<CoreApp>) {
+            assert!(core.modules.contains("attached"));
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
     fn opts() -> BootstrapOptions {
         BootstrapOptions {
             init_logging: false,
@@ -576,6 +591,17 @@ mod tests {
         let check = app.minecraft.check("1.21.1");
         assert!(!check.valid && !check.components.manifest);
         drop(app.shared.try_acquire(&app.paths.minecraft_dir, "java_runtime").unwrap());
+    }
+
+    #[test]
+    fn attach_reaches_every_module() {
+        let home = tempfile::tempdir().unwrap();
+        let env = PathEnv { os: Os::Linux, home: home.path().to_path_buf(), ..PathEnv::default() };
+        let attached = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let modules: Vec<Box<dyn Module>> = vec![Box::new(Attached(attached.clone())), Box::new(Flag)];
+        let app = Arc::new(CoreApp::bootstrap(env, Arc::new(NullSink), modules, opts()).unwrap());
+        app.modules.attach_all(&app);
+        assert_eq!(attached.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]

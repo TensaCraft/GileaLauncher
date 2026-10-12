@@ -142,6 +142,9 @@ pub fn watch_game(
     };
     tracing::info!("Minecraft {} ended (pid {pid}): {state:?}", watch.build_name);
     registry.unregister(&watch.key, pid);
+    for w in &mut watches {
+        w.exited();
+    }
     emit(sink, &watch, state.clone());
     state
 }
@@ -250,6 +253,29 @@ mod tests {
 
     fn crash_alerts(recorder: &Recorder) -> Vec<Text> {
         recorder.alerts.lock().unwrap().iter().map(|a| a.message.clone()).collect()
+    }
+
+    /// Counts the exits it hears of.
+    struct ExitWatch(Arc<AtomicUsize>);
+
+    impl GameWatch for ExitWatch {
+        fn exited(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn every_watch_hears_its_game_exit() {
+        for (process, kind) in [
+            (FakeProcess::exiting_after(1, Duration::from_millis(600), Some(0)), "a clean exit"),
+            (FakeProcess::exiting_after(1, Duration::from_millis(10), Some(1)), "a crash"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let heard = Arc::new(AtomicUsize::new(0));
+            let run = run_watched(process, dir.path(), None, vec![Box::new(ExitWatch(heard.clone()))]);
+            assert_eq!(heard.load(Ordering::SeqCst), 1, "{kind}");
+            assert!(!run.registry.is_active("k"), "{kind}: told once the game is no longer counted");
+        }
     }
 
     #[test]

@@ -5,6 +5,7 @@
 use std::collections::HashSet;
 use std::future::Future;
 use std::io;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -18,6 +19,7 @@ use crate::launch::hooks::{GameWatcher, LaunchHook};
 use crate::paths::LauncherPaths;
 use crate::providers::{ContentProvider, require};
 use crate::storage::config::ConfigStore;
+use crate::storage::versions::Build;
 
 /// A module command's answer.
 pub type ModuleFuture = Pin<Box<dyn Future<Output = AppResult<Value>> + Send + 'static>>;
@@ -74,6 +76,18 @@ pub trait Module: Send + Sync + 'static {
         let _ = (core, command, args);
         None
     }
+
+    /// The launcher's core, once it is up: for what a launch step or a watch needs of it.
+    fn attach(&self, core: &Arc<CoreApp>) {
+        let _ = core;
+    }
+
+    /// The paths of `build` this module keeps in line itself, relative to `game_dir` and
+    /// `/`-separated (a folder means everything in it): other modules leave them alone there.
+    fn managed_files(&self, build: &Build, game_dir: &Path) -> Vec<String> {
+        let _ = (build, game_dir);
+        Vec::new()
+    }
 }
 
 pub struct ModuleRegistry {
@@ -123,6 +137,22 @@ impl ModuleRegistry {
     }
 
     /// The modules' steps in every launch, in registration order.
+    /// Gives every module the started core.
+    pub fn attach_all(&self, core: &Arc<CoreApp>) {
+        for module in &self.modules {
+            module.attach(core);
+        }
+    }
+
+    /// The paths of `build` any module keeps in line itself (`Module::managed_files`), sorted.
+    pub fn managed_files(&self, build: &Build, game_dir: &Path) -> Vec<String> {
+        let mut all: Vec<String> =
+            self.modules.iter().flat_map(|m| m.managed_files(build, game_dir)).collect();
+        all.sort();
+        all.dedup();
+        all
+    }
+
     pub fn launch_hooks(&self) -> Vec<Arc<dyn LaunchHook>> {
         self.modules.iter().filter_map(|m| m.launch_hook()).collect()
     }
@@ -218,6 +248,37 @@ mod tests {
         fn config_defaults(&self) -> Vec<(&'static str, Value)> {
             vec![("dummy_flag", json!("yes")), ("dummy_count", json!(3))]
         }
+    }
+
+    /// A module that keeps `paths` of every build in line itself.
+    struct Manages(&'static str, Vec<&'static str>);
+    impl Module for Manages {
+        fn id(&self) -> &'static str {
+            self.0
+        }
+        fn version(&self) -> &'static str {
+            "1.0.0"
+        }
+        fn managed_files(
+            &self,
+            _build: &crate::storage::versions::Build,
+            _game_dir: &std::path::Path,
+        ) -> Vec<String> {
+            self.1.iter().map(|p| p.to_string()).collect()
+        }
+    }
+
+    #[test]
+    fn managed_files_are_every_modules_together() {
+        let registry = ModuleRegistry::new(vec![
+            Box::new(Manages("a", vec!["config/server", "mods"])),
+            Box::new(Dummy("b")),
+            Box::new(Manages("c", vec!["mods", "resourcepacks/pack.zip"])),
+        ])
+        .unwrap();
+        let build = crate::storage::versions::Build::new("Aero");
+        let managed = registry.managed_files(&build, std::path::Path::new("games/aero"));
+        assert_eq!(managed, vec!["config/server", "mods", "resourcepacks/pack.zip"]);
     }
 
     #[test]

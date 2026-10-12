@@ -88,4 +88,7 @@ pub trait GameWatch: Send {
         let _ = sink;
         false
     }
+
+    /// The game exited, however it ended: told once, when it no longer counts as running.
+    fn exited(&mut self) {}
 }

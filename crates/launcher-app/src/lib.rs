@@ -193,6 +193,7 @@ pub fn run() -> i32 {
                     return Ok(());
                 }
             };
+            core.modules.attach_all(&core);
             if let ResumeOutcome::Discarded(reason) = &resumed {
                 tracing::warn!("Discarded a pending launcher update: {reason}");
             }
