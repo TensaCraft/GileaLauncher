@@ -23,6 +23,7 @@
 |---|---|
 | `paths`, `storage`, `settings`, `setup` | folders, atomic writes, config, the first-run wizard |
 | `backups` | the backups folder and each build's folder in it |
+| `storage::usage`, `storage::housekeeping` | what the launcher's own files take, clearing them, and the once-a-day clean (the Storage settings tab) |
 | `auth` | Microsoft and offline profiles |
 | `minecraft`, `loaders`, `java` | versions, libraries, assets, Forge/NeoForge/Fabric/Quilt, Mojang's Java |
 | `builds`, `content` | builds and their content: mods, resource packs, shaders, screenshots |
