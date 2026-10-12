@@ -15,6 +15,8 @@ pub fn backend_modules() -> Vec<Box<dyn Module>> {
     modules.push(module_curseforge::backend::module());
     #[cfg(feature = "mod-backups")]
     modules.push(module_backups::backend::module());
+    #[cfg(feature = "mod-sync")]
+    modules.push(module_sync::backend::module());
     #[cfg(feature = "mod-reports")]
     modules.push(module_reports::backend::module());
     #[cfg(feature = "mod-diagnostics")]

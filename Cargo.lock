@@ -2887,6 +2887,7 @@ dependencies = [
  "module-diagnostics",
  "module-modrinth",
  "module-reports",
+ "module-sync",
  "module-tensa",
  "serde",
  "serde_json",
@@ -2972,6 +2973,7 @@ dependencies = [
  "module-diagnostics",
  "module-modrinth",
  "module-reports",
+ "module-sync",
  "module-tensa",
  "serde",
  "serde_json",
@@ -3479,6 +3481,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "ui-kit",
+]
+
+[[package]]
+name = "module-sync"
+version = "0.0.11-beta.1"
+dependencies = [
+ "launcher-core",
+ "launcher-shared",
+ "serde",
+ "serde_json",
+ "tempfile",
  "ui-kit",
 ]
 

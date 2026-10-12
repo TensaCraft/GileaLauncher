@@ -1,0 +1,19 @@
+[package]
+name = "module-sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+backend = ["dep:launcher-core"]
+ui = ["dep:ui-kit"]
+
+[dependencies]
+launcher-shared.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+launcher-core = { workspace = true, optional = true }
+ui-kit = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true

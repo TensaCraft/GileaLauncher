@@ -1,6 +1,6 @@
 [profile]
 name = "standard"
-modules = ["modrinth", "curseforge", "backups", "reports"]
+modules = ["modrinth", "curseforge", "backups", "sync", "reports"]
 
 [branding]
 app_name = "GileaLauncher"

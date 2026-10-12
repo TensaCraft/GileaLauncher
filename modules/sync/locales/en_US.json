@@ -1,0 +1,4 @@
+{
+    "module_sync_name": "Build sync",
+    "module_sync_desc": "Keeps chosen files and folders the same across builds"
+}
