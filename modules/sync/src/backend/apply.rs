@@ -67,7 +67,12 @@ pub fn pass_folder(shelf: &BuildBackups, at: SystemTime) -> PathBuf {
 }
 
 /// Keeps `saved` (the member's versions about to go) in a new pass folder with a `change.json`.
-fn keep(member: &Member, saved: &[&Saved], group: &SyncGroup, at: SystemTime) -> AppResult<PathBuf> {
+pub(crate) fn keep(
+    member: &Member,
+    saved: &[&Saved],
+    group: &SyncGroup,
+    at: SystemTime,
+) -> AppResult<PathBuf> {
     let folder = pass_folder(&member.shelf, at);
     for version in saved {
         copy_dated(&member.game.join(&version.path), &folder.join("files").join(&version.path))?;

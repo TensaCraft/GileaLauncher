@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-backend = ["dep:launcher-core", "dep:uuid", "dep:sha2", "dep:hex", "dep:tracing", "dep:chrono"]
+backend = ["dep:launcher-core", "dep:uuid", "dep:sha2", "dep:hex", "dep:tracing", "dep:chrono", "dep:tokio"]
 ui = ["dep:ui-kit"]
 
 [dependencies]
@@ -18,7 +18,12 @@ sha2 = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 ui-kit = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[[test]]
+name = "pass"
+required-features = ["backend"]

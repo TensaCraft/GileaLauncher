@@ -43,7 +43,7 @@ pub fn modified_ms(meta: &fs::Metadata) -> u64 {
 }
 
 /// `relative` is `managed`, or inside one of them.
-fn is_managed(relative: &str, managed: &[String]) -> bool {
+pub(crate) fn is_managed(relative: &str, managed: &[String]) -> bool {
     let relative = key(relative);
     managed.iter().map(|m| key(m)).any(|m| relative == m || relative.starts_with(&format!("{m}/")))
 }
