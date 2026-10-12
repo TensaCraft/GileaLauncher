@@ -1,7 +1,9 @@
 //! The sync module's backend: groups of builds whose chosen files are kept the same.
 
+pub mod apply;
 pub mod blacklist;
 pub mod decide;
+pub mod history;
 pub mod paths;
 pub mod scan;
 pub mod store;
