@@ -66,6 +66,7 @@ The first launch on each system has a step of its own: see [Installation](#insta
 - **Accounts:** Microsoft accounts and offline profiles; a build can have an account of its own.
 - **Java** for the game is picked and downloaded automatically.
 - **World backups** and a **desktop shortcut** for a build.
+- **Build sync:** chosen files and folders (settings, a minimap, resource packs) kept the same across builds, with history to restore from.
 - **Your own look:** Home, the Play button and the sidebar each come in a few [variants](#design-variants).
 - English and Ukrainian interface.
 

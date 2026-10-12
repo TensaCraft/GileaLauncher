@@ -8,6 +8,7 @@ A module is an optional part of the launcher: a build includes it only when its 
 |---|---|---|
 | `modrinth` | mods, resource packs, shaders and modpacks from Modrinth (a content provider) | standard, full |
 | `backups` | world backups | standard, full |
+| `sync` | build sync: chosen files and folders kept the same across groups of builds, with history | standard, full |
 | `reports` | reports of the launcher's own problems (a failed operation, a crash of the launcher, what the user describes), sent to the profile's `endpoint` | standard, full |
 | `tensa` | TensaCraft server builds on Home | full |
 | `curseforge` | mods, resource packs, shaders and modpacks from CurseForge (a content provider; needs the CurseForge API key, see below) | standard, full |
@@ -41,7 +42,9 @@ Every method but `id` and `version` is optional:
 | `init` | starting with the core (`ModuleContext`: folders, config, notifications) |
 | `provider_info` / `provider` | the module is a content provider (see below) |
 | `launch_hook` | a step before every game start (world backup in `backups`, server build sync in `tensa`) |
-| `game_watcher` | watching a running game |
+| `game_watcher` | watching a running game, and hearing it exit (`GameWatch::exited`: `sync` syncs after a game closes) |
+| `attach` | the started core, once (for a launch step or a watch that needs its services: `sync`) |
+| `managed_files` | the paths of a build the module keeps in line itself; other modules leave them alone there (`tensa`'s server builds) |
 | `call` | the module's own commands, which the interface calls through `module_invoke` |
 | `changes_builds` | a command changes builds: the app refreshes the build list after it |
 
@@ -56,6 +59,7 @@ A module can add to the interface:
 - windows shown over the whole app (`overlays`);
 - cards on Home (`home_cards`). The card component tells Home how many cards it shows with `report_home_cards`, so Home only says "no builds yet" when there is nothing on it;
 - build menu entries (`build_actions`);
+- marks on a build's card and row (`build_badges`: `sync` marks a build in a group);
 - buttons of an alert the user can report (`alert_actions`);
 - warnings above a provider's tab (`content_notices`);
 - rows of the Support window (`support_actions`);
