@@ -25,6 +25,7 @@ axum.workspace = true
 tokio = { workspace = true, features = ["net"] }
 tempfile.workspace = true
 sha2.workspace = true
+zip.workspace = true
 
 [[test]]
 name = "api"
@@ -52,4 +53,8 @@ required-features = ["backend"]
 
 [[test]]
 name = "home"
+required-features = ["backend"]
+
+[[test]]
+name = "optional"
 required-features = ["backend"]

@@ -23,13 +23,21 @@ fn three(w: &World) {
 }
 
 #[test]
-fn the_provider_offers_modpacks_only() {
+fn the_provider_offers_modpacks_and_optional_mods_to_server_builds() {
+    use launcher_shared::ContentKind;
     let info = info();
     assert_eq!(
         (info.id.as_str(), info.name.as_str(), info.icon.as_str()),
         ("tensa", "TensaCraft", "rocket_launch")
     );
-    assert!(info.modpacks && !info.modpack_updates && info.content.is_empty() && info.updates.is_empty());
+    assert!(info.modpacks && !info.modpack_updates);
+    assert_eq!(
+        (info.content.clone(), info.updates.clone()),
+        (vec![ContentKind::Mods], vec![ContentKind::Mods])
+    );
+    assert_eq!(info.content_clients, ["TensaCraft"]);
+    assert_eq!(info.content_label.as_deref(), Some("tensa_optional_source"));
+    assert!(info.serves(Some("TensaCraft")) && !info.serves(Some("fabric")));
 }
 
 #[tokio::test]

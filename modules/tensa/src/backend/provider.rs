@@ -6,28 +6,31 @@ use std::sync::Arc;
 
 use launcher_core::providers::{ContentProvider, ProviderFuture};
 use launcher_shared::provider::{
-    PACKS_LIMIT, PackArgs, PackInstallArgs, PackInstalled, PackVersion, PacksArgs, ProjectHit, ProviderInfo,
-    SearchPage,
+    InstallAnswer, InstallArgs, Overview, OverviewArgs, PACKS_LIMIT, PackArgs, PackInstallArgs,
+    PackInstalled, PackVersion, PacksArgs, PlanDto, ProjectHit, ProviderInfo, SearchArgs, SearchPage,
 };
-use launcher_shared::{AppError, AppResult, ErrorCode, LoaderKind};
+use launcher_shared::{AppError, AppResult, ContentKind, ErrorCode, LoaderKind};
 use serde_json::Value;
 
+use super::identity::CLIENT;
 use super::install::install;
+use super::optional_content;
 use super::pack::{Pack, find};
 use super::service::Deps;
 
-/// The name the server builds go by; their icon the original's.
+/// The name the server builds go by; their icon the original's. A server build's Mods tab also
+/// offers the mods the server allows (its whitelist), as «Необов'язкові».
 pub fn info() -> ProviderInfo {
     ProviderInfo {
         id: crate::ID.into(),
         name: "TensaCraft".into(),
         icon: "rocket_launch".into(),
-        content: Vec::new(),
-        updates: Vec::new(),
+        content: vec![ContentKind::Mods],
+        updates: vec![ContentKind::Mods],
         modpacks: true,
         modpack_updates: false,
-        content_clients: Vec::new(),
-        content_label: None,
+        content_clients: vec![CLIENT.into()],
+        content_label: Some("tensa_optional_source".into()),
     }
 }
 
@@ -109,6 +112,22 @@ impl ServerBuilds {
 }
 
 impl ContentProvider for ServerBuilds {
+    fn search(&self, args: SearchArgs) -> ProviderFuture<'_, SearchPage> {
+        Box::pin(async move { optional_content::search(&self.deps, &args).await })
+    }
+
+    fn plan(&self, args: InstallArgs) -> ProviderFuture<'_, PlanDto> {
+        Box::pin(async move { optional_content::plan(&self.deps, &args).await })
+    }
+
+    fn install(&self, args: InstallArgs) -> ProviderFuture<'_, InstallAnswer> {
+        Box::pin(async move { optional_content::install(&self.deps, &args).await })
+    }
+
+    fn overview(&self, args: OverviewArgs) -> ProviderFuture<'_, Overview> {
+        Box::pin(async move { optional_content::overview(&self.deps, &args).await })
+    }
+
     fn modpacks(&self, args: PacksArgs) -> ProviderFuture<'_, SearchPage> {
         Box::pin(async move { Ok(page(&self.deps.api.packs().await?, &args)) })
     }
