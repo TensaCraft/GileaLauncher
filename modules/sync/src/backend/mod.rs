@@ -1,3 +1,8 @@
+//! The sync module's backend: groups of builds whose chosen files are kept the same.
+
+pub mod blacklist;
+pub mod paths;
+
 use launcher_core::modules::Module;
 
 pub struct SyncModule;
