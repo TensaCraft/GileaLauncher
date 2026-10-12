@@ -236,6 +236,8 @@ fn auto_cleaning_runs_once_a_day_and_follows_the_switches() {
     w.service.set_rule(StorageRule::JavaDumps, false).unwrap();
     assert!(w.service.snapshot(false).rules.iter().any(|r| r.rule == StorageRule::JavaDumps && !r.on));
     let now = SystemTime::now();
+    // Not the first clean (that one dates the copies an older version made instead).
+    w.config.set("storage_cleaned_at", json!(0)).unwrap();
     assert_eq!(w.service.auto_clean(now), 3);
     assert!(!copy.exists() && dump.is_file(), "a rule that is off keeps its files");
     assert_eq!(w.rec.keys(), vec!["storage_cleaned_auto"]);
@@ -260,4 +262,52 @@ fn a_damaged_config_is_never_rewritten_by_cleaning() {
     assert_eq!(fs::read(w.tmp.path().join("config.json")).unwrap(), b"{ broken");
     assert!(copy.is_file());
     assert!(w.service.snapshot(false).rules.iter().all(|r| r.on));
+}
+
+#[test]
+fn temp_files_of_a_busy_build_stay() {
+    let w = world();
+    let (_, game) = build(&w, "Aero", true);
+    let (_, idle) = build(&w, "Zeta", true);
+    let rollback = put(&game, ".a.jar.rollback.ab.tmp", b"copying");
+    let leftover = put(&idle, "mods/x.jar.part.json", b"{}");
+    aged(&rollback, 2 * DAY);
+    aged(&leftover, 2 * DAY);
+    // A change of Aero is being undone: its copy is old by its date, but it is being written.
+    let lease = w.instances.try_acquire(&game, "launch").unwrap();
+    w.service.clear(None, StorageLine::TempFiles).unwrap();
+    assert!(rollback.is_file(), "a held build is not touched");
+    assert!(!leftover.exists());
+    w.service.clear_unneeded().unwrap();
+    assert!(rollback.is_file());
+    drop(lease);
+    w.service.clear(None, StorageLine::TempFiles).unwrap();
+    assert!(!rollback.exists());
+}
+
+#[test]
+fn the_first_clean_dates_old_mod_copies_instead_of_removing_them() {
+    let w = world();
+    let (aero, _) = build(&w, "Aero", true);
+    // Copied by an older version: dated as its jar, though made yesterday.
+    let copy = put(&shelf(&w, &aero).mods(), "sodium.jar.backup", b"old");
+    aged(&copy, 60 * DAY);
+    let now = SystemTime::now();
+    assert_eq!(w.service.auto_clean(now), 0);
+    assert!(copy.is_file());
+    let dated = fs::metadata(&copy).unwrap().modified().unwrap();
+    assert!(now.duration_since(dated).unwrap_or_default() < Duration::from_secs(60), "dated now");
+    assert_eq!(w.service.auto_clean(now + 31 * DAY), 3, "a month later it goes");
+}
+
+#[test]
+fn a_kept_snapshot_shows_which_games_run_now() {
+    let w = world();
+    let (aero, _) = build(&w, "Aero", true);
+    let running = |s: &StorageSnapshot| s.builds.iter().find(|b| b.key == aero).unwrap().running;
+    assert!(!running(&w.service.snapshot(false)));
+    w.running.lock().unwrap().insert(aero.clone());
+    assert!(running(&w.service.snapshot(false)), "the game started since");
+    w.running.lock().unwrap().clear();
+    assert!(!running(&w.service.snapshot(false)), "and closed again");
 }

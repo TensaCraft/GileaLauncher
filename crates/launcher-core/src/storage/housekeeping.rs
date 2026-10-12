@@ -18,7 +18,7 @@ use serde_json::json;
 
 use super::config::ConfigStore;
 use super::usage::{
-    THUMBS_CAP, build_items, dir_size, launcher_items, line_size, rule_items, stale_thumbnails,
+    THUMBS_CAP, build_items, dir_size, launcher_items, line_size, rule_items, stale_thumbnails, temp_files,
 };
 use super::versions::{Build, VersionStore};
 use crate::backups::{BackupsRoot, BuildBackups};
@@ -130,11 +130,6 @@ impl StorageService {
         })
     }
 
-    /// The builds' game folders whose games do not run (where temporary files are looked for).
-    fn idle_games(&self) -> Vec<PathBuf> {
-        self.deps.versions.list().iter().filter(|b| !self.running(b)).map(|b| self.game(b)).collect()
-    }
-
     fn measure(&self) -> StorageSnapshot {
         let builds = self.deps.versions.list();
         let games: Vec<PathBuf> = builds.iter().map(|b| self.game(b)).collect();
@@ -174,7 +169,11 @@ impl StorageService {
     /// What the launcher's files take: measured the first time, then kept until a clear or
     /// `refresh`.
     pub fn snapshot(&self, refresh: bool) -> StorageSnapshot {
-        if !refresh && let Some(snapshot) = self.cache().clone() {
+        if !refresh && let Some(mut snapshot) = self.cache().clone() {
+            // Kept sizes, but whose game runs is told as it is now.
+            for kept in &mut snapshot.builds {
+                kept.running = self.deps.versions.get(&kept.key).is_some_and(|b| self.running(&b));
+            }
             return snapshot;
         }
         let snapshot = self.measure();
@@ -202,14 +201,27 @@ impl StorageService {
     }
 
     fn clear_launcher(&self, line: StorageLine) -> AppResult<u64> {
-        let games = self.idle_games();
-        let items = launcher_items(line, &self.deps.cache_dir, &games, SystemTime::now());
-        if line == StorageLine::UpdateDownloads {
-            let size = line_size(&items);
-            (self.deps.clear_updates)()?;
-            return Ok(size);
+        let now = SystemTime::now();
+        let items = launcher_items(line, &self.deps.cache_dir, &[], now);
+        match line {
+            StorageLine::UpdateDownloads => {
+                let size = line_size(&items);
+                (self.deps.clear_updates)()?;
+                Ok(size)
+            }
+            StorageLine::TempFiles => {
+                // A build's only while it is held: a change being undone writes a copy whose date is
+                // its source's (Windows keeps it).
+                let mut freed = remove(&items);
+                for build in self.deps.versions.list() {
+                    if let Ok(_held) = self.hold(&build) {
+                        freed += remove(&temp_files(&self.game(&build), now));
+                    }
+                }
+                Ok(freed)
+            }
+            _ => Ok(remove(&items)),
         }
-        Ok(remove(&items))
     }
 
     /// Clears every line «Очистити непотрібне» names, in every build that is not running or held,
@@ -265,7 +277,8 @@ impl StorageService {
             return 0;
         }
         let at = millis(now);
-        if config.get_u64(CLEANED_AT).is_some_and(|last| at.saturating_sub(last) < DAY_MS) {
+        let last = config.get_u64(CLEANED_AT);
+        if last.is_some_and(|last| at.saturating_sub(last) < DAY_MS) {
             return 0;
         }
         let rules: Vec<StorageRule> = StorageRule::ALL.into_iter().filter(|r| self.rule_on(*r)).collect();
@@ -274,7 +287,17 @@ impl StorageService {
         for build in &builds {
             let Ok(_held) = self.hold(build) else { continue };
             let (game, shelf) = (self.game(build), self.shelf(build));
-            for rule in &rules {
+            if last.is_none() {
+                // The first clean: an older version dated a mod's copy as its jar (Windows keeps a
+                // copied file's time), so the copies it made are dated now and age from here.
+                for copy in build_items(StorageLine::ModBackups, &game, &shelf) {
+                    let dated = fs::File::options().write(true).open(&copy).and_then(|f| f.set_modified(now));
+                    if let Err(e) = dated {
+                        tracing::warn!("Unable to date {}: {e}", copy.display());
+                    }
+                }
+            }
+            for rule in rules.iter().filter(|r| last.is_some() || **r != StorageRule::ModBackups) {
                 freed += remove(&rule_items(*rule, &game, &shelf, now));
             }
         }

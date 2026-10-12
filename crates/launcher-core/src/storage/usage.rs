@@ -236,11 +236,13 @@ pub fn rule_items(rule: StorageRule, game: &Path, backups: &BuildBackups, now: S
             // A set-aside change's work keeps copies for a repair by hand, as long as its journal.
             let (old, young): (Vec<_>, Vec<_>) =
                 service.set_aside.iter().cloned().partition(|(path, _)| older_than(path, MONTH, now));
+            // One whose change is not known (a broken journal) may own any of them: they all stay.
+            let unknown = young.iter().any(|(_, id)| id.is_none());
             let kept: HashSet<String> = young.into_iter().filter_map(|(_, id)| id).collect();
             let mut out: Vec<PathBuf> = service
                 .idle_work()
                 .into_iter()
-                .filter(|(_, id)| !kept.contains(id))
+                .filter(|(_, id)| !unknown && !kept.contains(id))
                 .map(|(p, _)| p)
                 .collect();
             out.extend(old.into_iter().map(|(path, _)| path));
@@ -287,6 +289,14 @@ fn leftovers(dir: &Path, skip: &[&str], now: SystemTime, out: &mut Vec<PathBuf>)
     }
 }
 
+/// The temporary files in build folder `game` untouched for `TEMP_AGE` (not in its worlds or its
+/// service folder).
+pub fn temp_files(game: &Path, now: SystemTime) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    leftovers(game, &["saves", ".launcher"], now, &mut out);
+    out
+}
+
 /// The paths launcher line `line` is made of: in the cache, and for temporary files in the builds'
 /// folders `games` too (none for a build line).
 pub fn launcher_items(line: StorageLine, cache: &Path, games: &[PathBuf], now: SystemTime) -> Vec<PathBuf> {
@@ -297,10 +307,7 @@ pub fn launcher_items(line: StorageLine, cache: &Path, games: &[PathBuf], now: S
             if marker_path(cache).exists() || !downloads.exists() { Vec::new() } else { vec![downloads] }
         }
         StorageLine::TempFiles => {
-            let mut out = Vec::new();
-            for game in games {
-                leftovers(game, &["saves", ".launcher"], now, &mut out);
-            }
+            let mut out: Vec<PathBuf> = games.iter().flat_map(|game| temp_files(game, now)).collect();
             leftovers(cache, &[PENDING_DIR], now, &mut out);
             out
         }
@@ -499,6 +506,16 @@ mod tests {
         let work = game.join(".launcher/work");
         let service = rule_items(StorageRule::ServiceFolder, &game, &backups, now);
         assert_eq!(sorted(service), sorted(vec![work.join("cd"), work.join("gh"), old_aside, download]));
+    }
+
+    #[test]
+    fn a_set_aside_journal_without_an_id_keeps_every_work_folder() {
+        let (_tmp, game, backups) = setup();
+        let broken = put(&game, ".launcher/journal/tensa.json.1.failed", b"{ broken");
+        aged(&broken, 2 * DAY);
+        put(&game, ".launcher/work/cd/backup/a.jar", b"old");
+        let items = rule_items(StorageRule::ServiceFolder, &game, &backups, SystemTime::now());
+        assert!(items.is_empty(), "its change's copies may be any of them: {items:?}");
     }
 
     #[test]
