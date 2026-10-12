@@ -315,7 +315,8 @@ pub async fn overview(deps: &Deps, args: &OverviewArgs) -> AppResult<Overview> {
                 update: newer.clone(),
                 url: found.item.page.clone(),
                 icon_url: None,
-                installed: true,
+                // Its own only when the launcher put it in: Modrinth keeps what it installed.
+                installed: found.noted.as_deref() == Some(file.as_str()),
             });
         }
     }

@@ -398,27 +398,49 @@ pub fn plan_with(
     }
     checked.dirs = json!(managed.iter().collect::<Vec<_>>());
     checked.save();
+    // The server's own files, before the optional mods' are added.
+    let listed = expected.clone();
+    let listed_paths: Vec<String> = entries.iter().filter_map(|e| e.relative.clone()).collect();
+    let mut note = optional.note.clone();
+    let mut replaced: Vec<String> = Vec::new();
     for relative in &optional.keep {
         expected.insert(name_key(relative));
     }
-    for file in &optional.downloads {
-        if expected.insert(name_key(&file.relative)) && reachable(root, &file.relative) {
+    for item in &optional.items {
+        let in_list = |relative: &String| listed.contains(&name_key(relative));
+        let taken_by_pattern = item.pattern.as_ref().is_some_and(|rule| {
+            listed_paths.iter().any(|path| super::manifest::preserved(path, std::slice::from_ref(rule)))
+        });
+        let theirs = item.named.iter().chain(&item.by_name).chain(item.download.iter().map(|d| &d.relative));
+        if taken_by_pattern || theirs.clone().any(in_list) {
+            // The server's own list has this mod now: its copies here go, the server's stays.
+            replaced.extend(item.named.iter().filter(|f| !in_list(f)).cloned());
+            for relative in &item.by_name {
+                expected.insert(name_key(relative));
+            }
+            if let Some(note) = note.as_mut() {
+                note.remove(&item.id);
+            }
+            continue;
+        }
+        for relative in &item.keep {
+            expected.insert(name_key(relative));
+        }
+        if let Some(file) = &item.download
+            && expected.insert(name_key(&file.relative))
+            && reachable(root, &file.relative)
+        {
             downloads.push(file.clone());
         }
+        replaced.extend(item.replaced.iter().cloned());
     }
     let mut stale = stale_files(root, &managed, &expected, preserve);
-    for relative in &optional.replaced {
+    for relative in &replaced {
         if !expected.contains(&name_key(relative)) && !stale.contains(relative) && reachable(root, relative) {
             stale.push(relative.clone());
         }
     }
-    SyncPlan {
-        managed_dirs: managed.into_iter().collect(),
-        downloads,
-        stale,
-        force,
-        note: optional.note.clone(),
-    }
+    SyncPlan { managed_dirs: managed.into_iter().collect(), downloads, stale, force, note }
 }
 
 /// Plans a sync of `pack` into `root` from what the server lists: its force-update manifest when

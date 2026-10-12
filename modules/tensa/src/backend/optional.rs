@@ -72,6 +72,13 @@ pub struct Found {
     /// Its files were known by the server's name pattern alone (an older version, put there by
     /// hand): the player confirms replacing them.
     pub by_name_only: bool,
+    /// The file the launcher's note names (it put it there).
+    pub noted: Option<String>,
+    /// Its files known by the server's name pattern alone: perhaps another mod, so a sync never
+    /// replaces or removes them.
+    pub by_name: Vec<String>,
+    /// The server's name pattern of its file (`own_glob`), when it has one.
+    pub pattern: Option<PreserveRule>,
 }
 
 fn modified_ms(meta: &fs::Metadata) -> u64 {
@@ -132,14 +139,17 @@ pub fn recognize(
     let sized = |item: &Item, size: u64| item.size.is_none_or(|s| s == size);
     let mut owner: HashMap<usize, usize> = HashMap::new();
     let mut named: Vec<bool> = vec![false; items.len()];
-    // The note, then the hashes, then the server's name patterns.
+    let mut by_note: HashMap<usize, usize> = HashMap::new();
+    // The note (a noted file turned off or on since is still it), then the hashes, then the
+    // server's name patterns.
     for (i, item) in items.iter().enumerate() {
         let Some(noted) = note.get(&item.id) else { continue };
-        let key = name_key(&format!("{MODS}/{}", noted.file));
-        if let Some(at) = files.iter().position(|(relative, _)| name_key(relative) == key)
+        let key = name_key(enabled_name(&format!("{MODS}/{}", noted.file)));
+        if let Some(at) = files.iter().position(|(relative, _)| name_key(enabled_name(relative)) == key)
             && !owner.contains_key(&at)
         {
             owner.insert(at, i);
+            by_note.insert(i, at);
             named[i] = true;
         }
     }
@@ -153,12 +163,24 @@ pub fn recognize(
             named[i] = true;
         }
     }
-    for (i, item) in items.iter().enumerate() {
-        let Some(rule) = own_glob(item, rules) else { continue };
-        for (at, (relative, _)) in files.iter().enumerate() {
-            if !owner.contains_key(&at) && preserved(enabled_name(relative), std::slice::from_ref(rule)) {
-                owner.insert(at, i);
-            }
+    // A file two items' patterns take is neither's.
+    let patterns: Vec<Option<&PreserveRule>> = items.iter().map(|item| own_glob(item, rules)).collect();
+    let mut by_pattern: Vec<usize> = Vec::new();
+    for (at, (relative, _)) in files.iter().enumerate() {
+        if owner.contains_key(&at) {
+            continue;
+        }
+        let takers: Vec<usize> = patterns
+            .iter()
+            .enumerate()
+            .filter(|(_, rule)| {
+                rule.is_some_and(|rule| preserved(enabled_name(relative), std::slice::from_ref(rule)))
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if let [i] = takers.as_slice() {
+            owner.insert(at, *i);
+            by_pattern.push(at);
         }
     }
     items
@@ -183,6 +205,13 @@ pub fn recognize(
                 current,
                 disabled: !mine.is_empty() && mine.iter().all(|&at| is_disabled(&files[at].0)),
                 by_name_only: !mine.is_empty() && !named[i],
+                noted: by_note.get(&i).map(|&at| files[at].0.clone()),
+                by_name: mine
+                    .iter()
+                    .filter(|at| by_pattern.contains(at))
+                    .map(|&at| files[at].0.clone())
+                    .collect(),
+                pattern: patterns[i].cloned(),
             }
         })
         .collect()
@@ -209,18 +238,33 @@ pub fn hasher<'a>(root: &'a Path, note: &'a Note) -> impl FnMut(&str) -> Option<
     }
 }
 
-/// What a server sync does for the optional mods: the files it keeps, the newer versions it
-/// downloads, the older ones it removes, and the note it leaves (`None`: the note stays as it is).
+/// What a server sync does for one optional mod.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OptionalItem {
+    pub id: String,
+    /// Its files known by the note or the hash: the sync may replace or remove them.
+    pub named: Vec<String>,
+    /// Its files known by the server's name pattern alone: kept as they are.
+    pub by_name: Vec<String>,
+    /// The server's name pattern of its file: a file of the server's own list it takes is this mod.
+    pub pattern: Option<PreserveRule>,
+    pub keep: Vec<String>,
+    pub download: Option<PlannedFile>,
+    pub replaced: Vec<String>,
+}
+
+/// What a server sync does for the optional mods (`items`), or, when the whitelist could not be
+/// read, the files it keeps (`keep`); and the note it leaves (`None`: as it is).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Optional {
+    pub items: Vec<OptionalItem>,
     pub keep: Vec<String>,
-    pub downloads: Vec<PlannedFile>,
-    pub replaced: Vec<String>,
     pub note: Option<Note>,
 }
 
 /// The sync's part for the optional mods of `found` (`None`: the whitelist could not be read, so
-/// what the note names stays and nothing changes).
+/// what the note names stays and nothing changes). Only files known by the note or the hash are
+/// replaced or removed; one found by the server's name pattern alone may be another mod.
 pub fn for_sync(root: &Path, found: Option<&[Found]>, note: &Note) -> Optional {
     let Some(found) = found else {
         let keep = note
@@ -233,26 +277,35 @@ pub fn for_sync(root: &Path, found: Option<&[Found]>, note: &Note) -> Optional {
     let mut out = Optional::default();
     let mut next = note_after(found, root);
     for f in found {
+        let named: Vec<String> = f.files.iter().filter(|file| !f.by_name.contains(file)).cloned().collect();
+        let mut item = OptionalItem {
+            id: f.item.id.clone(),
+            named: named.clone(),
+            by_name: f.by_name.clone(),
+            pattern: f.pattern.clone(),
+            keep: f.by_name.clone(),
+            ..OptionalItem::default()
+        };
         match f.state {
             State::Missing => {}
             State::Current => {
-                // The server's version stays; another copy of it would load the mod twice.
-                for file in &f.files {
+                // The server's version stays; another known copy of it would load the mod twice.
+                for file in &named {
                     if Some(file) == f.current.as_ref() {
-                        out.keep.push(file.clone());
+                        item.keep.push(file.clone());
                     } else {
-                        out.replaced.push(file.clone());
+                        item.replaced.push(file.clone());
                     }
                 }
             }
+            State::Outdated if named.is_empty() => {}
             State::Outdated => {
-                let dest = if f.disabled {
-                    format!("{}{DISABLED}", f.item.relative)
-                } else {
-                    f.item.relative.clone()
-                };
-                out.replaced.extend(f.files.iter().filter(|file| !file.eq_ignore_ascii_case(&dest)).cloned());
-                out.downloads.push(PlannedFile {
+                let disabled = named.iter().all(|file| is_disabled(file));
+                let dest =
+                    if disabled { format!("{}{DISABLED}", f.item.relative) } else { f.item.relative.clone() };
+                item.replaced =
+                    named.iter().filter(|file| name_key(file) != name_key(&dest)).cloned().collect();
+                item.download = Some(PlannedFile {
                     relative: dest.clone(),
                     url: f.item.url.clone(),
                     size: f.item.size,
@@ -268,17 +321,19 @@ pub fn for_sync(root: &Path, found: Option<&[Found]>, note: &Note) -> Optional {
                 next.insert(f.item.id.clone(), noted);
             }
         }
+        out.items.push(item);
     }
     out.note = Some(next);
     out
 }
 
-/// The note of `found`'s items that are the server's version, with their files' size and time now.
+/// The note of `found`'s items the launcher put in that are the server's version, with their
+/// files' size and time now.
 pub fn note_after(found: &[Found], root: &Path) -> Note {
     found
         .iter()
         .filter_map(|f| {
-            let relative = f.current.as_ref()?;
+            let relative = f.current.as_ref().filter(|current| f.noted.as_ref() == Some(*current))?;
             let meta = fs::metadata(root.join(relative)).ok()?;
             let file = relative.strip_prefix("mods/").unwrap_or(relative).to_string();
             let noted = Noted {
@@ -371,6 +426,35 @@ mod tests {
         let found = recognize(dir.path(), &[goggles()], &rules, &Note::new(), &mut real_hash(dir.path()));
         assert_eq!(found[0].files, ["mods/CreateCyberGoggles-1.21.1-8.6.8-NeoForge.jar"]);
         assert_eq!((found[0].state, found[0].by_name_only), (State::Outdated, true));
+    }
+
+    #[test]
+    fn a_file_two_items_globs_match_goes_to_neither() {
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "mods/alpha-bet.jar", "which one");
+        let alpha = item("alpha", "alpha-2.jar", "alpha 2");
+        let alpbet = item("alpbet", "alpbet.jar", "alpbet 2");
+        let rules = [glob("mods/alpha-*.jar"), glob("mods/alp*bet.jar")];
+        let found = recognize(dir.path(), &[alpha, alpbet], &rules, &Note::new(), &mut real_hash(dir.path()));
+        assert!(
+            found.iter().all(|f| f.files.is_empty()),
+            "both patterns take it: neither item does {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_noted_file_turned_off_is_still_its_item() {
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "mods/goggles-1.jar.disabled", "goggles 1");
+        let mut note = Note::new();
+        note.insert("goggles".into(), Noted { file: "goggles-1.jar".into(), ..Noted::default() });
+        let found = recognize(dir.path(), &[goggles()], &[], &note, &mut real_hash(dir.path()));
+        assert_eq!(found[0].files, ["mods/goggles-1.jar.disabled"]);
+        assert_eq!(
+            (found[0].state, found[0].disabled, found[0].by_name_only),
+            (State::Outdated, true, false)
+        );
+        assert_eq!(found[0].noted.as_deref(), Some("mods/goggles-1.jar.disabled"));
     }
 
     #[test]
@@ -471,11 +555,22 @@ mod tests {
         put(dir.path(), "mods/CreateCyberGoggles-1.21.1-8.6.9-NeoForge.jar", "goggles 8.6.9");
         let old = item("old", "old-2.jar", "old 2");
         put(dir.path(), "mods/old-1.jar", "old 1");
+        let barrel = item("barrel", "barrel-1.jar", "barrel");
+        put(dir.path(), "mods/barrel-1.jar", "barrel");
         let rules = [glob("mods/old-*.jar")];
+        let mut noted = Note::new();
+        for (id, file) in [("goggles", "CreateCyberGoggles-1.21.1-8.6.9-NeoForge.jar"), ("old", "old-1.jar")]
+        {
+            noted.insert(id.into(), Noted { file: file.into(), ..Noted::default() });
+        }
         let found =
-            recognize(dir.path(), &[goggles(), old], &rules, &Note::new(), &mut real_hash(dir.path()));
+            recognize(dir.path(), &[goggles(), old, barrel], &rules, &noted, &mut real_hash(dir.path()));
         let note = note_after(&found, dir.path());
-        assert_eq!(note.keys().collect::<Vec<_>>(), ["goggles"], "only what is the server's version");
+        assert_eq!(
+            note.keys().collect::<Vec<_>>(),
+            ["goggles"],
+            "only what the launcher put in and is the server's version: not the old one, not one put by another"
+        );
         assert_eq!(note["goggles"].sha256, sha("goggles 8.6.9"));
         assert_eq!(note["goggles"].size, 13);
         write_note(dir.path(), &note).unwrap();

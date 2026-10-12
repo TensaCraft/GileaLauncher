@@ -405,6 +405,7 @@ async fn an_outdated_optional_mod_is_replaced_by_the_whitelists() {
     let build = installed(&w);
     put(&w, &build, "mods/core.jar", "core");
     put(&w, &build, "mods/goggles-1.jar", "goggles 1");
+    note_of(&w, &build, "g", "goggles-1.jar");
     assert_eq!(run(&w, &build, false).await.unwrap(), Synced::Updated);
     assert_eq!(mods(&w, &build), ["core.jar", "goggles-2.jar"]);
     let note = module_tensa::backend::optional::read_note(&folder(&w, &build));
@@ -462,6 +463,7 @@ async fn a_disabled_optional_mod_is_updated_and_stays_disabled() {
     let build = installed(&w);
     put(&w, &build, "mods/core.jar", "core");
     put(&w, &build, "mods/goggles-1.jar.disabled", "goggles 1");
+    note_of(&w, &build, "g", "goggles-1.jar");
     run(&w, &build, false).await.unwrap();
     assert_eq!(mods(&w, &build), ["core.jar", "goggles-2.jar.disabled"]);
 }
@@ -488,8 +490,85 @@ async fn a_whitelisted_file_the_manifest_also_lists_is_planned_once() {
     let build = installed(&w);
     put(&w, &build, "mods/core.jar", "core");
     put(&w, &build, "mods/goggles-1.jar", "goggles 1");
+    note_of(&w, &build, "g", "goggles-1.jar");
     run(&w, &build, false).await.unwrap();
     assert_eq!(mods(&w, &build), ["core.jar", "goggles-2.jar"]);
     let fetched = w.server.seen().iter().filter(|s| s.as_str() == "/files/goggles-2.jar").count();
     assert_eq!(fetched, 1, "one download of it");
+}
+
+#[tokio::test]
+async fn an_unrelated_mod_the_glob_matches_is_never_removed() {
+    let w = World::start().await;
+    catalog(&w, json!({"preserve_rules": [{"type": "glob", "path": "mods/sodium-*.jar", "enabled": true}]}));
+    manifest(&w, &[("core.jar", "core")]);
+    whitelist(&w, &[("s", "sodium-0.6.jar", "sodium 0.6")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/sodium-extra-0.6.jar", "sodium extra");
+    run(&w, &build, false).await.unwrap();
+    assert_eq!(
+        mods(&w, &build),
+        ["core.jar", "sodium-extra-0.6.jar"],
+        "not Sodium, and Sodium is not put in"
+    );
+    put(&w, &build, "mods/sodium-0.6.jar", "sodium 0.6");
+    run(&w, &build, false).await.unwrap();
+    assert_eq!(
+        mods(&w, &build),
+        ["core.jar", "sodium-0.6.jar", "sodium-extra-0.6.jar"],
+        "nor a second copy of it"
+    );
+}
+
+#[tokio::test]
+async fn a_hand_put_older_version_is_left_for_the_player_to_update() {
+    let w = World::start().await;
+    catalog(&w, goggles_glob());
+    manifest(&w, &[("core.jar", "core")]);
+    whitelist(&w, &[("g", "goggles-2.jar", "goggles 2")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-1.jar", "goggles 1");
+    assert_eq!(run(&w, &build, false).await.unwrap(), Synced::Unchanged);
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-1.jar"]);
+}
+
+#[tokio::test]
+async fn a_mod_the_manifest_now_brings_is_left_to_the_manifest() {
+    let w = World::start().await;
+    catalog(&w, goggles_glob());
+    manifest(&w, &[("core.jar", "core"), ("goggles-3.jar", "goggles 3")]);
+    whitelist(&w, &[("g", "goggles-2.jar", "goggles 2")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-2.jar", "goggles 2");
+    note_of(&w, &build, "g", "goggles-2.jar");
+    run(&w, &build, false).await.unwrap();
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-3.jar"], "one copy: the server's own");
+    std::fs::remove_file(folder(&w, &build).join("mods/goggles-3.jar")).unwrap();
+    run(&w, &build, false).await.unwrap();
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-3.jar"], "and the whitelist's never comes back");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_silent_whitelist_does_not_hold_up_the_sync() {
+    let w = World::start().await;
+    // An address that takes the connection and never answers.
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}/whitelist", silent.local_addr().unwrap());
+    catalog(&w, json!({"whitelist_endpoint": endpoint}));
+    manifest(&w, &[("core.jar", "core")]);
+    let build = installed(&w);
+    let deps = SyncDeps {
+        api: &w.deps.api,
+        versions: &w.deps.versions,
+        components: w.deps.components.as_ref(),
+        downloader: &w.deps.downloader,
+        running: false,
+        ask_within: Some(std::time::Duration::from_secs(3)),
+    };
+    let synced = sync(&deps, &build, false, &op(&w)).await.unwrap();
+    assert_eq!(synced, Synced::Updated, "the server's files came all the same");
+    assert_eq!(mods(&w, &build), ["core.jar"]);
 }

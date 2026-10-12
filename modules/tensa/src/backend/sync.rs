@@ -29,6 +29,8 @@ use super::profile;
 
 /// The journal's name for a server build's sync.
 pub const OPERATION: &str = "tensacraft_sync";
+/// The longest a sync waits for the whitelist.
+const WHITELIST_ASK: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Synced {
@@ -220,15 +222,23 @@ pub async fn sync(
     };
     let root = game_dir(build, deps.versions.minecraft_dir());
     finish_interrupted_commit(&root)?;
+    // The whitelist is asked beside the server's list, and given up sooner: a sync without it
+    // goes on as before.
     let endpoint = pack.whitelist_endpoint.as_deref();
-    let whitelist = match in_time(deadline, deps.api.whitelist(&pack.id, endpoint, true)).await {
+    let whitelist_by = Instant::now() + WHITELIST_ASK;
+    let whitelist_by = Some(deadline.map_or(whitelist_by, |d| d.min(whitelist_by)));
+    let (whitelist, source) = tokio::join!(
+        in_time(whitelist_by, deps.api.whitelist(&pack.id, endpoint, true)),
+        in_time(deadline, listed(deps.api, &pack)),
+    );
+    let whitelist = match whitelist {
         Ok(items) => Some(items),
         Err(e) => {
             tracing::info!("No whitelist of {} this time: {}", pack.id, e.detail);
             None
         }
     };
-    let plan = match in_time(deadline, listed(deps.api, &pack)).await {
+    let plan = match source {
         Ok(source) => planned(source, &pack, &root, force, whitelist).await,
         Err(e) => Err(e),
     };

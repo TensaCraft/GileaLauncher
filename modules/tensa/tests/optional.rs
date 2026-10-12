@@ -216,7 +216,13 @@ async fn the_overview_names_the_mods_and_their_updates() {
     let notes: Vec<(&str, &str, bool)> =
         overview.notes.iter().map(|n| (n.file.as_str(), n.project_id.as_str(), n.update.is_some())).collect();
     assert_eq!(notes, [("barrel-1.jar", "b", false), ("goggles-old.jar", "g", true)]);
-    assert!(overview.notes.iter().all(|n| n.installed));
+    let installed: Vec<(&str, bool)> =
+        overview.notes.iter().map(|n| (n.file.as_str(), n.installed)).collect();
+    assert_eq!(
+        installed,
+        [("barrel-1.jar", false), ("goggles-old.jar", true)],
+        "only what the launcher put in is its own: Modrinth keeps what it installed"
+    );
     let summary = overview.updates.unwrap();
     assert_eq!((summary.status, summary.available), (UpdatesStatus::Available, 1));
     assert_eq!(overview.notes[1].update.as_ref().unwrap().version_number, "goggles-2.jar");
