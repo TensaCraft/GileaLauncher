@@ -188,6 +188,8 @@ fn preview_providers() -> Vec<launcher_shared::provider::ProviderInfo> {
     list.push(module_modrinth::types::provider_info());
     #[cfg(all(feature = "mod-modrinth", feature = "mod-curseforge"))]
     list.push(module_curseforge::types::provider_info());
+    #[cfg(feature = "mod-tensa")]
+    list.push(module_tensa::provider_info());
     list
 }
 
@@ -406,6 +408,10 @@ pub fn install() {
             },
         ]),
         "pick_directory" => Ok(json!("D:\\Games\\Launcher")),
+        #[cfg(feature = "mod-tensa")]
+        cmd if cmd.starts_with("provider_") && args["provider"] == module_tensa::ID => {
+            tensa.borrow_mut().handle_provider(cmd, &args)
+        }
         #[cfg(feature = "mod-modrinth")]
         cmd if cmd.starts_with("provider_") => modrinth.borrow_mut().handle(cmd, &args),
         #[cfg(feature = "mod-sync")]

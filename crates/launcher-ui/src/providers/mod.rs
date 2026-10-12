@@ -31,7 +31,11 @@ pub fn content_providers(all: &[ProviderInfo], kind: ContentKind, client: Option
     if kind != ContentKind::ResourcePacks && !mods_supported(client) {
         return Vec::new();
     }
-    all.iter().filter(|p| p.offers(Need::Content(kind)) && p.serves(client)).cloned().collect()
+    let mut offered: Vec<ProviderInfo> =
+        all.iter().filter(|p| p.offers(Need::Content(kind)) && p.serves(client)).cloned().collect();
+    // A source made for this kind of build (a server's own mods) comes first.
+    offered.sort_by_key(|p| p.content_clients.is_empty());
+    offered
 }
 
 /// What a content source is called: its label (`t` translates it) when it has one, else its name.
@@ -160,7 +164,7 @@ mod tests {
         let ids = |client| {
             content_providers(&all, ContentKind::Mods, client).into_iter().map(|p| p.id).collect::<Vec<_>>()
         };
-        assert_eq!(ids(Some("TensaCraft")), ["modrinth", "tensa"]);
+        assert_eq!(ids(Some("TensaCraft")), ["tensa", "modrinth"], "the build's own source first");
         assert_eq!(ids(Some("neoforge")), ["modrinth"]);
     }
 

@@ -10,7 +10,7 @@ A module is an optional part of the launcher: a build includes it only when its 
 | `backups` | world backups | standard, full |
 | `sync` | build sync: chosen files and folders kept the same across groups of builds, with history | standard, full |
 | `reports` | reports of the launcher's own problems (a failed operation, a crash of the launcher, what the user describes), sent to the profile's `endpoint` | standard, full |
-| `tensa` | TensaCraft server builds on Home | full |
+| `tensa` | TensaCraft server builds on Home, and the mods the server allows (its whitelist) as «Optional» in their Mods tab, kept at the server's version | full |
 | `curseforge` | mods, resource packs, shaders and modpacks from CurseForge (a content provider; needs the CurseForge API key, see below) | standard, full |
 | `diagnostics` | the postponed diagnostics module | none (outside `--modules all`) |
 
@@ -77,7 +77,8 @@ A provider is a module that finds and installs content. It declares in `Provider
 
 - what it can search and install (`content`);
 - what it can update (`updates`);
-- whether it works with modpacks (`modpacks`, `modpack_updates`).
+- whether it works with modpacks (`modpacks`, `modpack_updates`);
+- which builds it gives content to (`content_clients`: the clients of those builds; empty for every build) and what its source is called there (`content_label`: a translation key, instead of its name). `tensa` gives its optional mods to the server's builds only, as «Optional».
 
 The `launcher_core::providers::ContentProvider` contract has `search`, `plan`, `install`, `overview`, `modpacks`, `modpack_versions` and more. All are optional: by default they answer "not supported". The core asks a provider only about what it declared. The content interface is shared by all providers: a new provider needs no pages of its own.
 

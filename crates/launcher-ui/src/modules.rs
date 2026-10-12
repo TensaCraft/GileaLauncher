@@ -63,9 +63,14 @@ impl ModuleParts {
         }
     }
 
-    /// The translation keys of the warnings for `build`'s provider tabs.
-    pub fn notices_for(&self, build: &BuildDto) -> Vec<&'static str> {
-        self.content_notices.iter().filter(|n| (n.applies)(build)).map(|n| n.text).collect()
+    /// The translation keys of the warnings for `build`'s provider tab of `source`: a module's own
+    /// source (what it installs, it keeps) goes without its warning.
+    pub fn notices_for(&self, build: &BuildDto, source: &str) -> Vec<&'static str> {
+        self.content_notices
+            .iter()
+            .filter(|n| n.module != source && (n.applies)(build))
+            .map(|n| n.text)
+            .collect()
     }
 }
 
@@ -197,10 +202,14 @@ mod tests {
     fn content_notices_show_for_the_builds_they_apply_to() {
         let all = ModuleParts::of(&[Box::new(WithOverlay) as Box<dyn UiModule>]);
         let on = all.present_among(&["watcher".to_string()]);
-        assert_eq!(on.notices_for(&build(Some("Watched"))), ["watched_content_goes"]);
-        assert!(on.notices_for(&build(Some("Fabric"))).is_empty(), "not for other builds");
+        assert_eq!(on.notices_for(&build(Some("Watched")), "modrinth"), ["watched_content_goes"]);
+        assert!(on.notices_for(&build(Some("Fabric")), "modrinth").is_empty(), "not for other builds");
         assert!(
-            all.present_among(&[]).notices_for(&build(Some("Watched"))).is_empty(),
+            on.notices_for(&build(Some("Watched")), "watcher").is_empty(),
+            "not on the module's own source: what it installs stays"
+        );
+        assert!(
+            all.present_among(&[]).notices_for(&build(Some("Watched")), "modrinth").is_empty(),
             "no backend, no warning"
         );
     }

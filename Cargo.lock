@@ -3522,6 +3522,7 @@ dependencies = [
  "tokio",
  "tracing",
  "ui-kit",
+ "zip",
 ]
 
 [[package]]

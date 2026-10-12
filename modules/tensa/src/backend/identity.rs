@@ -9,7 +9,7 @@ use launcher_core::storage::versions::Build;
 use serde_json::{Value, json};
 
 /// The client a server build names (the original launcher's, so its builds are recognised).
-pub const CLIENT: &str = "TensaCraft";
+pub const CLIENT: &str = crate::CLIENT;
 /// The journal of a server build's file changes.
 pub const JOURNAL: JournalName = JournalName { file: "tensa.json", legacy: ".launcher-tensa-sync.json" };
 const PACK_OPTION_KEYS: [&str; 2] = ["tensacraftPackId", "tensacraft_pack_id"];

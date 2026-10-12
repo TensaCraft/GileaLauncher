@@ -11,8 +11,7 @@ use ui_kit::module::{
     BuildActionRun, ModuleBuildAction, ModuleContentNotice, ModuleHomeCards, ModuleSection, UiModule,
 };
 
-/// The server's client, as its builds name it (`backend::identity::CLIENT`).
-const CLIENT: &str = "TensaCraft";
+use crate::CLIENT;
 
 /// A build the server manages goes by the server's client.
 pub fn is_server_build(build: &BuildDto) -> bool {
@@ -131,6 +130,22 @@ mod tests {
         assert!(is_server_build(&build(Some(" tensacraft "))));
         assert!(!is_server_build(&build(Some("Fabric"))));
         assert!(!is_server_build(&build(None)));
+    }
+
+    #[test]
+    fn the_notice_points_to_the_optional_mods() {
+        let text = |raw: &str| {
+            let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(raw).unwrap();
+            map["tensa_added_content_synced_away"].as_str().unwrap().to_string()
+        };
+        assert!(
+            text(include_str!("../../locales/uk_UA.json"))
+                .ends_with("Дозволені сервером моди — у «Необов'язкових».")
+        );
+        assert!(
+            text(include_str!("../../locales/en_US.json"))
+                .ends_with("Mods the server allows are under Optional.")
+        );
     }
 
     #[test]

@@ -197,8 +197,10 @@ pub fn ProviderPanel(
 
     // A module's word for this build (a server's build: what is added here may go at its next sync).
     let parts = crate::modules::use_module_parts();
-    let notices =
-        move || current.with(|b| b.as_ref().map(|b| parts.with(|p| p.notices_for(b))).unwrap_or_default());
+    let notices = move || {
+        let source = id.get_value();
+        current.with(|b| b.as_ref().map(|b| parts.with(|p| p.notices_for(b, &source))).unwrap_or_default())
+    };
 
     view! {
         <div node_ref=top class="create__bar">

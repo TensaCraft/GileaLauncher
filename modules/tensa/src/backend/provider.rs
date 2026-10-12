@@ -9,29 +9,17 @@ use launcher_shared::provider::{
     InstallAnswer, InstallArgs, Overview, OverviewArgs, PACKS_LIMIT, PackArgs, PackInstallArgs,
     PackInstalled, PackVersion, PacksArgs, PlanDto, ProjectHit, ProviderInfo, SearchArgs, SearchPage,
 };
-use launcher_shared::{AppError, AppResult, ContentKind, ErrorCode, LoaderKind};
+use launcher_shared::{AppError, AppResult, ErrorCode, LoaderKind};
 use serde_json::Value;
 
-use super::identity::CLIENT;
 use super::install::install;
 use super::optional_content;
 use super::pack::{Pack, find};
 use super::service::Deps;
 
-/// The name the server builds go by; their icon the original's. A server build's Mods tab also
-/// offers the mods the server allows (its whitelist), as «Необов'язкові».
+/// The name the server builds go by; their icon the original's (`crate::provider_info`).
 pub fn info() -> ProviderInfo {
-    ProviderInfo {
-        id: crate::ID.into(),
-        name: "TensaCraft".into(),
-        icon: "rocket_launch".into(),
-        content: vec![ContentKind::Mods],
-        updates: vec![ContentKind::Mods],
-        modpacks: true,
-        modpack_updates: false,
-        content_clients: vec![CLIENT.into()],
-        content_label: Some("tensa_optional_source".into()),
-    }
+    crate::provider_info()
 }
 
 /// "Fabric" for `fabric`, the name as written for a loader the launcher does not know.

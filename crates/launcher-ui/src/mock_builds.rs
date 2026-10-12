@@ -386,6 +386,12 @@ impl MockBuilds {
         self.builds.iter().find(|b| b.key == key).map(|b| b.name.clone())
     }
 
+    /// The client of build `key`.
+    #[cfg(feature = "mod-tensa")]
+    pub fn client_of(&self, key: &str) -> Option<String> {
+        self.builds.iter().find(|b| b.key == key).and_then(|b| b.client.clone())
+    }
+
     pub fn emit_builds(&self) {
         if let Ok(value) = serde_json::to_value(self.snapshot()) {
             ipc::emit_mock(names::BUILDS, value);

@@ -43,7 +43,7 @@ The standard edition: everything described below, with Modrinth and CurseForge.
 
 ### GileaLauncher + TensaCraft
 
-The TensaCraft edition: the same launcher, plus the TensaCraft servers' builds on Home.
+The TensaCraft edition: the same launcher, plus the TensaCraft servers' builds on Home, and in their Mods tab the optional mods the server allows, installed in one click and kept up to date.
 
 | System | File | |
 |---|---|---|
