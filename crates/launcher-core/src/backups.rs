@@ -107,7 +107,7 @@ impl BuildBackups {
 
 /// `name` is a modpack update's backup folder: its time (`2026-10-01_10-00-00`), with `-2`… after
 /// it for a second update in the same second.
-fn an_update_s(name: &str) -> bool {
+pub(crate) fn an_update_s(name: &str) -> bool {
     let (Some(time), Some(rest)) = (name.get(..19), name.get(19..)) else { return false };
     chrono::NaiveDateTime::parse_from_str(time, "%Y-%m-%d_%H-%M-%S").is_ok()
         && (rest.is_empty()

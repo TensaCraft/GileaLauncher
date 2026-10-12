@@ -180,7 +180,7 @@ pub struct SyncJournal {
 }
 
 /// The journal at `path` tells of a change that is not over (or cannot be read).
-fn unfinished(path: &Path) -> bool {
+pub(crate) fn unfinished(path: &Path) -> bool {
     let read = fs::read_to_string(path).ok().and_then(|text| serde_json::from_str::<Value>(&text).ok());
     read.and_then(|v| v.as_object().map(status_of)).is_none_or(|status| !FINISHED.contains(&status.as_str()))
 }

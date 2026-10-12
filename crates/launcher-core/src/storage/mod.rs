@@ -6,6 +6,7 @@ pub mod journal;
 pub mod json;
 pub mod layout;
 pub mod transaction;
+pub mod usage;
 pub mod versions;
 
 use std::collections::HashMap;
