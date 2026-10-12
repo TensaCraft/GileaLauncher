@@ -408,11 +408,11 @@ pub fn install() {
         "pick_directory" => Ok(json!("D:\\Games\\Launcher")),
         #[cfg(feature = "mod-modrinth")]
         cmd if cmd.starts_with("provider_") => modrinth.borrow_mut().handle(cmd, &args),
-        #[cfg(feature = "mod-backups")]
         #[cfg(feature = "mod-sync")]
         "module_invoke" if args["module"] == "sync" => {
             sync.borrow_mut().handle(args["command"].as_str().unwrap_or_default(), &args["args"])
         }
+        #[cfg(feature = "mod-backups")]
         "module_invoke" if args["module"] == "backups" => {
             backups.borrow_mut().handle(args["command"].as_str().unwrap_or_default(), &args["args"])
         }

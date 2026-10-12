@@ -191,12 +191,15 @@ pub fn check_steps() -> Vec<Vec<String>> {
     steps
 }
 
-/// fmt and clippy: the app and the UI with every module, the UI for wasm too, and each module that
-/// is built by no profile (`lint`; CI runs it once, the tests on every system).
+/// fmt and clippy: the app and the UI with every module and with none (the core profile), the UI
+/// for wasm too, and each module that is built by no profile (`lint`; CI runs it once, the tests on
+/// every system).
 pub fn lint_steps() -> Vec<Vec<String>> {
     let mut steps = vec![
         words("fmt --all -- --check"),
         words("clippy --workspace --all-targets -- -D warnings"),
+        words("clippy -p launcher-app --no-default-features --all-targets -- -D warnings"),
+        words("clippy -p launcher-ui --target wasm32-unknown-unknown --no-default-features -- -D warnings"),
         words(&format!(
             "clippy -p launcher-app --features {} --all-targets -- -D warnings",
             extra_features("launcher-app")
@@ -379,6 +382,18 @@ mod tests {
             assert!(steps.iter().any(|s| s.contains("wasm32-unknown-unknown") && s.contains(&ui)));
         }
         assert!(EXTRA_MODULES.contains(&"tensa") && EXTRA_MODULES.contains(&"diagnostics"));
+    }
+
+    #[test]
+    fn the_lint_builds_the_app_and_the_ui_with_no_module() {
+        // The core profile has none: a module's code left outside its `cfg` breaks only that build.
+        let steps: Vec<String> = lint_steps().iter().map(|s| s.join(" ")).collect();
+        for step in [
+            "clippy -p launcher-app --no-default-features --all-targets -- -D warnings",
+            "clippy -p launcher-ui --target wasm32-unknown-unknown --no-default-features -- -D warnings",
+        ] {
+            assert!(steps.iter().any(|s| s == step), "missing: cargo {step}\n{steps:#?}");
+        }
     }
 
     #[test]
