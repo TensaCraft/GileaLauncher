@@ -15,6 +15,7 @@ pub mod provider;
 pub mod service;
 pub mod sync;
 
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use launcher_core::builds::service::default_gpu_mode;
@@ -22,6 +23,7 @@ use launcher_core::core_app::CoreApp;
 use launcher_core::launch::hooks::LaunchHook;
 use launcher_core::modules::{Module, ModuleFuture};
 use launcher_core::providers::ContentProvider;
+use launcher_core::storage::versions::Build;
 use launcher_shared::provider::ProviderInfo;
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde_json::{Value, json};
@@ -96,6 +98,10 @@ impl Module for TensaModule {
         Ok(Arc::new(provider::ServerBuilds::new(Arc::new(deps_of(core)?))))
     }
 
+    fn managed_files(&self, build: &Build, game_dir: &Path) -> Vec<String> {
+        if identity::is_managed(build, game_dir) { plan::managed_paths(game_dir) } else { Vec::new() }
+    }
+
     fn launch_hook(&self) -> Option<Arc<dyn LaunchHook>> {
         match api() {
             Ok(api) => Some(Arc::new(hook::ServerSync::new(api))),
@@ -141,4 +147,29 @@ impl Module for TensaModule {
 
 pub fn module() -> Box<dyn Module> {
     Box::new(TensaModule)
+}
+
+#[cfg(test)]
+mod managed_tests {
+    use std::fs;
+
+    use launcher_core::modules::Module;
+    use launcher_core::storage::versions::Build;
+    use serde_json::json;
+
+    use super::TensaModule;
+
+    #[test]
+    fn a_server_build_names_its_managed_folders_and_files() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".launcher")).unwrap();
+        let note =
+            json!({"files": {"mods/a.jar": {"size": 1}, "options.txt": {"size": 2}}, "dirs": ["mods"]});
+        fs::write(dir.path().join(super::plan::CHECKED), note.to_string()).unwrap();
+        let mut server = Build::new("Server");
+        super::identity::mark(&mut server, "pack");
+        assert_eq!(TensaModule.managed_files(&server, dir.path()), vec!["mods", "mods/a.jar", "options.txt"]);
+        let own = Build::new("Own");
+        assert!(TensaModule.managed_files(&own, dir.path()).is_empty(), "a build that is not the server's");
+    }
 }

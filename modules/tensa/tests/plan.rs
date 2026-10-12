@@ -57,6 +57,21 @@ fn a_manifest_manages_its_folders_and_files() {
 }
 
 #[test]
+fn the_note_keeps_the_managed_folders() {
+    let dir = tempfile::tempdir().unwrap();
+    put(dir.path(), "mods/a.jar", "a");
+    let manifest = json!({
+        "files": [file("mods/a.jar"), file("config/b.json")],
+        "directories": [{"path": "mods"}, {"path": "config/server"}]
+    });
+    plan(dir.path(), &Source::Manifest(manifest), &[], false);
+    let note: Value =
+        serde_json::from_slice(&fs::read(dir.path().join(".launcher/tensa-checked.json")).unwrap()).unwrap();
+    assert_eq!(note["dirs"], json!(["config/server", "mods"]));
+    assert!(note["files"].get("mods/a.jar").is_some());
+}
+
+#[test]
 fn a_file_checked_once_is_not_hashed_again_while_its_size_and_time_stay() {
     // Every launch planned the sync by hashing each managed file (gigabytes for a big server
     // build): what was checked is remembered in the build, by size and time.

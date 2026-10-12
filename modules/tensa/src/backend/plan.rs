@@ -155,22 +155,26 @@ fn inferred_scopes(entries: &[Entry<'_>]) -> BTreeSet<String> {
 /// size and time stay is not hashed again (each launch would read gigabytes).
 pub const CHECKED: &str = ".launcher/tensa-checked.json";
 
-/// The hashes noted before (`known`) and those of this plan (`seen`), by path.
+/// The hashes noted before (`known`) and those of this plan (`seen`), by path; and the folders the
+/// server manages, noted for other modules (`managed_paths`).
 struct Checked {
     path: PathBuf,
     known: Map<String, Value>,
     seen: Map<String, Value>,
+    known_dirs: Value,
+    dirs: Value,
 }
 
 impl Checked {
     fn open(root: &Path) -> Checked {
         let path = root.join(CHECKED);
-        let known = fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .and_then(|note| note.get("files").and_then(Value::as_object).cloned())
+        let note = fs::read(&path).ok().and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+        let known = note
+            .as_ref()
+            .and_then(|n| n.get("files").and_then(Value::as_object).cloned())
             .unwrap_or_default();
-        Checked { path, known, seen: Map::new() }
+        let known_dirs = note.as_ref().and_then(|n| n.get("dirs").cloned()).unwrap_or(json!([]));
+        Checked { path, known, seen: Map::new(), dirs: known_dirs.clone(), known_dirs }
     }
 
     /// The hash of `kind` of the file at `dest`: the noted one while its size and time stay, else
@@ -203,10 +207,10 @@ impl Checked {
 
     /// Keeps the hashes of this plan (the files no longer listed go), when they changed.
     fn save(self) {
-        if self.seen == self.known {
+        if self.seen == self.known && self.dirs == self.known_dirs {
             return;
         }
-        let note = json!({"files": self.seen});
+        let note = json!({"files": self.seen, "dirs": self.dirs});
         let written = self
             .path
             .parent()
@@ -216,6 +220,21 @@ impl Checked {
             tracing::debug!("No note of the hashes read in {}: {e}", self.path.display());
         }
     }
+}
+
+/// The paths of the build in `root` its last sync managed, as its note keeps them: the managed
+/// folders and the files it checked, sorted.
+pub fn managed_paths(root: &Path) -> Vec<String> {
+    let Some(note) = fs::read(root.join(CHECKED)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    else {
+        return Vec::new();
+    };
+    let dirs = note["dirs"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string);
+    let files = note["files"].as_object().into_iter().flat_map(|files| files.keys().cloned());
+    let mut all: Vec<String> = dirs.chain(files).collect();
+    all.sort();
+    all.dedup();
+    all
 }
 
 /// The file is on disk as the server lists it: its size (when known) and hash (when known).
@@ -361,6 +380,7 @@ pub fn plan(root: &Path, source: &Source, preserve: &[PreserveRule], force: bool
             downloads.push(planned);
         }
     }
+    checked.dirs = json!(managed.iter().collect::<Vec<_>>());
     checked.save();
     let stale = stale_files(root, &managed, &expected, preserve);
     SyncPlan { managed_dirs: managed.into_iter().collect(), downloads, stale, force }
