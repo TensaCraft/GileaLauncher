@@ -157,14 +157,15 @@ impl StorageSnapshot {
     }
 
     /// What «Очистити непотрібне» frees, line by line: the `unneeded` lines that hold something,
-    /// a build line summed over the builds.
+    /// a build line summed over the builds whose game does not run (those it leaves).
     pub fn unneeded(&self) -> Vec<LineSize> {
         StorageLine::BUILD
             .iter()
             .chain(&StorageLine::LAUNCHER)
             .filter(|line| line.unneeded())
             .map(|&line| {
-                let lines = self.builds.iter().flat_map(|b| &b.lines).chain(&self.launcher);
+                let builds = self.builds.iter().filter(|b| !b.running);
+                let lines = builds.flat_map(|b| &b.lines).chain(&self.launcher);
                 LineSize { line, bytes: lines.filter(|l| l.line == line).map(|l| l.bytes).sum() }
             })
             .filter(|l| l.bytes > 0)
@@ -209,6 +210,20 @@ mod tests {
         );
         assert_eq!(snapshot.total(), 25);
         assert_eq!(snapshot.builds[0].total(), 15);
+    }
+
+    #[test]
+    fn a_running_build_adds_nothing_to_what_is_cleared() {
+        let mut running = build("b", vec![line(StorageLine::ModBackups, 7)]);
+        running.running = true;
+        let snapshot = StorageSnapshot {
+            builds: vec![build("a", vec![line(StorageLine::ModBackups, 5)]), running],
+            launcher: Vec::new(),
+            free: None,
+            rules: Vec::new(),
+        };
+        assert_eq!(snapshot.unneeded(), vec![line(StorageLine::ModBackups, 5)]);
+        assert_eq!(snapshot.total(), 12, "it still counts in the total");
     }
 
     #[test]
