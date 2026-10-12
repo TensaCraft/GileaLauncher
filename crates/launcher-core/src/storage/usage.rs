@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 use launcher_shared::{StorageLine, StorageRule};
 use serde_json::Value;
 
-use crate::backups::{BuildBackups, an_update_s};
+use crate::backups::{BuildBackups, stamp_time, stamped};
 use crate::launch::process::launch_log;
 use crate::storage::journal::{JOURNAL_DIR, SYNC_WORK_DIR, unfinished};
 use crate::updater::stage::{DOWNLOADS_DIR, PENDING_DIR, marker_path, pending_dir};
@@ -23,6 +23,9 @@ pub const TEMP_AGE: Duration = DAY;
 pub const MONTH: Duration = Duration::from_secs(30 * 24 * 3600);
 /// How long Java's dumps are kept by their rule.
 pub const DUMP_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
+/// How long, and how much per build, the sync history is kept by its rule.
+pub const SYNC_HISTORY_AGE: Duration = Duration::from_secs(14 * 24 * 3600);
+pub const SYNC_HISTORY_CAP: u64 = 2 * 1024 * 1024 * 1024;
 /// What the screenshots' thumbnails may take at most.
 pub const THUMBS_CAP: u64 = 500 * 1024 * 1024;
 
@@ -182,11 +185,8 @@ pub fn build_items(line: StorageLine, game: &Path, backups: &BuildBackups) -> Ve
         StorageLine::ModBackups => {
             files(&backups.mods(), |n| n.ends_with(".backup") || n.ends_with(".backup.part"))
         }
-        StorageLine::ModpackBackups => entries(&backups.modpacks())
-            .into_iter()
-            .filter(|e| is_dir(e) && an_update_s(&name_of(&e.path())))
-            .map(|e| e.path())
-            .collect(),
+        StorageLine::ModpackBackups => stamped_folders(&backups.modpacks()),
+        StorageLine::SyncHistory => stamped_folders(&backups.sync()),
         StorageLine::ServiceFolder => {
             let service = service(game);
             let mut out: Vec<PathBuf> = service.idle_work().into_iter().map(|(path, _)| path).collect();
@@ -201,10 +201,35 @@ pub fn build_items(line: StorageLine, game: &Path, backups: &BuildBackups) -> Ve
     }
 }
 
-/// When the modpack update whose copies are in folder `name` (its time, `2026-10-01_10-00-00`) ran.
-fn update_time(name: &str) -> Option<SystemTime> {
-    let time = chrono::NaiveDateTime::parse_from_str(name.get(..19)?, "%Y-%m-%d_%H-%M-%S").ok()?.and_utc();
-    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(u64::try_from(time.timestamp()).ok()?))
+/// The folders of copies in `dir` named by their time (`stamped`), oldest first.
+fn stamped_folders(dir: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = entries(dir)
+        .into_iter()
+        .filter(|e| is_dir(e) && stamped(&name_of(&e.path())))
+        .map(|e| e.path())
+        .collect();
+    out.sort();
+    out
+}
+
+/// The sync passes' folders of `backups` to remove at `now`: those older than `SYNC_HISTORY_AGE`,
+/// then the oldest of the rest until they take at most `cap`.
+pub(crate) fn sync_history_items(backups: &BuildBackups, now: SystemTime, cap: u64) -> Vec<PathBuf> {
+    let (mut out, kept): (Vec<PathBuf>, Vec<PathBuf>) =
+        stamped_folders(&backups.sync()).into_iter().partition(|folder| {
+            stamp_time(&name_of(folder))
+                .and_then(|at| now.duration_since(at).ok())
+                .is_some_and(|age| age >= SYNC_HISTORY_AGE)
+        });
+    let mut total: u64 = kept.iter().map(|p| dir_size(p)).sum();
+    for folder in kept {
+        if total <= cap {
+            break;
+        }
+        total = total.saturating_sub(dir_size(&folder));
+        out.push(folder);
+    }
+    out
 }
 
 /// The paths rule `rule` takes from build `game` and its backups at `now` (the thumbnails' rule
@@ -221,12 +246,13 @@ pub fn rule_items(rule: StorageRule, game: &Path, backups: &BuildBackups, now: S
             updates.sort();
             let newest = updates.pop();
             let stale = newest.filter(|folder| {
-                update_time(&name_of(folder))
+                stamp_time(&name_of(folder))
                     .and_then(|at| now.duration_since(at).ok())
                     .is_some_and(|d| d >= MONTH)
             });
             updates.into_iter().chain(stale).collect()
         }
+        StorageRule::SyncHistory => sync_history_items(backups, now, SYNC_HISTORY_CAP),
         StorageRule::JavaDumps => dumps(game).into_iter().filter(past(DUMP_AGE)).collect(),
         StorageRule::CrashReports => {
             crash_reports(game).into_iter().chain(log_archives(game)).filter(past(MONTH)).collect()
@@ -534,6 +560,36 @@ mod tests {
         let later = at("2026-11-10 10:00");
         let both = rule_items(StorageRule::ModpackBackups, &game, &backups, later);
         assert_eq!(sorted(both), sorted(vec![older, newest]), "the newest too, past its month");
+    }
+
+    #[test]
+    fn sync_history_goes_by_age_then_by_size() {
+        let (_tmp, game, backups) = setup();
+        let at = |text: &str| -> SystemTime {
+            let time = chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M").unwrap().and_utc();
+            SystemTime::UNIX_EPOCH + Duration::from_secs(time.timestamp() as u64)
+        };
+        let passes = [
+            "2026-09-20_10-00-00-1",
+            "2026-10-07_10-00-00-1",
+            "2026-10-09_10-00-00-1",
+            "2026-10-11_10-00-00-2",
+        ];
+        let folders: Vec<PathBuf> = passes.iter().map(|p| backups.sync().join(p)).collect();
+        for folder in &folders {
+            put(folder, "files/options.txt", &[0; 10]);
+        }
+        put(&backups.sync(), "My notes/a.txt", b"mine");
+        let shown = build_items(StorageLine::SyncHistory, &game, &backups);
+        assert_eq!(sorted(shown), sorted(folders.clone()), "the player's folder is not a pass's");
+        let now = at("2026-10-12 10:00");
+        let stale = sync_history_items(&backups, now, 2 * 12);
+        assert_eq!(
+            stale,
+            vec![folders[0].clone(), folders[1].clone()],
+            "past 14 days, then the oldest over the cap"
+        );
+        assert_eq!(rule_items(StorageRule::SyncHistory, &game, &backups, now), vec![folders[0].clone()]);
     }
 
     #[test]

@@ -10,7 +10,7 @@ use crate::mock_builds::{arg, to_value};
 
 const MB: u64 = 1024 * 1024;
 
-fn lines(sizes: [u64; 6]) -> Vec<LineSize> {
+fn lines(sizes: [u64; 7]) -> Vec<LineSize> {
     StorageLine::BUILD.iter().zip(sizes).map(|(&line, mb)| LineSize { line, bytes: mb * MB }).collect()
 }
 
@@ -30,9 +30,9 @@ impl MockStorage {
         MockStorage {
             snapshot: StorageSnapshot {
                 builds: vec![
-                    build("aeronautics", "Aeronautics", false, false, [1843, 2458, 640, 12, 35, 48]),
-                    build("skyblock", "Скайблок", false, true, [420, 120, 0, 3, 2, 9]),
-                    build("vanilna_1_20_1", "Ванільна 1.20.1", true, false, [210, 0, 0, 1, 0, 4]),
+                    build("aeronautics", "Aeronautics", false, false, [1843, 2458, 640, 310, 12, 35, 48]),
+                    build("skyblock", "Скайблок", false, true, [420, 120, 0, 64, 3, 2, 9]),
+                    build("vanilna_1_20_1", "Ванільна 1.20.1", true, false, [210, 0, 0, 0, 1, 0, 4]),
                 ],
                 launcher: [86, 140, 22]
                     .into_iter()

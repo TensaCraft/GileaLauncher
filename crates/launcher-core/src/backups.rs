@@ -79,6 +79,11 @@ impl BuildBackups {
         self.0.join("modpacks")
     }
 
+    /// What build sync overwrote or removed in it, a folder per pass (`<time>-<n>`).
+    pub fn sync(&self) -> PathBuf {
+        self.0.join("sync")
+    }
+
     /// Removes its mods' and modpack's backups: what the launcher wrote there (a mod's
     /// `<file>.backup`, an update's folder named by its time), then the folders left empty.
     /// Anything else there is the player's: the backups folder may be one they keep things in.
@@ -95,7 +100,7 @@ impl BuildBackups {
         let modpacks = self.modpacks();
         for entry in fs::read_dir(&modpacks).into_iter().flatten().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if entry.file_type().is_ok_and(|t| t.is_dir()) && an_update_s(&name) {
+            if entry.file_type().is_ok_and(|t| t.is_dir()) && stamped(&name) {
                 fs::remove_dir_all(entry.path())?;
             }
         }
@@ -105,13 +110,19 @@ impl BuildBackups {
     }
 }
 
-/// `name` is a modpack update's backup folder: its time (`2026-10-01_10-00-00`), with `-2`… after
-/// it for a second update in the same second.
-pub(crate) fn an_update_s(name: &str) -> bool {
+/// `name` is a folder of copies named by its time (`2026-10-01_10-00-00`), with `-2`… after it
+/// for a second one in the same second: a modpack update's, or a sync pass's.
+pub fn stamped(name: &str) -> bool {
     let (Some(time), Some(rest)) = (name.get(..19), name.get(19..)) else { return false };
     chrono::NaiveDateTime::parse_from_str(time, "%Y-%m-%d_%H-%M-%S").is_ok()
         && (rest.is_empty()
             || rest.strip_prefix('-').is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
+}
+
+/// When the copies in folder `name` (`stamped`) were made.
+pub fn stamp_time(name: &str) -> Option<std::time::SystemTime> {
+    let time = chrono::NaiveDateTime::parse_from_str(name.get(..19)?, "%Y-%m-%d_%H-%M-%S").ok()?.and_utc();
+    Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::try_from(time.timestamp()).ok()?))
 }
 
 #[cfg(test)]
