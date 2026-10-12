@@ -11,6 +11,8 @@ use launcher_shared::{AppError, AppResult, ErrorCode};
 use reqwest::{Client, Url};
 use serde_json::{Value, json};
 
+use super::whitelist::{Item, items};
+
 /// The API's address from the build profile (`[modules.tensa] api_base`).
 pub const API_BASE: &str = match option_env!("LAUNCHER_MOD_TENSA_API_BASE") {
     Some(base) => base,
@@ -24,6 +26,8 @@ const RETRY_DELAY: Duration = Duration::from_millis(500);
 const IMAGE_ASK: Duration = Duration::from_secs(4);
 /// How long a picture's version is trusted before it is asked again.
 const IMAGE_KNOWN: Duration = Duration::from_secs(10 * 60);
+/// How long a whitelist is kept for the optional mods' source before it is asked again.
+const WHITELIST_KNOWN: Duration = Duration::from_secs(5 * 60);
 
 fn network(e: impl std::fmt::Display) -> AppError {
     AppError::new(ErrorCode::Network, format!("server builds: {e}"))
@@ -61,6 +65,8 @@ pub struct TensaApi {
     retry_delay: Duration,
     /// The pictures' versions asked lately, by address.
     image_versions: Mutex<HashMap<String, (Instant, String)>>,
+    /// The whitelists asked lately, by address.
+    whitelists: Mutex<HashMap<String, (Instant, Vec<Item>)>>,
 }
 
 /// A picture's version from its answer: its `ETag`, else its `Last-Modified`; letters, digits and
@@ -82,6 +88,7 @@ impl TensaApi {
             base: base.trim_end_matches('/').to_string(),
             retry_delay: RETRY_DELAY,
             image_versions: Mutex::new(HashMap::new()),
+            whitelists: Mutex::new(HashMap::new()),
         })
     }
 
@@ -148,6 +155,27 @@ impl TensaApi {
         kept.retain(|_, (at, _)| at.elapsed() < IMAGE_KNOWN);
         kept.insert(url.to_string(), (Instant::now(), version.clone()));
         Some(version)
+    }
+
+    /// The mods the server allows in build `pack_id` (at `endpoint` when one is named); one asked
+    /// in the last five minutes is not asked again unless `fresh`.
+    pub async fn whitelist(
+        &self,
+        pack_id: &str,
+        endpoint: Option<&str>,
+        fresh: bool,
+    ) -> AppResult<Vec<Item>> {
+        let url = self.address(pack_id, endpoint, "/whitelist")?;
+        let kept = || self.whitelists.lock().unwrap_or_else(|e| e.into_inner());
+        if !fresh && let Some((_, known)) = kept().get(&url).filter(|(at, _)| at.elapsed() < WHITELIST_KNOWN)
+        {
+            return Ok(known.clone());
+        }
+        let found = items(&self.get_json(&url).await?);
+        let mut kept = kept();
+        kept.retain(|_, (at, _)| at.elapsed() < WHITELIST_KNOWN);
+        kept.insert(url, (Instant::now(), found.clone()));
+        Ok(found)
     }
 
     /// The catalog: its entries that are objects.

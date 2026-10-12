@@ -123,3 +123,28 @@ async fn a_picture_s_version_is_its_etag_else_its_date() {
     api.image_version(&server.url("/icons/a.png")).await;
     assert_eq!(server.seen().len(), asked, "a version known a moment ago is not asked again");
 }
+
+fn whitelist_answer() -> serde_json::Value {
+    serde_json::from_str(include_str!("fixtures/whitelist-aeronautics_dev.json")).unwrap()
+}
+
+#[tokio::test]
+async fn the_whitelist_is_asked_at_its_address_and_kept_five_minutes() {
+    let server = Server::start().await;
+    server.json("/api/mods/aero/whitelist", whitelist_answer());
+    let api = api(&server);
+    assert_eq!(api.whitelist("aero", None, false).await.unwrap().len(), 14);
+    assert_eq!(api.whitelist("aero", None, false).await.unwrap().len(), 14);
+    assert_eq!(server.seen(), ["/api/mods/aero/whitelist"], "the second answer is kept");
+    api.whitelist("aero", None, true).await.unwrap();
+    assert_eq!(server.seen().len(), 2, "a fresh ask goes to the server");
+}
+
+#[tokio::test]
+async fn a_named_whitelist_endpoint_is_used() {
+    let server = Server::start().await;
+    server.json("/other", whitelist_answer());
+    let named = server.url("/other");
+    assert_eq!(api(&server).whitelist("aero", Some(&named), false).await.unwrap().len(), 14);
+    assert_eq!(server.seen(), ["/other"]);
+}

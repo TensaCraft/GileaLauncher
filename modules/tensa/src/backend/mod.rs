@@ -14,6 +14,7 @@ pub mod profile;
 pub mod provider;
 pub mod service;
 pub mod sync;
+pub mod whitelist;
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};

@@ -69,6 +69,8 @@ pub struct Pack {
     pub force_update: bool,
     pub files_endpoint: Option<String>,
     pub force_endpoint: Option<String>,
+    /// Where its whitelist is, when not at `{base}/{id}/whitelist`.
+    pub whitelist_endpoint: Option<String>,
     pub preserve_rules: Option<Value>,
     /// Settings of the build the server overrides at every sync.
     pub forced_fields: Vec<String>,
@@ -115,6 +117,8 @@ impl Pack {
             force_update,
             files_endpoint: first(client, &["files_endpoint", "endpoint"]),
             force_endpoint,
+            whitelist_endpoint: first(client, &["whitelist_endpoint", "whitelistEndpoint"])
+                .or_else(|| first(entry, &["whitelist_endpoint", "whitelistEndpoint"])),
             preserve_rules: client.get("preserve_rules").cloned(),
             forced_fields: client
                 .get("force_update_profile_fields")
@@ -274,6 +278,9 @@ mod tests {
         assert_eq!(p.gpu.as_deref(), Some("discrete"));
         assert_eq!(p.options.get("a"), Some(&json!(1)));
         assert_eq!(p.preserve_rules, Some(json!([{"type": "file", "path": "x"}])));
+        assert_eq!(p.whitelist_endpoint, None);
+        let named = pack(json!({"client": {"id": "c", "whitelist_endpoint": " https://x/w "}}));
+        assert_eq!(named.whitelist_endpoint.as_deref(), Some("https://x/w"));
         assert_eq!(p.forced_fields, ["server", "jvm"]);
     }
 
