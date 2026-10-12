@@ -63,6 +63,9 @@ pub fn BuildCard(
     on_stop: Option<Callback<()>>,
     #[prop(optional, into)] stop_label: MaybeProp<String>,
     #[prop(optional, into)] on_menu: Option<Callback<(i32, i32)>>,
+    /// Modules' marks, at the top right.
+    #[prop(optional)]
+    badges: Option<AnyView>,
 ) -> impl IntoView {
     let style = use_context::<CardPlayStyle>().map_or_else(|| Signal::stored(CardPlay::Center), |s| s.0);
     let src = card_image(image.as_deref());
@@ -124,6 +127,7 @@ pub fn BuildCard(
                 <img class="card__image" src=src alt="" draggable="false" />
             </div>
             {tag.map(|(name, tone)| view! { <span class=format!("tag card__tag {}", tone.class())>{name}</span> })}
+            {badges.map(|marks| view! { <div class="card__marks">{marks}</div> })}
             {move || is_running().then(|| {
                 let text = running_label.get().unwrap_or_default();
                 // A dot beside the loader's tag (both fit the card), its words in its tip.

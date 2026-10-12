@@ -153,6 +153,7 @@ fn BuildRow(item: BuildDto, update_pack: Callback<(ProviderInfo, ModpackBuild)>)
                 <div class="build-row__name">{build.name.clone()}</div>
                 <div class="build-row__sub">{build_subtitle(&build)}</div>
             </div>
+            <crate::modules::BuildBadges key=build.key.clone() />
             {running.then(|| view! { <Tag tone=TagTone::Vanilla>{move || i18n.t("version_running_badge")}</Tag> })}
             <div class="build-row__actions">
                 {pack_update}

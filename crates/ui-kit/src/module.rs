@@ -104,6 +104,14 @@ pub struct ModuleContentNotice {
     pub applies: fn(&launcher_shared::BuildDto) -> bool,
 }
 
+/// A mark a module puts on a build's card and row (its tip says what it means): `view` gets the
+/// build's key and shows nothing when the mark does not apply.
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleBuildBadge {
+    pub module: &'static str,
+    pub view: fn(String) -> AnyView,
+}
+
 /// A button a module adds to an alert the user can report, before «Open Discord».
 #[derive(Debug, Clone, Copy)]
 pub struct ModuleAlertAction {
@@ -240,6 +248,11 @@ pub trait UiModule: 'static {
 
     /// Rows of the Support window.
     fn support_actions(&self) -> Vec<ModuleSupportAction> {
+        Vec::new()
+    }
+
+    /// Marks on a build's card and row.
+    fn build_badges(&self) -> Vec<ModuleBuildBadge> {
         Vec::new()
     }
 }

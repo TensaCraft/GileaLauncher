@@ -107,6 +107,7 @@ pub fn HomePage() -> impl IntoView {
                                     on_stop=Callback::new(move |()| actions.stop(for_stop.clone()))
                                     stop_label=Signal::derive(move || i18n.t("version_stop"))
                                     on_menu=Callback::new(move |(x, y)| build_menu.open(for_menu.clone(), x, y))
+                                    badges=view! { <crate::modules::BuildBadges key=build.key.clone() /> }.into_any()
                                 />
                                 </Reorderable>
                             }

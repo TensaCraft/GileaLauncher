@@ -3,8 +3,8 @@
 use launcher_shared::{AppInfo, BuildDto};
 use leptos::prelude::*;
 use ui_kit::module::{
-    DeleteOption, ModuleAlertAction, ModuleBuildAction, ModuleContentNotice, ModuleHomeCards, ModuleOverlay,
-    ModuleSection, ModuleSupportAction, ModuleTab, UiModule,
+    DeleteOption, ModuleAlertAction, ModuleBuildAction, ModuleBuildBadge, ModuleContentNotice,
+    ModuleHomeCards, ModuleOverlay, ModuleSection, ModuleSupportAction, ModuleTab, UiModule,
 };
 
 use crate::shell::sidebar::backend_modules;
@@ -22,6 +22,7 @@ pub struct ModuleParts {
     pub alert_actions: Vec<ModuleAlertAction>,
     pub content_notices: Vec<ModuleContentNotice>,
     pub support_actions: Vec<ModuleSupportAction>,
+    pub badges: Vec<ModuleBuildBadge>,
 }
 
 impl ModuleParts {
@@ -36,6 +37,7 @@ impl ModuleParts {
             alert_actions: modules.iter().flat_map(|m| m.alert_actions()).collect(),
             content_notices: modules.iter().flat_map(|m| m.content_notices()).collect(),
             support_actions: modules.iter().flat_map(|m| m.support_actions()).collect(),
+            badges: modules.iter().flat_map(|m| m.build_badges()).collect(),
         }
     }
 
@@ -57,12 +59,23 @@ impl ModuleParts {
             alert_actions: self.alert_actions.iter().copied().filter(|a| has(a.module)).collect(),
             content_notices: self.content_notices.iter().copied().filter(|n| has(n.module)).collect(),
             support_actions: self.support_actions.iter().copied().filter(|a| has(a.module)).collect(),
+            badges: self.badges.iter().copied().filter(|b| has(b.module)).collect(),
         }
     }
 
     /// The translation keys of the warnings for `build`'s provider tabs.
     pub fn notices_for(&self, build: &BuildDto) -> Vec<&'static str> {
         self.content_notices.iter().filter(|n| (n.applies)(build)).map(|n| n.text).collect()
+    }
+}
+
+/// The modules' marks on build `key`'s card or row.
+#[component]
+pub fn BuildBadges(key: String) -> impl IntoView {
+    let parts = use_module_parts();
+    move || {
+        let key = key.clone();
+        parts.with(|p| p.badges.iter().map(|b| (b.view)(key.clone())).collect_view())
     }
 }
 

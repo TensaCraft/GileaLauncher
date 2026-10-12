@@ -3490,8 +3490,10 @@ version = "0.0.11-beta.1"
 dependencies = [
  "chrono",
  "hex",
+ "js-sys",
  "launcher-core",
  "launcher-shared",
+ "leptos",
  "serde",
  "serde_json",
  "sha2",
@@ -3500,6 +3502,7 @@ dependencies = [
  "tracing",
  "ui-kit",
  "uuid",
+ "wasm-bindgen",
 ]
 
 [[package]]

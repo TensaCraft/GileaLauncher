@@ -270,6 +270,8 @@ pub fn install() {
     let storage = Rc::new(RefCell::new(crate::mock_storage::MockStorage::new()));
     #[cfg(feature = "mod-backups")]
     let backups = Rc::new(RefCell::new(crate::mock_backups::MockBackups::default()));
+    #[cfg(feature = "mod-sync")]
+    let sync = Rc::new(RefCell::new(crate::mock_sync::MockSync::new()));
     #[cfg(feature = "mod-diagnostics")]
     let diagnostics =
         Rc::new(RefCell::new(crate::mock_diagnostics::MockDiagnostics::new(query_flag("crash"))));
@@ -407,6 +409,10 @@ pub fn install() {
         #[cfg(feature = "mod-modrinth")]
         cmd if cmd.starts_with("provider_") => modrinth.borrow_mut().handle(cmd, &args),
         #[cfg(feature = "mod-backups")]
+        #[cfg(feature = "mod-sync")]
+        "module_invoke" if args["module"] == "sync" => {
+            sync.borrow_mut().handle(args["command"].as_str().unwrap_or_default(), &args["args"])
+        }
         "module_invoke" if args["module"] == "backups" => {
             backups.borrow_mut().handle(args["command"].as_str().unwrap_or_default(), &args["args"])
         }
