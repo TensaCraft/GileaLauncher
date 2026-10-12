@@ -1,7 +1,22 @@
 //! What the sync module's backend and interface say to each other.
 
-use launcher_shared::Text;
+use launcher_shared::{AppError, Text};
 use serde::{Deserialize, Serialize};
+
+/// Sent after every pass and change of the groups: the views load them again.
+pub const GROUPS_EVENT: &str = "app://module/sync/groups";
+
+/// The parameter an error made by the module names its message with.
+pub const MESSAGE: &str = "message";
+
+/// What the player reads for `e`: the module's own message when it named one, else the
+/// launcher's for its code.
+pub fn error_text(e: &AppError) -> Text {
+    let mut params = e.params.clone();
+    let key = params.remove(MESSAGE).unwrap_or_else(|| e.code.i18n_key().to_string());
+    params.entry("error".to_string()).or_insert_with(|| e.detail.clone());
+    Text::Key { key, params }
+}
 
 /// How a group decides which version of a file every build gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -180,5 +195,20 @@ mod tests {
         assert_eq!(serde_json::from_str::<TreeEntry>(&text).unwrap(), locked);
         let view = GroupView { group, last_ms: None, state: GroupState::New, note: None };
         assert_eq!(serde_json::from_value::<GroupView>(serde_json::to_value(&view).unwrap()).unwrap(), view);
+    }
+
+    #[test]
+    fn an_error_reads_as_the_module_message_it_names() {
+        use launcher_shared::{AppError, ErrorCode};
+        let busy = AppError::new(ErrorCode::Busy, "sync group g1 is busy")
+            .with_param("group", "Карта")
+            .with_param(MESSAGE, "sync_error_busy");
+        let Text::Key { key, params } = error_text(&busy) else { panic!("a key") };
+        assert_eq!(key, "sync_error_busy", "not the launcher's «installation already running»");
+        assert_eq!(params.get("group").map(String::as_str), Some("Карта"));
+        assert!(!params.contains_key(MESSAGE));
+        let io = AppError::new(ErrorCode::Io, "denied").with_param("path", "x");
+        let Text::Key { key, params } = error_text(&io) else { panic!("a key") };
+        assert_eq!((key.as_str(), params.get("error").map(String::as_str)), ("error_io", Some("denied")));
     }
 }

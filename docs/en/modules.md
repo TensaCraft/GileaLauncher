@@ -48,6 +48,8 @@ Every method but `id` and `version` is optional:
 | `call` | the module's own commands, which the interface calls through `module_invoke` |
 | `changes_builds` | a command changes builds: the app refreshes the build list after it |
 
+A module tells its views that something changed with `FeedbackService::module_event` (`app://module/<id>/<name>`); the interface hears it with `ipc::listen` (`sync` reloads its groups after every pass, the background ones too).
+
 ## Interface: `UiModule`
 
 A module can add to the interface:

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::paths::{key, normalize, overlaps, taken};
-use crate::dto::{GroupState, SyncGroup};
+use crate::dto::{GroupState, MESSAGE, SyncGroup};
 
 /// The version of a file the group agreed on at its last pass.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -70,8 +70,22 @@ fn io_error(path: &Path, e: std::io::Error) -> AppError {
         .with_param("path", path.to_string_lossy())
 }
 
-fn invalid(why: &str, field: &str) -> AppError {
-    AppError::new(ErrorCode::InvalidInput, why.to_string()).with_param("field", field)
+fn invalid(why: &str, field: &str, message: &str) -> AppError {
+    AppError::new(ErrorCode::InvalidInput, why.to_string())
+        .with_param("field", field)
+        .with_param(MESSAGE, message)
+}
+
+/// A group id names its files in `<state>/sync/`: letters, digits, `-` and `_` only.
+fn checked(id: &str) -> AppResult<&str> {
+    let fits = !id.is_empty()
+        && id.len() <= 64
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if fits {
+        Ok(id)
+    } else {
+        Err(AppError::new(ErrorCode::InvalidInput, format!("no sync group id {id:?}")))
+    }
 }
 
 fn read<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
@@ -119,8 +133,11 @@ impl Store {
     }
 
     pub fn group(&self, id: &str) -> AppResult<SyncGroup> {
+        let id = checked(id)?;
         self.groups().into_iter().find(|g| g.id == id).ok_or_else(|| {
-            AppError::new(ErrorCode::NotFound, format!("no sync group {id}")).with_param("group", id)
+            AppError::new(ErrorCode::NotFound, format!("no sync group {id}"))
+                .with_param("group", id)
+                .with_param(MESSAGE, "sync_error_group_gone")
         })
     }
 
@@ -133,9 +150,12 @@ impl Store {
     /// group holds for one of its builds. Paths are written one way, and one inside another is
     /// dropped.
     pub fn save(&self, mut group: SyncGroup, builds_exist: &dyn Fn(&str) -> bool) -> AppResult<SyncGroup> {
+        if !group.id.is_empty() {
+            checked(&group.id)?;
+        }
         group.name = group.name.trim().to_string();
         if group.name.is_empty() {
-            return Err(invalid("a sync group needs a name", "name"));
+            return Err(invalid("a sync group needs a name", "name", "sync_error_name"));
         }
         let mut builds: Vec<String> = Vec::new();
         for build in &group.builds {
@@ -144,13 +164,15 @@ impl Store {
             }
         }
         if builds.len() < 2 {
-            return Err(invalid("a sync group needs two builds or more", "builds"));
+            return Err(invalid("a sync group needs two builds or more", "builds", "sync_error_builds"));
         }
         if let Some(missing) = builds.iter().find(|b| !builds_exist(b)) {
-            return Err(invalid("no such build", "builds").with_param("version", missing));
+            return Err(
+                invalid("no such build", "builds", "sync_error_build_missing").with_param("version", missing)
+            );
         }
         if !builds.contains(&group.start) {
-            return Err(invalid("the starting build is not in the group", "start"));
+            return Err(invalid("the starting build is not in the group", "start", "sync_error_start"));
         }
         let mut paths: Vec<String> = Vec::new();
         for raw in &group.paths {
@@ -163,7 +185,7 @@ impl Store {
         let all = paths.clone();
         paths.retain(|p| !all.iter().any(|outer| outer != p && overlaps(outer, p) && outer.len() < p.len()));
         if paths.is_empty() {
-            return Err(invalid("a sync group needs a path", "paths"));
+            return Err(invalid("a sync group needs a path", "paths", "sync_error_paths"));
         }
         let lock = path_lock(&self.groups_path());
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -172,10 +194,14 @@ impl Store {
         for build in &builds {
             for path in &paths {
                 if let Some(other) = taken(&groups, editing, build, path) {
-                    return Err(invalid("another group syncs this path for a build", "paths")
-                        .with_param("group", other)
-                        .with_param("path", path)
-                        .with_param("version", build));
+                    return Err(invalid(
+                        "another group syncs this path for a build",
+                        "paths",
+                        "sync_error_taken",
+                    )
+                    .with_param("group", other)
+                    .with_param("path", path)
+                    .with_param("version", build));
                 }
             }
         }
@@ -194,6 +220,7 @@ impl Store {
 
     /// Removes the group and its snapshot; nothing in the builds is touched.
     pub fn delete(&self, id: &str) -> AppResult<()> {
+        let id = checked(id)?;
         let lock = path_lock(&self.groups_path());
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut groups = self.groups();
@@ -208,10 +235,11 @@ impl Store {
 
     /// The group's snapshot; an empty one when it never synced.
     pub fn snapshot(&self, id: &str) -> Snapshot {
-        read(&self.snapshot_path(id))
+        checked(id).map(|id| read(&self.snapshot_path(id))).unwrap_or_default()
     }
 
     pub fn write_snapshot(&self, id: &str, snapshot: &Snapshot) -> AppResult<()> {
+        let id = checked(id)?;
         let value = serde_json::to_value(snapshot).map_err(|e| AppError::internal(e.to_string()))?;
         write(&self.snapshot_path(id), &value)
     }
@@ -283,6 +311,47 @@ mod tests {
         assert_eq!((renamed.id.as_str(), store.groups().len()), (saved.id.as_str(), 1), "saved over itself");
         store.delete(&saved.id).unwrap();
         assert!(store.groups().is_empty());
+    }
+
+    #[test]
+    fn a_refused_group_names_what_the_player_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        store.save(group(&["aero", "lite"], &["xaero"]), &exist).unwrap();
+        let message = |g: SyncGroup| store.save(g, &exist).unwrap_err().params.get("message").cloned();
+        let named = |g: SyncGroup| message(g).unwrap_or_default();
+        assert_eq!(
+            named(SyncGroup { name: " ".into(), ..group(&["aero", "lite"], &["a.txt"]) }),
+            "sync_error_name"
+        );
+        assert_eq!(named(group(&["aero"], &["a.txt"])), "sync_error_builds");
+        assert_eq!(named(group(&["aero", "ghost"], &["a.txt"])), "sync_error_build_missing");
+        assert_eq!(
+            named(SyncGroup { start: "zeta".into(), ..group(&["aero", "lite"], &["a.txt"]) }),
+            "sync_error_start"
+        );
+        assert_eq!(named(group(&["aero", "lite"], &[])), "sync_error_paths");
+        assert_eq!(named(group(&["aero", "lite"], &["saves/World"])), "sync_error_path_blocked");
+        assert_eq!(named(group(&["aero", "lite"], &["../x"])), "sync_error_path_invalid");
+        assert_eq!(named(group(&["zeta", "lite"], &["xaero/waypoints"])), "sync_error_taken");
+        assert_eq!(store.group("gone").unwrap_err().params.get("message").unwrap(), "sync_error_group_gone");
+    }
+
+    #[test]
+    fn a_group_id_never_leaves_the_sync_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let outside = dir.path().join("x.json");
+        fs::write(&outside, "{}").unwrap();
+        assert_eq!(store.delete("../x").unwrap_err().code, ErrorCode::InvalidInput);
+        assert_eq!(store.group("../x").unwrap_err().code, ErrorCode::InvalidInput);
+        assert!(store.write_snapshot("../x", &Snapshot::default()).is_err());
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "{}", "untouched");
+        let forged = SyncGroup { id: "../evil".into(), ..group(&["aero", "lite"], &["options.txt"]) };
+        assert_eq!(store.save(forged, &exist).unwrap_err().code, ErrorCode::InvalidInput);
+        assert!(store.groups().is_empty() && !dir.path().join("evil.json").exists());
+        let kept = SyncGroup { id: "a1b2".into(), ..group(&["aero", "lite"], &["options.txt"]) };
+        assert_eq!(store.save(kept, &exist).unwrap().id, "a1b2", "an id of its own letters is kept");
     }
 
     #[test]

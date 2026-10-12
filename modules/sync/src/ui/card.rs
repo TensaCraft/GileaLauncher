@@ -6,9 +6,9 @@ use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{ActionTone, ConfirmDialog, Icon, IconAction, InFlight, Tag, TagTone, use_toasts};
 
-use super::model::{mode_key, shown_path, state_key};
+use super::model::{build_name, mode_key, shown_path, state_key};
 use super::{api, state};
-use crate::dto::{GroupState, GroupView};
+use crate::dto::{GroupState, GroupView, error_text};
 
 /// The short line «Як це працює» the empty page and the editor show.
 #[component]
@@ -50,7 +50,10 @@ pub fn GroupCard(
         Signal::derive(move || {
             builds.with(|all| {
                 keys.iter()
-                    .map(|k| all.iter().find(|b| &b.key == k).map_or_else(|| k.clone(), |b| b.name.clone()))
+                    .map(|k| {
+                        build_name(all, k)
+                            .unwrap_or_else(|| i18n.tp("sync_build_gone", &[("build", k.clone())]))
+                    })
                     .collect::<Vec<_>>()
             })
         })
@@ -75,7 +78,7 @@ pub fn GroupCard(
                         None,
                     )
                 }
-                Err(e) => toasts.show(Level::Error, i18n.error(&e), None),
+                Err(e) => toasts.show(Level::Error, i18n.text(&error_text(&e)), None),
             }
             state::refresh();
             syncing.done();
@@ -87,7 +90,7 @@ pub fn GroupCard(
         }
         spawn_local(async move {
             if let Err(e) = api::delete(&id.get_value()).await {
-                toasts.show(Level::Error, i18n.error(&e), None);
+                toasts.show(Level::Error, i18n.text(&error_text(&e)), None);
             }
             state::refresh();
             deleting.done();

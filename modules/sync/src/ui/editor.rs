@@ -15,7 +15,7 @@ use ui_kit::{
 use super::card::HowItWorks;
 use super::model::{mismatch, summary, tree_rows};
 use super::{api, state};
-use crate::dto::{Lock, SyncGroup, SyncMode, TreeEntry};
+use crate::dto::{Lock, SyncGroup, SyncMode, TreeEntry, error_text};
 
 #[component]
 pub fn EditorDialog(
@@ -79,7 +79,7 @@ pub fn EditorDialog(
                     });
                 }
                 Err(e) => {
-                    let _ = error.try_set(Some(i18n.error(&e)));
+                    let _ = error.try_set(Some(i18n.text(&error_text(&e))));
                 }
             }
         });
@@ -113,7 +113,7 @@ pub fn EditorDialog(
                     let _ = open.try_set(false);
                 }
                 Err(e) => {
-                    let _ = error.try_set(Some(i18n.error(&e)));
+                    let _ = error.try_set(Some(i18n.text(&error_text(&e))));
                 }
             }
             saving.done();

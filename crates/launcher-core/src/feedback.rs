@@ -446,6 +446,11 @@ impl FeedbackService {
     pub fn error(&self, message: Text) -> u64 {
         self.alert(Level::Error, Text::key("warning"), message, false)
     }
+
+    /// A module's own event to the window (`app://module/<id>/<name>`).
+    pub fn module_event(&self, event: &str, payload: &serde_json::Value) {
+        self.sink.module_event(event, payload);
+    }
 }
 
 pub struct OperationHandle {
@@ -537,8 +542,12 @@ mod tests {
         activity: Mutex<Vec<ActivityEntry>>,
         toasts: Mutex<Vec<Toast>>,
         alerts: Mutex<Vec<Alert>>,
+        module_events: Mutex<Vec<String>>,
     }
     impl EventSink for Rec {
+        fn module_event(&self, event: &str, _payload: &serde_json::Value) {
+            self.module_events.lock().unwrap().push(event.to_string());
+        }
         fn ops(&self, s: &OpsSnapshot) {
             self.ops.lock().unwrap().push(s.clone());
         }
@@ -573,6 +582,13 @@ mod tests {
 
     fn spec(key: &str) -> OperationSpec {
         OperationSpec::new(Text::key(key), "install")
+    }
+
+    #[test]
+    fn a_module_event_reaches_the_window() {
+        let (feedback, rec, _) = setup();
+        feedback.module_event("app://module/sync/groups", &serde_json::Value::Null);
+        assert_eq!(*rec.module_events.lock().unwrap(), vec!["app://module/sync/groups".to_string()]);
     }
 
     #[test]

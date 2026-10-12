@@ -179,7 +179,7 @@ impl MockSync {
             }
             "sync_build" => {
                 let key = args["key"].as_str().unwrap_or_default();
-                let names: Vec<(String, Option<String>)> = self
+                let names: Vec<(String, Option<AppError>)> = self
                     .groups
                     .iter()
                     .filter(|g| g.group.builds.iter().any(|b| b == key))

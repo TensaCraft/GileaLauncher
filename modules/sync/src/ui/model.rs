@@ -110,6 +110,16 @@ pub fn summary(builds: &[BuildDto], group: &SyncGroup) -> Summary {
     }
 }
 
+/// The name of build `key`; `None` once the list is loaded and it is not there (deleted). Before
+/// the list loads, its key.
+pub fn build_name(builds: &[BuildDto], key: &str) -> Option<String> {
+    match builds.iter().find(|b| b.key == key) {
+        Some(build) => Some(build.name.clone()),
+        None if builds.is_empty() => Some(key.to_string()),
+        None => None,
+    }
+}
+
 /// A path as the views write it: a folder with `/` after it (one with an extension is a file).
 pub fn shown_path(path: &str) -> String {
     let name = path.rsplit('/').next().unwrap_or(path);
@@ -222,6 +232,14 @@ mod tests {
         let searched = tree_rows(&loaded, &expanded, &checked, "JE");
         let found: Vec<&str> = searched.iter().map(|r| r.entry.path.as_str()).collect();
         assert_eq!(found, vec!["config", "config/jei"], "a match keeps its folders");
+    }
+
+    #[test]
+    fn a_deleted_build_is_told_apart_once_the_list_is_loaded() {
+        let builds = vec![build("aero", "Aero", "1.21.1", None)];
+        assert_eq!(build_name(&builds, "aero").as_deref(), Some("Aero"));
+        assert_eq!(build_name(&builds, "gone"), None, "deleted");
+        assert_eq!(build_name(&[], "aero").as_deref(), Some("aero"), "not loaded yet: its key");
     }
 
     #[test]

@@ -4,10 +4,12 @@
 use launcher_shared::{AppError, AppResult, ErrorCode};
 
 use super::blacklist::blocked;
-use crate::dto::SyncGroup;
+use crate::dto::{MESSAGE, SyncGroup};
 
-fn invalid(raw: &str, why: &str) -> AppError {
-    AppError::new(ErrorCode::InvalidInput, format!("{raw:?}: {why}")).with_param("path", raw)
+fn invalid(raw: &str, why: &str, message: &str) -> AppError {
+    AppError::new(ErrorCode::InvalidInput, format!("{raw:?}: {why}"))
+        .with_param("path", raw)
+        .with_param(MESSAGE, message)
 }
 
 /// `raw` as a group keeps it: relative to a build's folder, `/`-separated, without empty, `.` or
@@ -16,14 +18,14 @@ pub fn normalize(raw: &str) -> AppResult<String> {
     let path = raw.trim().replace('\\', "/");
     let segments: Vec<&str> = path.split('/').map(str::trim).filter(|s| !s.is_empty()).collect();
     if segments.is_empty() {
-        return Err(invalid(raw, "no path"));
+        return Err(invalid(raw, "no path", "sync_error_path_invalid"));
     }
     if segments.iter().any(|s| *s == "." || *s == ".." || s.contains(':')) {
-        return Err(invalid(raw, "outside the build's folder"));
+        return Err(invalid(raw, "outside the build's folder", "sync_error_path_invalid"));
     }
     let path = segments.join("/");
     if blocked(&path) {
-        return Err(invalid(raw, "never synced"));
+        return Err(invalid(raw, "never synced", "sync_error_path_blocked"));
     }
     Ok(path)
 }

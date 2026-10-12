@@ -9,9 +9,9 @@ use ui_kit::{
     use_toasts,
 };
 
-use super::model::{mode_key, shown_path, state_key};
+use super::model::{build_name, mode_key, shown_path, state_key};
 use super::{api, state};
-use crate::dto::{GroupView, HistoryEntry, Reason};
+use crate::dto::{GroupView, HistoryEntry, Reason, error_text};
 
 fn reason_key(reason: Reason) -> &'static str {
     match reason {
@@ -36,8 +36,9 @@ pub fn GroupDialog(
     let history = RwSignal::new(None::<Vec<HistoryEntry>>);
     let restoring = InFlight::new();
     let name_of = move |key: &str| {
-        builds
-            .with(|all| all.iter().find(|b| b.key == key).map_or_else(|| key.to_string(), |b| b.name.clone()))
+        builds.with(|all| {
+            build_name(all, key).unwrap_or_else(|| i18n.tp("sync_build_gone", &[("build", key.to_string())]))
+        })
     };
     let load = move || {
         let Some(id) = view.with_untracked(|v| v.as_ref().map(|v| v.group.id.clone())) else { return };
@@ -61,7 +62,7 @@ pub fn GroupDialog(
         spawn_local(async move {
             match api::restore(&id, &entry).await {
                 Ok(_) => toasts.show(Level::Success, i18n.t("sync_restored"), None),
-                Err(e) => toasts.show(Level::Error, i18n.error(&e), None),
+                Err(e) => toasts.show(Level::Error, i18n.text(&error_text(&e)), None),
             }
             restoring.done();
             state::refresh();

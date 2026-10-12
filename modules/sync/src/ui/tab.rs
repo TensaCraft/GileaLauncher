@@ -12,7 +12,7 @@ use super::editor::EditorDialog;
 use super::group::GroupDialog;
 use super::page::load_builds;
 use super::{api, state};
-use crate::dto::{GroupView, SyncGroup};
+use crate::dto::{GroupView, SyncGroup, error_text};
 
 #[component]
 pub fn SyncTab(key: String) -> impl IntoView {
@@ -46,15 +46,20 @@ pub fn SyncTab(key: String) -> impl IntoView {
         spawn_local(async move {
             match api::sync_build(&key.get_value()).await {
                 Ok(results) => {
-                    let failed: Vec<String> =
-                        results.into_iter().filter_map(|(g, e)| e.map(|e| format!("{g}: {e}"))).collect();
+                    let failed: Vec<String> = results
+                        .into_iter()
+                        .filter_map(|(group, e)| {
+                            let error = i18n.text(&error_text(&e?));
+                            Some(i18n.tp("sync_group_failed", &[("group", group), ("error", error)]))
+                        })
+                        .collect();
                     if failed.is_empty() {
                         toasts.show(Level::Success, i18n.t("sync_build_done"), None);
                     } else {
                         toasts.show(Level::Error, failed.join("; "), None);
                     }
                 }
-                Err(e) => toasts.show(Level::Error, i18n.error(&e), None),
+                Err(e) => toasts.show(Level::Error, i18n.text(&error_text(&e)), None),
             }
             state::refresh();
             syncing.done();

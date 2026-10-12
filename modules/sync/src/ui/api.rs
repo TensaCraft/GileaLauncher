@@ -26,7 +26,7 @@ pub async fn sync(id: &str) -> Result<PassReport, AppError> {
 }
 
 /// Every group of build `key`: each group's name and its error, if it failed.
-pub async fn sync_build(key: &str) -> Result<Vec<(String, Option<String>)>, AppError> {
+pub async fn sync_build(key: &str) -> Result<Vec<(String, Option<AppError>)>, AppError> {
     ipc::module_invoke(crate::ID, "sync_build", &BuildArgs { key: key.into() }).await
 }
 

@@ -102,10 +102,10 @@ fn dispatch(service: &SyncService, command: &str, args: Value) -> AppResult<Valu
         "sync" => answer(service.sync_group(&parse::<GroupArgs>(args)?.id, None)?),
         "sync_build" => {
             let key = parse::<BuildArgs>(args)?.key;
-            let results: Vec<(String, Option<String>)> = service
+            let results: Vec<(String, Option<AppError>)> = service
                 .sync_build(&key, None)
                 .into_iter()
-                .map(|(group, result)| (group, result.err().map(|e| e.detail)))
+                .map(|(group, result)| (group, result.err()))
                 .collect();
             answer(results)
         }

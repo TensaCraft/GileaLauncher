@@ -18,6 +18,7 @@ use launcher_core::storage::transaction::{ApplyHooks, TransactionPlan, execute};
 use launcher_core::storage::usage::dir_size;
 use launcher_core::storage::versions::{Build, VersionStore};
 use launcher_shared::{AppError, AppResult, ErrorCode, Level, Text};
+use serde_json::Value;
 
 use super::apply::{Applied, Member, SYNC_JOURNAL, apply, keep};
 use super::blacklist::blocked;
@@ -27,13 +28,16 @@ use super::paths::{key, normalize, taken};
 use super::scan::{Found, is_managed, scan};
 use super::store::{FileRecord, Seen, Snapshot, Store};
 use crate::dto::{
-    GroupState, GroupView, HistoryEntry, Lock, PassReport, Reason, SyncGroup, SyncMode, TreeEntry,
+    GROUPS_EVENT, GroupState, GroupView, HistoryEntry, Lock, MESSAGE, PassReport, Reason, SyncGroup,
+    SyncMode, TreeEntry, error_text,
 };
 
 /// A pass that writes more shows as an operation; a smaller one passes quietly.
 const QUIET_BYTES: u64 = 8 * 1024 * 1024;
 /// How long a pass waits for another pass of its group to end.
 const LOCK_WAIT: Duration = Duration::from_secs(30);
+/// How many of a pass's conflicts its toast names.
+const CONFLICTS_SHOWN: usize = 3;
 
 /// The paths of a build its modules keep in line themselves (`Module::managed_files`).
 pub type ManagedFiles = Arc<dyn Fn(&Build, &Path) -> Vec<String> + Send + Sync>;
@@ -78,6 +82,7 @@ fn millis(at: SystemTime) -> u64 {
 fn busy(group: &SyncGroup) -> AppError {
     AppError::new(ErrorCode::Busy, format!("sync group {} is busy", group.id))
         .with_param("group", &group.name)
+        .with_param(MESSAGE, "sync_error_busy")
 }
 
 impl SyncService {
@@ -105,8 +110,16 @@ impl SyncService {
     fn view(&self, group: SyncGroup) -> GroupView {
         let snapshot = self.store.snapshot(&group.id);
         let existing = group.builds.iter().filter(|b| self.deps.versions.get(b).is_some()).count();
-        let state = if existing < 2 { GroupState::Idle } else { snapshot.state };
-        GroupView { group, last_ms: snapshot.last_ms, state, note: snapshot.note }
+        if existing < 2 {
+            let note = Some(Text::key("sync_idle_note"));
+            return GroupView { group, last_ms: snapshot.last_ms, state: GroupState::Idle, note };
+        }
+        GroupView { group, last_ms: snapshot.last_ms, state: snapshot.state, note: snapshot.note }
+    }
+
+    /// Whether build `key` is in a group.
+    pub fn in_a_group(&self, key: &str) -> bool {
+        self.store.groups().iter().any(|g| g.builds.iter().any(|b| b == key))
     }
 
     pub fn groups(&self) -> Vec<GroupView> {
@@ -161,15 +174,18 @@ impl SyncService {
     pub fn sync_group(&self, id: &str, held: Option<&str>) -> AppResult<PassReport> {
         let group = self.store.group(id)?;
         let _lock = self.lock_group(&group)?;
+        // Saved again while it waited: the pass goes by the group as it is now.
+        let group = self.store.group(id)?;
         let mut snapshot = self.store.snapshot(id);
         let result = self.pass(&group, &mut snapshot, held);
         if let Err(e) = &result {
             tracing::warn!("Sync of {} failed: {}", group.name, e.detail);
             let mut failed = self.store.snapshot(id);
             failed.state = GroupState::Failed;
-            failed.note = Some(Text::raw(e.detail.clone()));
+            failed.note = Some(error_text(e));
             let _ = self.store.write_snapshot(id, &failed);
         }
+        self.deps.feedback.module_event(GROUPS_EVENT, &Value::Null);
         result
     }
 
@@ -294,7 +310,7 @@ impl SyncService {
             Ok(applied) => applied,
             Err(e) => {
                 if let Some(op) = op {
-                    op.fail(Text::raw(e.detail.clone()));
+                    op.fail(error_text(&e));
                 }
                 return Err(e);
             }
@@ -323,8 +339,14 @@ impl SyncService {
             let note = Text::key("sync_done").param("group", &group.name).param("count", changed.to_string());
             self.deps.feedback.note(Level::Info, note);
         }
-        for path in &report.conflicts {
-            let title = Text::key("sync_conflict").param("group", &group.name).param("path", path);
+        if !report.conflicts.is_empty() {
+            let mut paths: Vec<&str> =
+                report.conflicts.iter().take(CONFLICTS_SHOWN).map(String::as_str).collect();
+            if report.conflicts.len() > CONFLICTS_SHOWN {
+                paths.push("…");
+            }
+            let title =
+                Text::key("sync_conflict").param("group", &group.name).param("path", paths.join(", "));
             self.deps.feedback.toast(Level::Warning, title, None, None);
         }
         Ok(report)
@@ -407,26 +429,57 @@ impl SyncService {
     }
 
     /// Puts history entry `entry` back as a new change: into the base (mode `Base`), else into
-    /// the build it was kept from (another that is not running, when that one is), dated now so it
-    /// is the newest; then a pass spreads it.
+    /// the build it was kept from (another that is not running and does not manage the path, when
+    /// that one does), dated now so it is the newest; then a pass spreads it. Refused for a path
+    /// the group no longer syncs.
     pub fn restore(&self, id: &str, entry: &str) -> AppResult<PassReport> {
         let group = self.store.group(id)?;
         let all = self.all_members(&group);
-        let not_found = || {
-            AppError::new(ErrorCode::NotFound, format!("no kept version {entry}")).with_param("path", entry)
+        let gone = || {
+            AppError::new(ErrorCode::NotFound, format!("no kept version {entry}"))
+                .with_param("path", entry)
+                .with_param(MESSAGE, "sync_error_version_gone")
         };
-        let file = history::version_file(&all, entry).ok_or_else(not_found)?;
-        let (owner, rest) = entry.split_once('/').ok_or_else(not_found)?;
-        let path = normalize(rest.split_once('/').ok_or_else(not_found)?.1)?;
-        let idle = |key: &str| self.deps.versions.get(key).filter(|b| !self.running(b));
-        let target = match group.mode {
-            SyncMode::Base => idle(&group.start),
-            SyncMode::Latest => idle(owner).or_else(|| group.builds.iter().find_map(|k| idle(k))),
+        let file = history::version_file(&all, entry).ok_or_else(gone)?;
+        let (owner, rest) = entry.split_once('/').ok_or_else(gone)?;
+        let path = normalize(rest.split_once('/').ok_or_else(gone)?.1)?;
+        if !is_managed(&path, &group.paths) {
+            return Err(AppError::new(ErrorCode::InvalidInput, format!("the group no longer syncs {path}"))
+                .with_param("path", &path)
+                .with_param(MESSAGE, "sync_error_restore_outside"));
         }
-        .ok_or_else(|| {
-            AppError::new(ErrorCode::InstanceBusy, "the build to restore into runs")
-                .with_param("version", &group.start)
-        })?;
+        let candidates: Vec<&str> = match group.mode {
+            SyncMode::Base => vec![group.start.as_str()],
+            SyncMode::Latest => std::iter::once(owner)
+                .chain(group.builds.iter().map(String::as_str).filter(|k| *k != owner))
+                .collect(),
+        };
+        let (mut managing, mut running) = (None, None);
+        let target = candidates.into_iter().filter_map(|k| self.deps.versions.get(k)).find(|b| {
+            if is_managed(&path, &(self.deps.managed)(b, &self.game(b))) {
+                managing.get_or_insert_with(|| b.name.clone());
+                false
+            } else if self.running(b) {
+                running.get_or_insert_with(|| b.name.clone());
+                false
+            } else {
+                true
+            }
+        });
+        let Some(target) = target else {
+            return Err(match (running, managing) {
+                (Some(name), _) => AppError::new(ErrorCode::InstanceBusy, "the build to restore into runs")
+                    .with_param("version", name)
+                    .with_param(MESSAGE, "sync_error_restore_running"),
+                (None, Some(name)) => {
+                    AppError::new(ErrorCode::InvalidInput, format!("{path} is kept in line in {name}"))
+                        .with_param("path", &path)
+                        .with_param("version", name)
+                        .with_param(MESSAGE, "sync_error_restore_managed")
+                }
+                (None, None) => gone(),
+            });
+        };
         {
             let _lock = self.lock_group(&group)?;
             let game = self.game(&target);
@@ -541,4 +594,17 @@ fn record(
     snapshot.files.retain(|k, _| covered(k));
     snapshot.members.extend(members.iter().map(|m| m.key.clone()));
     snapshot.paths = group.paths.iter().cloned().collect();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_busy_group_reads_as_the_sync_message() {
+        let group = SyncGroup { id: "g1".into(), name: "Карта".into(), ..SyncGroup::default() };
+        let e = busy(&group);
+        assert_eq!(e.params.get("message").map(String::as_str), Some("sync_error_busy"));
+        assert_eq!(e.params.get("group").map(String::as_str), Some("Карта"));
+    }
 }
