@@ -36,6 +36,9 @@ use crate::storage::config::ConfigStore;
 use crate::storage::transaction::recover_interrupted;
 use crate::storage::versions::{Build, VersionStore};
 
+/// How long a launch waits for a sync pass over its build to end.
+const SYNC_WAIT: Duration = Duration::from_secs(60);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LaunchTimings {
     pub cooldown: Duration,
@@ -270,11 +273,21 @@ impl LaunchService {
                 .with_param("version", &build.name)
                 .with_param("seconds", seconds.to_string()));
         }
-        let lease = match d.instances.try_acquire(&folder, "launch") {
-            Ok(lease) => lease,
-            Err(e) => {
-                self.registry.release(&key);
-                return Err(e.with_param("version", &build.name));
+        // A sync pass holds the build while it reads and writes its files: the launch waits for it.
+        let waited = Instant::now();
+        let lease = loop {
+            match d.instances.try_acquire(&folder, "launch") {
+                Ok(lease) => break lease,
+                Err(_)
+                    if d.instances.active_kind(&folder).as_deref() == Some("sync")
+                        && waited.elapsed() < SYNC_WAIT =>
+                {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                Err(e) => {
+                    self.registry.release(&key);
+                    return Err(e.with_param("version", &build.name));
+                }
             }
         };
         let op = d.feedback.begin(OperationSpec::new(Text::key("syncing_files_check"), "launch").hidden());

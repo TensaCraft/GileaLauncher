@@ -933,3 +933,21 @@ async fn play_goes_straight_into_the_server_or_world_asked() {
         assert_eq!(quick, 1, "one place to go: {args:?}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_launch_waits_for_its_build_s_sync() {
+    let w = world().await;
+    w.auth.create_offline("Steve").unwrap();
+    let key = w.build("Aero", &["-Dfake.after=300"]).await;
+    let game = launcher_core::launch::options::game_dir(&w.versions.get(&key).unwrap(), &w.mc);
+    // A sync pass holds the build while it reads and writes its files.
+    let lease = w.deps.instances.try_acquire(&game, "sync").unwrap();
+    let releaser = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        drop(lease);
+    });
+    let started = w.launcher.launch(request(&key)).await;
+    releaser.join().unwrap();
+    assert!(started.is_ok(), "the launch waits for the pass: {started:?}");
+    w.wait_for(finished);
+}

@@ -144,7 +144,12 @@ pub fn EditorDialog(
             .into_iter()
             .map(|build| {
                 let key = build.key.clone();
-                let on = RwSignal::new(chosen.with_untracked(|c| c.contains(&key)));
+                // Follows the chosen set: a dialog opened again shows its own builds' ticks.
+                let on = RwSignal::new(false);
+                {
+                    let key = key.clone();
+                    Effect::new(move |_| on.set(chosen.with(|c| c.contains(&key))));
+                }
                 let toggled = {
                     let key = key.clone();
                     Callback::new(move |value: bool| {

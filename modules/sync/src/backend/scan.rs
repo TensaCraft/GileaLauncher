@@ -13,6 +13,13 @@ use super::blacklist::blocked;
 use super::paths::key;
 use super::store::FileRecord;
 
+/// What a scan found, and the paths it could not read (never taken as removed).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Scanned {
+    pub found: BTreeMap<String, Found>,
+    pub unknown: Vec<String>,
+}
+
 /// A file of a build under a group's paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
@@ -76,16 +83,18 @@ pub fn scan(
     managed: &[String],
     previous: &BTreeMap<String, FileRecord>,
     build: &str,
-) -> BTreeMap<String, Found> {
+) -> Scanned {
     let mut files: Vec<(String, PathBuf)> = Vec::new();
+    let mut unknown = Vec::new();
     for path in paths {
         let path = spelled(game, path);
         let full = game.join(&path);
-        let Ok(meta) = fs::symlink_metadata(&full) else { continue };
-        if meta.is_file() {
-            files.push((path, full));
-        } else if meta.is_dir() {
-            walk(&full, &path, &mut files);
+        match fs::symlink_metadata(&full) {
+            Ok(meta) if meta.is_file() => files.push((path, full)),
+            Ok(meta) if meta.is_dir() => walk(&full, &path, &mut files, &mut unknown),
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => unknown.push(path),
         }
     }
     let mut found = BTreeMap::new();
@@ -93,7 +102,10 @@ pub fn scan(
         if blocked(&relative) || is_managed(&relative, managed) {
             continue;
         }
-        let Ok(meta) = fs::symlink_metadata(&full) else { continue };
+        let Ok(meta) = fs::symlink_metadata(&full) else {
+            unknown.push(relative);
+            continue;
+        };
         let (size, modified_ms) = (meta.len(), modified_ms(&meta));
         let k = key(&relative);
         let known = previous
@@ -106,25 +118,35 @@ pub fn scan(
             None => match sha256(&full) {
                 Ok(hash) => hash,
                 Err(e) => {
+                    // Held by another program, or not ours to read: not taken as removed.
                     tracing::warn!("Unable to read {}: {e}", full.display());
+                    unknown.push(relative);
                     continue;
                 }
             },
         };
         found.insert(k, Found { path: relative, size, modified_ms, hash });
     }
-    found
+    Scanned { found, unknown }
 }
 
-/// The files below `dir` (relative `prefix`), links not followed.
-fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) {
-    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+/// The files below `dir` (relative `prefix`), links not followed; a folder that cannot be read is
+/// `unknown`.
+fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>, unknown: &mut Vec<String>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => {
+            unknown.push(prefix.to_string());
+            return;
+        }
+    };
+    for entry in entries.flatten() {
         let Ok(kind) = entry.file_type() else { continue };
         let name = entry.file_name().to_string_lossy().into_owned();
         let relative = format!("{prefix}/{name}");
         if kind.is_dir() {
             if !blocked(&relative) {
-                walk(&entry.path(), &relative, out);
+                walk(&entry.path(), &relative, out, unknown);
             }
         } else if kind.is_file() {
             out.push((relative, entry.path()));
@@ -162,7 +184,7 @@ mod tests {
         put(game, "config/jei/x.json", b"{}");
         put(game, "config/server/a.toml", b"the server's");
         let paths = ["options.txt", "xaero", "config", "servers.dat"].map(String::from);
-        let found = scan(game, &paths, &["config/server".to_string()], &BTreeMap::new(), "aero");
+        let found = scan(game, &paths, &["config/server".to_string()], &BTreeMap::new(), "aero").found;
         assert_eq!(
             keys(&found),
             vec!["config/jei/x.json", "options.txt", "xaero/minimap.txt", "xaero/waypoints/w1.txt"]
@@ -178,7 +200,7 @@ mod tests {
         let game = dir.path();
         put(game, "options.txt", b"aaaa");
         let paths = ["options.txt".to_string()];
-        let first = scan(game, &paths, &[], &BTreeMap::new(), "aero").remove("options.txt").unwrap();
+        let first = scan(game, &paths, &[], &BTreeMap::new(), "aero").found.remove("options.txt").unwrap();
         let mut previous = BTreeMap::new();
         let mut record = FileRecord { path: first.path.clone(), ..FileRecord::default() };
         record.held.insert(
@@ -190,19 +212,35 @@ mod tests {
         let at = fs::metadata(game.join("options.txt")).unwrap().modified().unwrap();
         fs::write(game.join("options.txt"), b"bbbb").unwrap();
         fs::File::options().write(true).open(game.join("options.txt")).unwrap().set_modified(at).unwrap();
-        assert_eq!(scan(game, &paths, &[], &previous, "aero")["options.txt"].hash, first.hash);
+        assert_eq!(scan(game, &paths, &[], &previous, "aero").found["options.txt"].hash, first.hash);
         assert_ne!(
-            scan(game, &paths, &[], &previous, "lite")["options.txt"].hash,
+            scan(game, &paths, &[], &previous, "lite").found["options.txt"].hash,
             first.hash,
             "another build's record"
         );
         let later = at + Duration::from_secs(5);
         fs::File::options().write(true).open(game.join("options.txt")).unwrap().set_modified(later).unwrap();
         assert_ne!(
-            scan(game, &paths, &[], &previous, "aero")["options.txt"].hash,
+            scan(game, &paths, &[], &previous, "aero").found["options.txt"].hash,
             first.hash,
             "its time moved"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_file_another_program_holds_is_unknown_not_gone() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let game = dir.path();
+        put(game, "options.txt", b"keys");
+        put(game, "xaero/minimap.txt", b"map");
+        let _held = fs::File::options().read(true).share_mode(0).open(game.join("options.txt")).unwrap();
+        let paths = ["options.txt".to_string(), "xaero".to_string()];
+        let scanned = scan(game, &paths, &[], &BTreeMap::new(), "aero");
+        assert!(!scanned.found.contains_key("options.txt"));
+        assert_eq!(scanned.unknown, vec!["options.txt".to_string()]);
+        assert!(scanned.found.contains_key("xaero/minimap.txt"));
     }
 
     #[cfg(windows)]
@@ -213,7 +251,7 @@ mod tests {
         put(game, "Options.TXT", b"keys");
         put(game, "Xaero/Minimap.txt", b"map");
         let paths = ["options.txt".to_string(), "xaero".to_string()];
-        let found = scan(game, &paths, &[], &BTreeMap::new(), "aero");
+        let found = scan(game, &paths, &[], &BTreeMap::new(), "aero").found;
         assert_eq!(keys(&found), vec!["options.txt", "xaero/minimap.txt"]);
         assert_eq!(found["options.txt"].path, "Options.TXT", "written as the source spells it");
         assert_eq!(found["xaero/minimap.txt"].path, "Xaero/Minimap.txt");

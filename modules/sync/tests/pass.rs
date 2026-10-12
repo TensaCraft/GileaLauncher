@@ -265,3 +265,51 @@ fn the_tree_is_the_builds_union_with_locks() {
     assert_eq!(config[0].lock, Some(Lock::Managed));
     assert_eq!(config[0].managed_in, vec!["Server".to_string()]);
 }
+
+#[test]
+fn a_build_made_again_joins_anew() {
+    let w = world();
+    let (a, ga) = w.build("Aero");
+    let (b, gb) = w.build("Lite");
+    put(&ga, "options.txt", "keys", 600);
+    let id = w.group(&[&a, &b], &["options.txt"], SyncMode::Latest);
+    w.service.sync_group(&id, None).unwrap();
+    // Deleted and installed again under its name: a new folder, the same key.
+    fs::remove_dir_all(&gb).unwrap();
+    let (again, gb) = w.build("Lite");
+    assert_eq!(again, b);
+    w.service.sync_group(&id, None).unwrap();
+    assert_eq!(read(&ga, "options.txt").as_deref(), Some("keys"), "nothing removed from the others");
+    assert_eq!(read(&gb, "options.txt").as_deref(), Some("keys"), "it takes the group's files");
+}
+
+#[test]
+fn a_build_whose_folder_is_gone_takes_no_part() {
+    let w = world();
+    let (a, ga) = w.build("Aero");
+    let (b, gb) = w.build("Lite");
+    let (c, gc) = w.build("Zeta");
+    put(&ga, "options.txt", "keys", 600);
+    let id = w.group(&[&a, &b, &c], &["options.txt"], SyncMode::Latest);
+    w.service.sync_group(&id, None).unwrap();
+    fs::remove_dir_all(&gc).unwrap();
+    w.service.sync_group(&id, None).unwrap();
+    assert!(read(&ga, "options.txt").is_some() && read(&gb, "options.txt").is_some());
+}
+
+#[test]
+fn a_folder_the_server_starts_to_manage_is_not_removed_elsewhere() {
+    let w = world();
+    let (a, ga) = w.build("Aero");
+    let (s, gs) = w.build("Server");
+    put(&ga, "config/x.toml", "mine", 600);
+    let id = w.group(&[&a, &s], &["config"], SyncMode::Latest);
+    w.service.sync_group(&id, None).unwrap();
+    assert!(read(&gs, "config/x.toml").is_some());
+    w.managed.lock().unwrap().insert(s.clone(), vec!["config".into()]);
+    w.service.sync_group(&id, None).unwrap();
+    assert_eq!(read(&ga, "config/x.toml").as_deref(), Some("mine"));
+    w.managed.lock().unwrap().clear();
+    w.service.sync_group(&id, None).unwrap();
+    assert_eq!(read(&ga, "config/x.toml").as_deref(), Some("mine"), "and not when it stops either");
+}

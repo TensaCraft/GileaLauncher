@@ -185,6 +185,9 @@ impl SyncService {
         for key in order {
             let Some(build) = self.deps.versions.get(key) else { continue };
             let game = self.game(&build);
+            if !game.is_dir() {
+                continue;
+            }
             if held != Some(key.as_str()) {
                 if self.running(&build) {
                     continue;
@@ -209,36 +212,51 @@ impl SyncService {
 
     fn pass(&self, group: &SyncGroup, snapshot: &mut Snapshot, held: Option<&str>) -> AppResult<PassReport> {
         let (members, _leases) = self.members(group, held);
+        // Builds no longer in the group, or gone, are forgotten: one that comes back joins anew.
+        let kept = |b: &String| group.builds.contains(b) && self.deps.versions.get(b).is_some();
+        snapshot.members.retain(|b| kept(b));
+        snapshot.marks.retain(|b, _| kept(b));
+        for record in snapshot.files.values_mut() {
+            record.held.retain(|b, _| kept(b));
+        }
         if members.len() < 2 {
             return self.wait(group, snapshot);
+        }
+        // A member whose folder is not the one the group knew (made again) joins anew.
+        let mut marks = BTreeMap::new();
+        for (_, member) in &members {
+            let mark = folder_mark(&member.game)?;
+            if snapshot.marks.get(&member.key) != Some(&mark) {
+                snapshot.members.remove(&member.key);
+                for record in snapshot.files.values_mut() {
+                    record.held.remove(&member.key);
+                }
+            }
+            marks.insert(member.key.clone(), mark);
         }
         let mut found: BTreeMap<String, BTreeMap<String, Found>> = BTreeMap::new();
         let mut managed: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for (build, member) in &members {
-            let own = (self.deps.managed)(build, &member.game);
-            found.insert(
-                member.key.clone(),
-                scan(&member.game, &group.paths, &own, &snapshot.files, &member.key),
-            );
+            let mut own = (self.deps.managed)(build, &member.game);
+            let scanned = scan(&member.game, &group.paths, &own, &snapshot.files, &member.key);
+            found.insert(member.key.clone(), scanned.found);
+            // What it could not read is not touched there either.
+            own.extend(scanned.unknown);
             managed.insert(member.key.clone(), own);
         }
         let keys: Vec<String> = members.iter().map(|(_, m)| m.key.clone()).collect();
-        let mut outcome = decide(&Decision {
+        let outcome = decide(&Decision {
             mode: group.mode,
             start: &group.start,
             members: &keys,
             snapshot,
             found: &found,
             group_paths: &group.paths,
+            untouchable: &managed,
         });
         if outcome.wait {
             return self.wait(group, snapshot);
         }
-        // What a module keeps in line in a build is never written or removed there.
-        let mine = |build: &str, path: &str| managed.get(build).is_some_and(|own| is_managed(path, own));
-        outcome.writes.retain(|w| !mine(&w.build, &w.path));
-        outcome.removes.retain(|r| !mine(&r.build, &r.path));
-        outcome.history.retain(|h| !mine(&h.build, &h.path));
         let members: Vec<Member> = members.into_iter().map(|(_, m)| m).collect();
         let size_of =
             |build: &str, key: &str| found.get(build).and_then(|f| f.get(key)).map_or(0, |f| f.size);
@@ -285,7 +303,8 @@ impl SyncService {
         if let Some(op) = op {
             op.finish();
         }
-        record(snapshot, group, &members, &found, &outcome, &applied);
+        record(snapshot, group, &members, &found, &managed, &outcome, &applied);
+        snapshot.marks.extend(marks);
         snapshot.last_ms = Some(millis(now));
         snapshot.state = GroupState::Synced;
         snapshot.note = None;
@@ -446,6 +465,25 @@ impl SyncService {
     }
 }
 
+/// Where a build's folder keeps its mark for the sync groups.
+const FOLDER_MARK: &str = ".launcher/sync-id";
+
+/// The mark of the build folder `game`, made the first time: a folder made again has another.
+fn folder_mark(game: &Path) -> AppResult<String> {
+    let path = game.join(FOLDER_MARK);
+    if let Some(mark) = fs::read_to_string(&path).ok().map(|m| m.trim().to_string()).filter(|m| !m.is_empty())
+    {
+        return Ok(mark);
+    }
+    let mark = uuid::Uuid::new_v4().simple().to_string();
+    let io_error = |e: std::io::Error| AppError::new(ErrorCode::Io, format!("{}: {e}", path.display()));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(io_error)?;
+    }
+    fs::write(&path, &mark).map_err(io_error)?;
+    Ok(mark)
+}
+
 /// The snapshot after a pass: the agreed versions, what each member holds now, and the builds
 /// and paths that took part.
 fn record(
@@ -453,6 +491,7 @@ fn record(
     group: &SyncGroup,
     members: &[Member],
     found: &BTreeMap<String, BTreeMap<String, Found>>,
+    untouchable: &BTreeMap<String, Vec<String>>,
     outcome: &Outcome,
     applied: &Applied,
 ) {
@@ -475,7 +514,12 @@ fn record(
     let keys: BTreeSet<String> = snapshot.files.keys().cloned().collect();
     for member in members {
         let files = found.get(&member.key);
+        let own = untouchable.get(&member.key);
         for k in &keys {
+            // A file it could not touch: what it held is still what it holds.
+            if own.is_some_and(|own| is_managed(k, own)) {
+                continue;
+            }
             let Some(record) = snapshot.files.get_mut(k) else { continue };
             let removed = outcome.removes.iter().any(|r| r.build == member.key && &r.key == k);
             if let Some(seen) = applied.seen.get(&(member.key.clone(), k.clone())) {

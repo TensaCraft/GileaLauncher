@@ -213,7 +213,7 @@ fn stamped_folders(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// The sync passes' folders of `backups` to remove at `now`: those older than `SYNC_HISTORY_AGE`,
-/// then the oldest of the rest until they take at most `cap`.
+/// then the oldest of the rest until they take at most `cap`, never the newest.
 pub(crate) fn sync_history_items(backups: &BuildBackups, now: SystemTime, cap: u64) -> Vec<PathBuf> {
     let (mut out, kept): (Vec<PathBuf>, Vec<PathBuf>) =
         stamped_folders(&backups.sync()).into_iter().partition(|folder| {
@@ -222,7 +222,9 @@ pub(crate) fn sync_history_items(backups: &BuildBackups, now: SystemTime, cap: u
                 .is_some_and(|age| age >= SYNC_HISTORY_AGE)
         });
     let mut total: u64 = kept.iter().map(|p| dir_size(p)).sum();
-    for folder in kept {
+    // The newest stays, however large: it holds what the last pass replaced.
+    let older = kept.len().saturating_sub(1);
+    for folder in kept.into_iter().take(older) {
         if total <= cap {
             break;
         }
@@ -590,6 +592,21 @@ mod tests {
             "past 14 days, then the oldest over the cap"
         );
         assert_eq!(rule_items(StorageRule::SyncHistory, &game, &backups, now), vec![folders[0].clone()]);
+    }
+
+    #[test]
+    fn the_newest_pass_outlives_the_cap() {
+        let (_tmp, _game, backups) = setup();
+        let older = backups.sync().join("2026-10-11_10-00-00-1");
+        let newest = backups.sync().join("2026-10-12_09-00-00-1");
+        put(&older, "files/a.txt", &[0; 10]);
+        put(&newest, "files/mods.zip", &[0; 30]);
+        let at = |text: &str| -> SystemTime {
+            let time = chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M").unwrap().and_utc();
+            SystemTime::UNIX_EPOCH + Duration::from_secs(time.timestamp() as u64)
+        };
+        let stale = sync_history_items(&backups, at("2026-10-12 10:00"), 20);
+        assert_eq!(stale, vec![older], "the pass just made keeps what it replaced, however large");
     }
 
     #[test]

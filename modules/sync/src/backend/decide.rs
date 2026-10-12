@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::paths::key;
 use super::scan::Found;
+use super::scan::is_managed;
 use super::store::{Snapshot, Version};
 use crate::dto::{Reason, SyncMode};
 
@@ -19,6 +20,9 @@ pub struct Decision<'a> {
     /// What each member holds now, by build and `paths::key`.
     pub found: &'a BTreeMap<String, BTreeMap<String, Found>>,
     pub group_paths: &'a [String],
+    /// What each member may not touch: the paths a module manages there, and those that could
+    /// not be read. Such a file is neither held nor written nor removed in that member.
+    pub untouchable: &'a BTreeMap<String, Vec<String>>,
 }
 
 /// A file a member gets from another member.
@@ -109,20 +113,30 @@ pub fn decide(input: &Decision<'_>) -> Outcome {
             .find_map(|m| file_of(m).map(|f| f.path.clone()))
             .or_else(|| record.map(|r| r.path.clone()))
             .unwrap_or_else(|| k.clone());
-        let holders = || input.members.iter().filter_map(|m| file_of(m).map(|f| (m, f)));
+        // The members that may touch this file: not those that manage it or could not read it.
+        let free = |m: &String| !input.untouchable.get(m).is_some_and(|own| is_managed(&k, own));
+        let active: Vec<&String> = input.members.iter().filter(|m| free(m)).collect();
+        if input.mode == SyncMode::Base && !active.iter().any(|m| *m == input.start) {
+            // The base cannot say what this file is: the others keep theirs.
+            continue;
+        }
+        let holders = || active.iter().copied().filter_map(|m| file_of(m).map(|f| (m, f)));
         // The version every member gets (`None`: none), and the members whose own change lost.
         let (winner, losers): (Option<(&String, &Found)>, Vec<&String>) = match input.mode {
             SyncMode::Base => (
-                input.members.iter().find(|m| *m == input.start).and_then(|m| file_of(m).map(|f| (m, f))),
+                active.iter().copied().find(|m| *m == input.start).and_then(|m| file_of(m).map(|f| (m, f))),
                 Vec::new(),
             ),
             SyncMode::Latest if fresh => {
-                let start =
-                    input.members.iter().find(|m| *m == input.start).and_then(|m| file_of(m).map(|f| (m, f)));
+                let start = active
+                    .iter()
+                    .copied()
+                    .find(|m| *m == input.start)
+                    .and_then(|m| file_of(m).map(|f| (m, f)));
                 (start.or_else(|| newest(holders())), Vec::new())
             }
             SyncMode::Latest => {
-                let established = || input.members.iter().filter(|m| !joining(m));
+                let established = || active.iter().copied().filter(|m| !joining(m));
                 let changed: Vec<(&String, &Found)> = established()
                     .filter_map(|m| {
                         file_of(m).filter(|f| held(m).is_none_or(|h| h.hash != f.hash)).map(|f| (m, f))
@@ -136,8 +150,12 @@ pub fn decide(input: &Decision<'_>) -> Outcome {
                     (None, Vec::new())
                 } else {
                     match record.and_then(|r| r.agreed.as_ref()) {
-                        // The agreed version, from a member that holds it.
-                        Some(agreed) => (holders().find(|(_, f)| f.hash == agreed.hash), Vec::new()),
+                        // The agreed version, from a member that holds it; when none does (those that
+                        // do run), every member keeps what it has until one of them takes part.
+                        Some(agreed) => match holders().find(|(_, f)| f.hash == agreed.hash) {
+                            Some(holder) => (Some(holder), Vec::new()),
+                            None => continue,
+                        },
                         // A joining member brings its own file.
                         None => (newest(holders().filter(|(m, _)| joining(m))), Vec::new()),
                     }
@@ -155,7 +173,7 @@ pub fn decide(input: &Decision<'_>) -> Outcome {
         };
         match winner {
             Some((source, file)) => {
-                for m in input.members.iter().filter(|m| *m != source) {
+                for m in active.iter().copied().filter(|m| *m != source) {
                     match file_of(m) {
                         Some(own) if own.hash == file.hash => {}
                         own => {
@@ -238,6 +256,8 @@ mod tests {
         record: Option<Record<'a>>,
         /// What each member holds now: hash and time.
         now: &'a [(&'a str, Option<(&'a str, u64)>)],
+        /// Members that may not touch `KEY` (a module manages it there, or it could not be read).
+        untouchable: &'a [&'a str],
     }
 
     impl Case<'_> {
@@ -249,6 +269,7 @@ mod tests {
                 path_known: true,
                 record: None,
                 now: &[],
+                untouchable: &[],
             }
         }
 
@@ -280,6 +301,8 @@ mod tests {
             }
             let members: Vec<String> = self.members.iter().map(|m| m.to_string()).collect();
             let paths = vec![KEY.to_string()];
+            let untouchable: BTreeMap<String, Vec<String>> =
+                self.untouchable.iter().map(|m| (m.to_string(), vec![KEY.to_string()])).collect();
             decide(&Decision {
                 mode: self.mode,
                 start: "a",
@@ -287,6 +310,7 @@ mod tests {
                 snapshot: &snapshot,
                 found: &found,
                 group_paths: &paths,
+                untouchable: &untouchable,
             })
         }
     }
@@ -458,6 +482,47 @@ mod tests {
         let o = Case { members: &["b", "c"], now: &[("b", Some(("h2", 9))), ("c", None)], ..Case::latest() }
             .run();
         assert!(o.wait && o.writes.is_empty() && o.removes.is_empty());
+    }
+
+    #[test]
+    fn latest_a_file_no_member_holds_the_agreed_version_of_is_left_alone() {
+        // A edited it while B and C ran; now A runs: B and C keep theirs until A takes part.
+        let o = Case {
+            members: &["b", "c"],
+            before: ABC,
+            record: Some((Some("h1"), &[("a", "h1"), ("b", "h0"), ("c", "h0")])),
+            now: &[("b", Some(("h0", 1))), ("c", Some(("h0", 1)))],
+            ..Case::latest()
+        }
+        .run();
+        assert!(o.writes.is_empty() && o.removes.is_empty() && o.history.is_empty(), "{o:?}");
+        assert!(!o.agreed.contains_key(KEY), "the agreed version stays as it was");
+    }
+
+    #[test]
+    fn a_file_a_member_may_not_touch_is_neither_its_nor_written_there() {
+        // The server build manages it: it does not hold it here, which is no removal.
+        let latest = Case {
+            members: &["a", "s"],
+            before: &["a", "s"],
+            record: Some((Some("h0"), &[("a", "h0"), ("s", "h0")])),
+            now: &[("a", Some(("h0", 1))), ("s", None)],
+            untouchable: &["s"],
+            ..Case::latest()
+        }
+        .run();
+        assert!(latest.writes.is_empty() && latest.removes.is_empty(), "{latest:?}");
+        // The base manages it: the others keep theirs.
+        let base = Case {
+            mode: SyncMode::Base,
+            members: &["a", "b"],
+            before: &["a", "b"],
+            now: &[("a", None), ("b", Some(("h3", 5)))],
+            untouchable: &["a"],
+            ..Case::latest()
+        }
+        .run();
+        assert!(base.writes.is_empty() && base.removes.is_empty(), "{base:?}");
     }
 
     #[test]

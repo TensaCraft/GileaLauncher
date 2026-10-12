@@ -50,6 +50,10 @@ pub struct Snapshot {
     /// The paths synced so far (a path not among them joins).
     #[serde(default)]
     pub paths: BTreeSet<String>,
+    /// Each member's folder mark (`.launcher/sync-id`) when it last took part: a build made again
+    /// under the same key has another, and joins anew.
+    #[serde(default)]
+    pub marks: BTreeMap<String, String>,
     /// By `paths::key`.
     #[serde(default)]
     pub files: BTreeMap<String, FileRecord>,
