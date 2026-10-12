@@ -108,16 +108,21 @@ fn io_err(e: std::io::Error) -> AppError {
     AppError::new(ErrorCode::Io, e.to_string())
 }
 
+/// The interface's language: the one `config` names when the launcher has it, else `system_lang`.
+pub fn lang_of(config: &ConfigStore, system_lang: &str) -> String {
+    config
+        .get_str("lang")
+        .filter(|l| SUPPORTED_LANGS.contains(&l.as_str()))
+        .unwrap_or_else(|| system_lang.to_string())
+}
+
 impl SettingsService {
     pub fn new(env: PathEnv, paths: LauncherPaths, config: Arc<ConfigStore>, system_lang: String) -> Self {
         Self { env, paths, config, system_lang, revision: Mutex::new(0), last: AtomicU64::new(0) }
     }
 
     pub fn lang(&self) -> String {
-        self.config
-            .get_str("lang")
-            .filter(|l| SUPPORTED_LANGS.contains(&l.as_str()))
-            .unwrap_or_else(|| self.system_lang.clone())
+        lang_of(&self.config, &self.system_lang)
     }
 
     pub fn snapshot(&self) -> SettingsSnapshot {

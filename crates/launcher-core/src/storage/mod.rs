@@ -2,6 +2,7 @@
 
 pub mod atomic;
 pub mod config;
+pub mod housekeeping;
 pub mod journal;
 pub mod json;
 pub mod layout;

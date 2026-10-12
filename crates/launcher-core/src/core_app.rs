@@ -40,6 +40,7 @@ use crate::recent::RecentService;
 use crate::settings::{MINECRAFT_DIR_KEY, SettingsService};
 use crate::setup::{self, SetupOutcome};
 use crate::storage::config::ConfigStore;
+use crate::storage::housekeeping::{StorageDeps, StorageService};
 use crate::storage::versions::VersionStore;
 use crate::updater::select::Platform;
 use crate::updater::stage::{self as update_stage, ExecContext};
@@ -105,6 +106,8 @@ pub struct CoreApp {
     /// Home's «Продовжити гру»: the builds played last and what on.
     pub recent: Arc<RecentService>,
     pub updater: Arc<UpdateService>,
+    /// What the launcher's own files take on disk, their clearing and their daily clean.
+    pub storage: Arc<StorageService>,
     pub startup_warnings: Vec<Text>,
 }
 
@@ -232,26 +235,6 @@ impl CoreApp {
             instances.clone(),
         ));
         let backups = resolver(config.clone(), paths.minecraft_dir.clone());
-        // What the version before kept in the old places moves in the background: a copy to another
-        // drive may be large. A build in play, or busy with a change, waits for a later start.
-        let (moving, settings, holding) = (versions.clone(), config.clone(), instances.clone());
-        let _ = std::thread::Builder::new().name("layout".into()).spawn(move || {
-            let mc_dir = moving.minecraft_dir().to_path_buf();
-            let report = crate::storage::layout::move_all(&settings, &moving, |build| {
-                let game = crate::launch::options::game_dir(build, &mc_dir);
-                if crate::launch::alive::game_open(&game) {
-                    return None;
-                }
-                holding.try_acquire(&game, "layout").ok()
-            });
-            if report.moved > 0 || !report.skipped.is_empty() {
-                tracing::info!(
-                    "Moved {} of the launcher's files to their new places; busy builds: {:?}",
-                    report.moved,
-                    report.skipped
-                );
-            }
-        });
         let content = Arc::new(ContentService::new(
             versions.clone(),
             instances.clone(),
@@ -291,7 +274,51 @@ impl CoreApp {
         ));
         let shortcuts = Arc::new(ShortcutService::from_system(&paths.app_state_dir));
         let recent = Arc::new(RecentService::new(versions.clone()));
+        let system_lang = opts.system_lang.clone();
         let settings = SettingsService::new(env.clone(), paths.clone(), config.clone(), opts.system_lang);
+        let storage = Arc::new(StorageService::new(StorageDeps {
+            config: config.clone(),
+            versions: versions.clone(),
+            instances: instances.clone(),
+            feedback: feedback.clone(),
+            backups: backups.clone(),
+            cache_dir: paths.cache_dir.clone(),
+            running: {
+                let launcher = launcher.clone();
+                Arc::new(move |key: &str| launcher.is_running(key))
+            },
+            clear_updates: {
+                let updater = updater.clone();
+                Arc::new(move || updater.clear_downloads())
+            },
+            lang: {
+                let config = config.clone();
+                Arc::new(move || crate::settings::lang_of(&config, &system_lang))
+            },
+        }));
+        // What the version before kept in the old places moves in the background: a copy to another
+        // drive may be large. A build in play, or busy with a change, waits for a later start. Then
+        // the once-a-day clean runs.
+        let (moving, settings_store, holding, cleaning) =
+            (versions.clone(), config.clone(), instances.clone(), storage.clone());
+        let _ = std::thread::Builder::new().name("layout".into()).spawn(move || {
+            let mc_dir = moving.minecraft_dir().to_path_buf();
+            let report = crate::storage::layout::move_all(&settings_store, &moving, |build| {
+                let game = crate::launch::options::game_dir(build, &mc_dir);
+                if crate::launch::alive::game_open(&game) {
+                    return None;
+                }
+                holding.try_acquire(&game, "layout").ok()
+            });
+            if report.moved > 0 || !report.skipped.is_empty() {
+                tracing::info!(
+                    "Moved {} of the launcher's files to their new places; busy builds: {:?}",
+                    report.moved,
+                    report.skipped
+                );
+            }
+            cleaning.auto_clean(std::time::SystemTime::now());
+        });
         Ok(CoreApp {
             backups,
             env,
@@ -317,6 +344,7 @@ impl CoreApp {
             shortcuts,
             recent,
             updater,
+            storage,
             startup_warnings,
         })
     }

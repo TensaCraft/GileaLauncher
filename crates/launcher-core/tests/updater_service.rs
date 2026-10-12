@@ -325,3 +325,18 @@ async fn install_folder_the_launcher_cannot_update_is_explained() {
     }
     srv.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clearing_downloads_spares_a_prepared_update() {
+    let w = world();
+    let (svc, _) = service(&w, "http://127.0.0.1:9", "owner/repo", false);
+    let downloads = stage::pending_dir(&w.cache).join(stage::DOWNLOADS_DIR);
+    std::fs::create_dir_all(downloads.join("0.2.0")).unwrap();
+    std::fs::write(downloads.join("0.2.0/Launcher-new"), b"payload").unwrap();
+    std::fs::write(stage::marker_path(&w.cache), b"{}").unwrap();
+    svc.clear_downloads().unwrap();
+    assert!(downloads.join("0.2.0").is_dir(), "a prepared update keeps its download");
+    std::fs::remove_file(stage::marker_path(&w.cache)).unwrap();
+    svc.clear_downloads().unwrap();
+    assert!(!downloads.exists());
+}

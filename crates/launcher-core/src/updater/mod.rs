@@ -167,6 +167,23 @@ impl UpdateService {
         }
     }
 
+    /// Removes the downloaded updates (the «Сховище» tab), unless one is prepared; refused while
+    /// the service checks or downloads.
+    pub fn clear_downloads(&self) -> AppResult<()> {
+        let Some(_busy) = self.try_begin() else {
+            return Err(AppError::new(ErrorCode::Busy, "the updater is busy"));
+        };
+        let cache = &self.cfg.cache_dir;
+        let line = launcher_shared::StorageLine::UpdateDownloads;
+        for item in crate::storage::usage::launcher_items(line, cache, &[], SystemTime::now()) {
+            std::fs::remove_dir_all(&item).map_err(|e| {
+                AppError::new(ErrorCode::Io, format!("{}: {e}", item.display()))
+                    .with_param("path", item.to_string_lossy())
+            })?;
+        }
+        Ok(())
+    }
+
     pub async fn check(&self, include_beta: bool, manual: bool) -> UpdateStatus {
         let Some(client) = self.client.as_ref() else { return self.status() };
         let Some(_busy) = self.try_begin() else { return self.status() };
