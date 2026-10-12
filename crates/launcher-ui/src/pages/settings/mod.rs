@@ -5,6 +5,7 @@ pub mod java;
 mod launcher;
 mod logs;
 mod storage;
+mod usage;
 
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
@@ -16,6 +17,11 @@ use crate::modules::use_module_parts;
 use crate::shell::{PageHeader, use_header};
 use crate::store::use_store;
 
+/// The section the settings show, for a section that opens another (the storage tab opens
+/// «Бекапи»).
+#[derive(Clone, Copy)]
+pub struct SettingsSection(pub RwSignal<&'static str>);
+
 /// A section of the settings menu: `group` 0 is "General", 1 "System"; a module's `view` draws it.
 #[derive(Clone, Copy)]
 pub struct SectionDef {
@@ -26,10 +32,11 @@ pub struct SectionDef {
     pub view: Option<fn() -> AnyView>,
 }
 
-const CORE: [(&str, &str, &str, u8); 6] = [
+const CORE: [(&str, &str, &str, u8); 7] = [
     ("launcher", "tune", "settings_tab_launcher", 0),
     ("interface", "dashboard", "settings_tab_interface", 0),
     ("storage", "folder", "settings_tab_storage", 0),
+    ("usage", "data_usage", "settings_tab_usage", 0),
     // One word, so the menu keeps it on one line (its sections say memory, GPU and Java).
     ("java", "speed", "settings_tab_java", 0),
     ("activity", "history", "activity_center", 1),
@@ -66,6 +73,7 @@ pub fn SettingsPage() -> impl IntoView {
     let store = use_store();
     let header = use_header();
     let active = RwSignal::new("launcher");
+    provide_context(SettingsSection(active));
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
 
     let page_header = view! { <PageHeader title_key="settings_title" /> };
@@ -99,6 +107,7 @@ pub fn SettingsPage() -> impl IntoView {
                 {move || match active.get() {
                     "interface" => view! { <interface::InterfaceSection /> }.into_any(),
                     "storage" => view! { <storage::StorageSection /> }.into_any(),
+                    "usage" => view! { <usage::UsageSection /> }.into_any(),
                     "java" => view! { <java::JavaSection /> }.into_any(),
                     "activity" => view! { <activity::ActivitySection /> }.into_any(),
                     "about" => view! { <about::AboutSection /> }.into_any(),
@@ -137,9 +146,12 @@ mod tests {
             view: || ().into_any(),
         };
         let ids: Vec<&str> = sections(&[backups]).into_iter().map(|s| s.id).collect();
-        assert_eq!(ids, vec!["launcher", "interface", "storage", "java", "backups", "activity", "about"]);
+        assert_eq!(
+            ids,
+            vec!["launcher", "interface", "storage", "usage", "java", "backups", "activity", "about"]
+        );
         let core: Vec<&str> = sections(&[]).into_iter().map(|s| s.id).collect();
-        assert_eq!(core, vec!["launcher", "interface", "storage", "java", "activity", "about"]);
+        assert_eq!(core, vec!["launcher", "interface", "storage", "usage", "java", "activity", "about"]);
     }
 
     #[test]
