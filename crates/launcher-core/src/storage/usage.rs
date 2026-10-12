@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use launcher_shared::StorageLine;
+use launcher_shared::{StorageLine, StorageRule};
 use serde_json::Value;
 
 use crate::backups::{BuildBackups, an_update_s};
@@ -15,8 +15,16 @@ use crate::launch::process::launch_log;
 use crate::storage::journal::{JOURNAL_DIR, SYNC_WORK_DIR, unfinished};
 use crate::updater::stage::{DOWNLOADS_DIR, PENDING_DIR, marker_path, pending_dir};
 
+const DAY: Duration = Duration::from_secs(24 * 3600);
 /// A temporary file untouched this long is a leftover: a download in progress keeps writing its own.
-pub const TEMP_AGE: Duration = Duration::from_secs(24 * 3600);
+pub const TEMP_AGE: Duration = DAY;
+/// How long a mod's copy, a modpack's copy, a crash report, a log archive and a set-aside journal
+/// are kept by the rules.
+pub const MONTH: Duration = Duration::from_secs(30 * 24 * 3600);
+/// How long Java's dumps are kept by their rule.
+pub const DUMP_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
+/// What the screenshots' thumbnails may take at most.
+pub const THUMBS_CAP: u64 = 500 * 1024 * 1024;
 
 fn entries(dir: &Path) -> Vec<fs::DirEntry> {
     fs::read_dir(dir).into_iter().flatten().flatten().collect()
@@ -193,6 +201,74 @@ pub fn build_items(line: StorageLine, game: &Path, backups: &BuildBackups) -> Ve
     }
 }
 
+/// When the modpack update whose copies are in folder `name` (its time, `2026-10-01_10-00-00`) ran.
+fn update_time(name: &str) -> Option<SystemTime> {
+    let time = chrono::NaiveDateTime::parse_from_str(name.get(..19)?, "%Y-%m-%d_%H-%M-%S").ok()?.and_utc();
+    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(u64::try_from(time.timestamp()).ok()?))
+}
+
+/// The paths rule `rule` takes from build `game` and its backups at `now` (the thumbnails' rule
+/// is `stale_thumbnails`).
+pub fn rule_items(rule: StorageRule, game: &Path, backups: &BuildBackups, now: SystemTime) -> Vec<PathBuf> {
+    let past = |age: Duration| move |path: &PathBuf| older_than(path, age, now);
+    match rule {
+        StorageRule::ModBackups => {
+            build_items(StorageLine::ModBackups, game, backups).into_iter().filter(past(MONTH)).collect()
+        }
+        StorageRule::ModpackBackups => {
+            let mut updates = build_items(StorageLine::ModpackBackups, game, backups);
+            // Their names are their times: the last one is the newest.
+            updates.sort();
+            let newest = updates.pop();
+            let stale = newest.filter(|folder| {
+                update_time(&name_of(folder))
+                    .and_then(|at| now.duration_since(at).ok())
+                    .is_some_and(|d| d >= MONTH)
+            });
+            updates.into_iter().chain(stale).collect()
+        }
+        StorageRule::JavaDumps => dumps(game).into_iter().filter(past(DUMP_AGE)).collect(),
+        StorageRule::CrashReports => {
+            crash_reports(game).into_iter().chain(log_archives(game)).filter(past(MONTH)).collect()
+        }
+        StorageRule::ServiceFolder => {
+            let service = service(game);
+            // A set-aside change's work keeps copies for a repair by hand, as long as its journal.
+            let (old, young): (Vec<_>, Vec<_>) =
+                service.set_aside.iter().cloned().partition(|(path, _)| older_than(path, MONTH, now));
+            let kept: HashSet<String> = young.into_iter().filter_map(|(_, id)| id).collect();
+            let mut out: Vec<PathBuf> = service
+                .idle_work()
+                .into_iter()
+                .filter(|(_, id)| !kept.contains(id))
+                .map(|(p, _)| p)
+                .collect();
+            out.extend(old.into_iter().map(|(path, _)| path));
+            out.extend(service.downloads);
+            out
+        }
+        StorageRule::Thumbnails => Vec::new(),
+    }
+}
+
+/// The thumbnails in `thumbs` to remove: every one not `wanted` (its screenshot is gone or
+/// changed), then the oldest of the rest until they take at most `cap`.
+pub fn stale_thumbnails(thumbs: &Path, wanted: &HashSet<PathBuf>, cap: u64) -> Vec<PathBuf> {
+    let (mut kept, mut out): (Vec<PathBuf>, Vec<PathBuf>) =
+        files(thumbs, |n| n.ends_with(".jpg")).into_iter().partition(|path| wanted.contains(path));
+    out.sort();
+    let mut total: u64 = kept.iter().map(|p| dir_size(p)).sum();
+    kept.sort_by_key(|path| modified(path));
+    for path in kept {
+        if total <= cap {
+            break;
+        }
+        total = total.saturating_sub(dir_size(&path));
+        out.push(path);
+    }
+    out
+}
+
 fn temporary(name: &str) -> bool {
     name.ends_with(".part") || name.ends_with(".tmp") || name.ends_with(".part.json")
 }
@@ -238,7 +314,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
-    use launcher_shared::StorageLine;
+    use launcher_shared::{StorageLine, StorageRule};
     use serde_json::json;
 
     use super::*;
@@ -378,6 +454,81 @@ mod tests {
         assert_eq!(launcher_items(StorageLine::Thumbnails, &cache, &[], now), vec![thumb]);
         fs::write(crate::updater::stage::marker_path(&cache), b"{}").unwrap();
         assert!(launcher_items(StorageLine::UpdateDownloads, &cache, &[], now).is_empty());
+    }
+
+    const DAY: Duration = Duration::from_secs(24 * 3600);
+
+    #[test]
+    fn rules_take_what_is_past_its_age() {
+        let (_tmp, game, backups) = setup();
+        let now = SystemTime::now();
+        let young_copy = put(&backups.mods(), "a.jar.backup", b"old");
+        let old_copy = put(&backups.mods(), "b.jar.backup", b"old");
+        aged(&young_copy, 29 * DAY);
+        aged(&old_copy, 31 * DAY);
+        assert_eq!(rule_items(StorageRule::ModBackups, &game, &backups, now), vec![old_copy]);
+
+        let young_dump = put(&game, "hs_err_pid1.log", b"dump");
+        let old_dump = put(&game, "hs_err_pid2.log", b"dump");
+        aged(&young_dump, 6 * DAY);
+        aged(&old_dump, 8 * DAY);
+        assert_eq!(rule_items(StorageRule::JavaDumps, &game, &backups, now), vec![old_dump]);
+
+        let young_report = put(&game, "crash-reports/c1.txt", b"crash");
+        let old_report = put(&game, "crash-reports/c2.txt", b"crash");
+        let young_logs = put(&game, "logs/y.log.gz", b"gz");
+        let old_logs = put(&game, "logs/x.log.gz", b"gz");
+        for (path, days) in [(&young_report, 29), (&old_report, 31), (&young_logs, 29), (&old_logs, 31)] {
+            aged(path, days * DAY);
+        }
+        let reports = rule_items(StorageRule::CrashReports, &game, &backups, now);
+        assert_eq!(sorted(reports), sorted(vec![old_report, old_logs]), "dumps have their own rule");
+
+        put(&game, ".launcher/work/cd/stage/a.jar", b"left");
+        let young_aside = json!({"status": "repair_required", "transaction_id": "ef"});
+        let young_aside =
+            put(&game, ".launcher/journal/tensa.json.1.failed", young_aside.to_string().as_bytes());
+        put(&game, ".launcher/work/ef/backup/a.jar", b"old");
+        let old_aside = json!({"status": "repair_required", "transaction_id": "gh"});
+        let old_aside = put(&game, ".launcher/journal/tensa.json.2.failed", old_aside.to_string().as_bytes());
+        put(&game, ".launcher/work/gh/backup/a.jar", b"old");
+        aged(&young_aside, 29 * DAY);
+        aged(&old_aside, 31 * DAY);
+        let download = put(&game, ".launcher/modpack.zip", b"pack");
+        put(&game, ".launcher/launch.log", b"started");
+        let work = game.join(".launcher/work");
+        let service = rule_items(StorageRule::ServiceFolder, &game, &backups, now);
+        assert_eq!(sorted(service), sorted(vec![work.join("cd"), work.join("gh"), old_aside, download]));
+    }
+
+    #[test]
+    fn only_the_newest_modpack_copy_stays() {
+        let (_tmp, game, backups) = setup();
+        let older = backups.modpacks().join("2026-10-01_10-00-00");
+        let newest = backups.modpacks().join("2026-10-05_10-00-00");
+        put(&older, "config/a.toml", b"mine");
+        put(&newest, "config/a.toml", b"mine");
+        let at = |text: &str| -> SystemTime {
+            let time = chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M").unwrap().and_utc();
+            SystemTime::UNIX_EPOCH + Duration::from_secs(time.timestamp() as u64)
+        };
+        let soon = at("2026-10-12 10:00");
+        assert_eq!(rule_items(StorageRule::ModpackBackups, &game, &backups, soon), vec![older.clone()]);
+        let later = at("2026-11-10 10:00");
+        let both = rule_items(StorageRule::ModpackBackups, &game, &backups, later);
+        assert_eq!(sorted(both), sorted(vec![older, newest]), "the newest too, past its month");
+    }
+
+    #[test]
+    fn thumbnails_of_gone_screenshots_go_then_the_oldest_over_the_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let thumbs = tmp.path().join("thumbs");
+        let [a, b, c, d] = ["a", "b", "c", "d"].map(|n| put(&thumbs, &format!("{n}.jpg"), &[0; 10]));
+        aged(&a, 2 * DAY);
+        aged(&c, 3 * DAY);
+        aged(&d, DAY);
+        let wanted: std::collections::HashSet<PathBuf> = [a, c.clone(), d].into_iter().collect();
+        assert_eq!(stale_thumbnails(&thumbs, &wanted, 20), vec![b, c], "the gone one, then the oldest");
     }
 
     #[test]

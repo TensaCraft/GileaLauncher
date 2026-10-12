@@ -23,13 +23,18 @@ fn io_error(code: ErrorCode, path: &Path, e: io::Error) -> AppError {
 }
 
 /// Copies mod `relative` of `game` to `<dir>/<filename>.backup` (`dir`: the build's mods' backups)
-/// over an older one and drops the other backups of the same mod; a failed copy leaves no part
-/// behind.
+/// over an older one, dated now, and drops the other backups of the same mod; a failed copy leaves
+/// no part behind.
 pub fn back_up(dir: &Path, game: &Path, relative: &str, filename: &str) -> AppResult<()> {
     fs::create_dir_all(dir).map_err(|e| io_error(ErrorCode::BackupFailed, dir, e))?;
     let target = dir.join(format!("{filename}{SUFFIX}"));
     let part = dir.join(format!("{filename}{SUFFIX}.part"));
-    fs::copy(game.join(relative), &part).and_then(|_| rename_retrying(&part, &target)).map_err(|e| {
+    // Dated when made, not as the mod was (a copy keeps the source's time on Windows): the rules
+    // count a copy's age from it.
+    let copied = fs::copy(game.join(relative), &part).map(|_| {
+        let _ = fs::File::options().write(true).open(&part).and_then(|f| f.set_modified(SystemTime::now()));
+    });
+    copied.and_then(|()| rename_retrying(&part, &target)).map_err(|e| {
         let _ = fs::remove_file(&part);
         io_error(ErrorCode::BackupFailed, &target, e)
     })?;
@@ -162,6 +167,26 @@ pub fn restore(game: &Path, backup: &Backup, current: &Path, enabled: bool) -> A
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_copy_is_dated_when_it_is_made() {
+        let dir = tempfile::tempdir().unwrap();
+        let game = dir.path().join("game");
+        fs::create_dir_all(game.join("mods")).unwrap();
+        fs::write(game.join("mods/a.jar"), b"jar").unwrap();
+        let month_ago = SystemTime::now() - std::time::Duration::from_secs(60 * 24 * 3600);
+        fs::File::options()
+            .write(true)
+            .open(game.join("mods/a.jar"))
+            .unwrap()
+            .set_modified(month_ago)
+            .unwrap();
+        let shelf = dir.path().join("backups/aero/mods");
+        back_up(&shelf, &game, "mods/a.jar", "a.jar").unwrap();
+        let made = fs::metadata(shelf.join("a.jar.backup")).unwrap().modified().unwrap();
+        let age = SystemTime::now().duration_since(made).unwrap_or_default();
+        assert!(age < std::time::Duration::from_secs(60), "{age:?}: the 30-day rule counts from the copy");
+    }
 
     #[test]
     fn a_backup_is_compared_with_the_mod_piece_by_piece() {

@@ -50,7 +50,7 @@ impl Thumbs {
     }
 
     /// Where the thumbnail of `shot` as it is now lives.
-    fn path_of(&self, shot: &ScreenshotFile) -> PathBuf {
+    pub fn path_of(&self, shot: &ScreenshotFile) -> PathBuf {
         let mut hash = Sha1::new();
         hash.update(shot.path.to_string_lossy().as_bytes());
         hash.update(shot.size.to_le_bytes());
