@@ -143,12 +143,12 @@ pub fn recognize(
             named[i] = true;
         }
     }
-    for at in 0..files.len() {
-        if owner.contains_key(&at) || !items.iter().any(|item| sized(item, files[at].1)) {
+    for (at, &(_, size)) in files.iter().enumerate() {
+        if owner.contains_key(&at) || !items.iter().any(|item| sized(item, size)) {
             continue;
         }
         let Some(sha) = hash_of(at) else { continue };
-        if let Some(i) = items.iter().position(|item| sized(item, files[at].1) && item.sha256 == sha) {
+        if let Some(i) = items.iter().position(|item| sized(item, size) && item.sha256 == sha) {
             owner.insert(at, i);
             named[i] = true;
         }
