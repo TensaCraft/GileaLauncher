@@ -8,6 +8,7 @@ pub mod icon;
 pub mod identity;
 pub mod install;
 pub mod manifest;
+pub mod optional;
 pub mod pack;
 pub mod plan;
 pub mod profile;

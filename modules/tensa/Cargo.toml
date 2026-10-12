@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-backend = ["dep:launcher-core", "dep:reqwest", "dep:tokio", "dep:tracing", "dep:futures-util"]
+backend = ["dep:launcher-core", "dep:reqwest", "dep:tokio", "dep:tracing", "dep:futures-util", "dep:serde"]
 ui = ["dep:ui-kit", "dep:leptos", "dep:serde"]
 
 [dependencies]

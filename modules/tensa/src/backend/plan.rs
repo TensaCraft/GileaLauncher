@@ -249,7 +249,7 @@ fn unchanged(dest: &Path, file: &PlannedFile, checked: &mut Checked) -> bool {
 }
 
 /// A listed path, compared as the file system compares names (case-blind on Windows and macOS).
-fn name_key(path: &str) -> String {
+pub(crate) fn name_key(path: &str) -> String {
     if cfg!(any(windows, target_os = "macos")) { path.to_lowercase() } else { path.to_string() }
 }
 
