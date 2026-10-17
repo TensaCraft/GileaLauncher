@@ -9,6 +9,7 @@ pub mod field;
 pub mod float;
 pub mod icon;
 pub mod layout;
+pub mod loader_mark;
 pub mod menu;
 pub mod select;
 pub mod slider;

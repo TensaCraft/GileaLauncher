@@ -22,7 +22,7 @@ type Project = (&'static str, &'static str, &'static str, &'static str, u64);
 const MODS: [Project; 18] = [
     ("mock-sodium", "sodium", "Sodium", "jellysquid3", 61_234_567),
     ("mock-lithium", "lithium", "Lithium", "jellysquid3", 38_120_000),
-    ("mock-fabric-api", "fabric-api", "Fabric API", "modmuss50", 95_400_000),
+    ("P7dR8mSH", "fabric-api", "Fabric API", "modmuss50", 95_400_000),
     ("mock-iris", "iris", "Iris Shaders", "coderbot", 55_700_000),
     ("mock-modmenu", "modmenu", "Mod Menu", "Prospector", 40_300_000),
     ("mock-ferritecore", "ferrite-core", "FerriteCore", "malte0811", 30_900_000),
@@ -160,7 +160,7 @@ impl MockModrinth {
                 _ if args.alone && args.project_id != "mock-entityculling" => {}
                 "mock-sodium-extra" => {
                     add(item("mock-sodium", "Sodium"));
-                    add(item("mock-fabric-api", "Fabric API"));
+                    add(item("P7dR8mSH", "Fabric API"));
                 }
                 "mock-iris" if !args.optional.iter().any(|p| p.project_id == "mock-sodium") => {
                     plan.optional.push(item("mock-sodium", "Sodium"));
@@ -608,7 +608,7 @@ mod tests {
         assert!(plan.requires_confirmation());
         assert_eq!(
             plan.install.iter().map(|i| i.project_id.as_str()).collect::<Vec<_>>(),
-            ["mock-sodium", "mock-fabric-api"]
+            ["mock-sodium", "P7dR8mSH"]
         );
         let mut approved = args("mock-sodium-extra", "Sodium Extra");
         approved["approved"] = serde_json::to_value(plan.changes(&[])).unwrap();
@@ -624,7 +624,7 @@ mod tests {
         )
         .unwrap();
         let ids: Vec<&str> = overview.notes.iter().map(|n| n.project_id.as_str()).collect();
-        assert!(ids.contains(&"mock-sodium-extra") && ids.contains(&"mock-fabric-api"), "{ids:?}");
+        assert!(ids.contains(&"mock-sodium-extra") && ids.contains(&"P7dR8mSH"), "{ids:?}");
         // Unapproved changes come back as a plan; blocked plans cannot install.
         let unapproved: InstallAnswer = serde_json::from_value(
             mock.handle("provider_install", &call(args("mock-iris", "Iris"))).unwrap(),

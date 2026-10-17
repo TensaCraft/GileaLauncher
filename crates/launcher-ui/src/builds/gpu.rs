@@ -14,6 +14,15 @@ pub fn writes_registry(os: &str, mode: &str) -> bool {
     os == "windows" && mode != "auto"
 }
 
+/// The label key of a mode (an unknown one reads as `auto`, which is what the launcher does with it).
+pub fn mode_label(mode: &str) -> &'static str {
+    match mode {
+        "igpu" => "gpu_mode_integrated",
+        "dgpu" => "gpu_mode_discrete",
+        _ => "gpu_mode_auto",
+    }
+}
+
 /// Whether going from `before` to `after` needs the user's word first: the first registry choice.
 pub fn asks_first(os: &str, before: &str, after: &str) -> bool {
     writes_registry(os, after) && !writes_registry(os, before)
@@ -63,11 +72,7 @@ pub fn GpuChoice(
         pending.set(None);
     });
     let options = Signal::derive(move || {
-        vec![
-            SegOption::new("auto", i18n.t("gpu_mode_auto")),
-            SegOption::new("igpu", i18n.t("gpu_mode_integrated")),
-            SegOption::new("dgpu", i18n.t("gpu_mode_discrete")),
-        ]
+        ["auto", "igpu", "dgpu"].map(|mode| SegOption::new(mode, i18n.t(mode_label(mode)))).to_vec()
     });
     let points =
         ["gpu_registry_where", "gpu_registry_only_java", "gpu_registry_antivirus", "gpu_registry_undo"];
@@ -111,5 +116,13 @@ mod tests {
         assert!(!asks_first("windows", "igpu", "dgpu"), "already in the registry");
         assert!(!asks_first("windows", "dgpu", "auto"), "back to auto takes it out: nothing to ask");
         assert!(!asks_first("linux", "auto", "dgpu"));
+    }
+
+    #[test]
+    fn each_mode_is_named_by_its_own_label() {
+        assert_eq!(mode_label("auto"), "gpu_mode_auto");
+        assert_eq!(mode_label("igpu"), "gpu_mode_integrated");
+        assert_eq!(mode_label("dgpu"), "gpu_mode_discrete");
+        assert_eq!(mode_label("something else"), "gpu_mode_auto");
     }
 }

@@ -14,16 +14,31 @@ pub struct ChoiceOption {
     pub icon: String,
     pub desc: Option<String>,
     pub image: Option<String>,
+    /// Shown, but not to be chosen (its line says why).
+    pub disabled: bool,
 }
 
 impl ChoiceOption {
     pub fn new(value: impl Into<String>, label: impl Into<String>, icon: impl Into<String>) -> Self {
-        Self { value: value.into(), label: label.into(), icon: icon.into(), desc: None, image: None }
+        Self {
+            value: value.into(),
+            label: label.into(),
+            icon: icon.into(),
+            desc: None,
+            image: None,
+            disabled: false,
+        }
     }
 
     /// A line under the name (none when empty).
     pub fn with_desc(mut self, desc: impl Into<String>) -> Self {
         self.desc = Some(desc.into()).filter(|d| !d.trim().is_empty());
+        self
+    }
+
+    /// Shown but not to be chosen.
+    pub fn with_disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 
@@ -73,6 +88,7 @@ fn choice_card(
             class="choice-card"
             class:is-on=chosen
             class:is-plain=plain
+            disabled=opt.disabled
             aria-checked=move || chosen.get().to_string()
             on:click=move |_| {
                 if value.get_untracked() != v {

@@ -128,6 +128,7 @@ pub fn EditorDialog(
                 icon: "update".into(),
                 desc: Some(i18n.t("sync_mode_latest_desc")),
                 image: None,
+                disabled: false,
             },
             ChoiceOption {
                 value: "base".into(),
@@ -135,6 +136,7 @@ pub fn EditorDialog(
                 icon: "star".into(),
                 desc: Some(i18n.t("sync_mode_base_desc")),
                 image: None,
+                disabled: false,
             },
         ]
     });

@@ -123,6 +123,30 @@
 .wizard__status ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); }
 .wizard__status.is-ok { background: rgba(69, 194, 126, 0.1); border: 1px solid rgba(69, 194, 126, 0.4); color: var(--ok); }
 .wizard__status.is-error { background: rgba(240, 82, 74, 0.1); border: 1px solid rgba(240, 82, 74, 0.45); color: var(--danger-text); }
+/* The build wizard: the first-run wizard's panel with its steps in a row across the top. */
+.build-wizard { max-width: 1180px; margin: 4px auto 16px; }
+.build-wizard__steps { display: flex; align-items: center; gap: 10px; padding: 12px 28px; border-bottom: 1px solid var(--line); background: rgba(5, 12, 10, 0.35); }
+.build-wizard__step { flex: none; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 14px 0 6px; border: 0; border-radius: 999px; background: none;
+  color: var(--text-3); font: 500 13.5px var(--f-ui); white-space: nowrap; cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
+.build-wizard__step:hover:not(:disabled) { background: rgba(123, 227, 210, 0.06); color: var(--text); }
+.build-wizard__step:disabled { cursor: default; color: var(--text-4); }
+.build-wizard__step.is-on { background: rgba(23, 195, 162, 0.12); color: var(--text); box-shadow: inset 0 0 0 1px rgba(23, 195, 162, 0.35); }
+.build-wizard__mark { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line-2); background: var(--s-input); font: 600 12.5px var(--f-ui); }
+.build-wizard__mark .icon { font-size: 16px; }
+.build-wizard__step.is-on .build-wizard__mark { border-color: var(--primary); color: var(--primary-hi); box-shadow: 0 0 0 3px rgba(23, 195, 162, 0.15); }
+.build-wizard__step.is-done .build-wizard__mark { border-color: transparent; background: var(--primary); color: #04261a; }
+.build-wizard__line { flex: 1; min-width: 16px; height: 2px; border-radius: 1px; background: var(--line-2); transition: background 320ms var(--ease); }
+.build-wizard__line.is-done { background: linear-gradient(90deg, var(--primary-lo), var(--primary-hi)); box-shadow: 0 0 8px rgba(63, 224, 192, 0.45); }
+.build-wizard__why { font-size: 12.5px; color: var(--text-3); }
+.build-wizard__more { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; padding: 0; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.build-wizard__more:hover { color: var(--text); }
+.build-wizard__basics > .field + .field, .build-wizard__basics > .build-wizard__more + .field { margin-top: 14px; }
+.build-wizard__toolbar, .build-wizard__search { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.build-wizard__plan { display: grid; gap: 6px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--s-input); }
+.build-wizard__pick { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); }
+.build-wizard__group { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.build-wizard__settings { display: grid; gap: 12px; }
+.build-wizard__content .wizard__status { margin-bottom: 12px; }
 .wizard__paths { display: grid; gap: 6px; font-size: 12.5px; color: var(--text-3); }
 .wizard__paths div { display: grid; grid-template-columns: 180px 1fr; gap: 10px; }
 .wizard__paths code { font-family: var(--f-mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }

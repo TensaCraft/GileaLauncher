@@ -153,6 +153,8 @@
   border-radius: var(--r-lg); border: 1px solid var(--line-2); background: var(--s-row); cursor: pointer; overflow: hidden;
   transition: border-color var(--dur), box-shadow var(--dur), transform var(--dur) var(--ease); }
 .choice-card:hover { border-color: var(--line-3); transform: translateY(-2px); }
+.choice-card:disabled { opacity: 0.45; cursor: not-allowed; }
+.choice-card:disabled:hover { border-color: var(--line); transform: none; }
 .choice-card:focus-visible { outline: none; box-shadow: var(--ring); }
 .choice-card.is-on { border-color: var(--primary); color: var(--text); box-shadow: 0 0 0 1px var(--primary), 0 12px 32px rgba(23, 195, 162, 0.16); }
 .choice-card__pic { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 10; overflow: hidden; border-bottom: 1px solid var(--line);
@@ -163,6 +165,8 @@
 .choice-card.is-plain .choice-card__pic { aspect-ratio: auto; height: 84px; }
 .choice-card.is-plain .choice-card__pic > .icon { font-size: 36px; }
 .choice-card.is-on .choice-card__pic > .icon { color: var(--primary-hi); opacity: 1; }
+.choice-card .choice-card__pic > .icon--loader { font-size: 42px; color: var(--mark); opacity: 0.8; }
+.choice-card.is-on .choice-card__pic > .icon--loader { opacity: 1; }
 .choice-card__text { display: grid; gap: 4px; padding: 12px 14px 14px; }
 .choice-card__title { display: flex; align-items: center; gap: 9px; font: 600 14px var(--f-ui); color: var(--text); }
 .choice-card__dot { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-3); transition: border-color var(--dur), background var(--dur); }
@@ -411,3 +415,10 @@
 .icon--brand { width: 1em; height: 1em; flex: none; display: inline-block; vertical-align: middle; }
 .icon--brand-modrinth { color: #1bd96a; }
 .icon--brand-curseforge { color: #f16436; }
+/* The game's and the loaders' marks in a Material icon's place, each in its loader's colour. */
+.icon--loader { width: 1em; height: 1em; flex: none; display: inline-block; vertical-align: middle; color: var(--mark); }
+.icon--loader-vanilla { --mark: #8fd9a8; }
+.icon--loader-fabric { --mark: #e7ce93; }
+.icon--loader-forge { --mark: #86cfe6; }
+.icon--loader-neoforge { --mark: #f7b27a; }
+.icon--loader-quilt { --mark: #cdb3f4; }

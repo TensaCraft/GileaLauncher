@@ -24,6 +24,7 @@ use crate::pages::modpacks::ModpacksPage;
 use crate::pages::profiles::ProfilesPage;
 use crate::pages::settings::SettingsPage;
 use crate::pages::setup::SetupPage;
+use crate::pages::wizard::BuildWizardPage;
 use crate::profiles::auth::{BrowserWaitDialog, DeviceCodeDialog};
 use crate::shell::{
     AlertHost, PageHeader, QuitConfirm, Shell, SupportDialog, provide_header, provide_support,
@@ -216,6 +217,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/") view=HomePage />
                     <Route path=path!("/builds") view=BuildsPage />
                     <Route path=path!("/builds/create") view=CreateBuildPage />
+                    <Route path=path!("/builds/new") view=BuildWizardPage />
                     <Route path=path!("/builds/components") view=ComponentsPage />
                     <Route path=path!("/builds/content") view=ContentRoute />
                     <Route path=path!("/modpacks") view=ModpacksPage />

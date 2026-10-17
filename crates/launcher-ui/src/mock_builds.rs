@@ -474,7 +474,44 @@ impl MockBuilds {
             "catalog_loader" => {
                 let kind: LoaderKind =
                     serde_json::from_value(args["loader"].clone()).unwrap_or(LoaderKind::Fabric);
-                to_value(self.loader_catalog(kind, args["unstable"].as_bool().unwrap_or(false)))
+                // Packed as the app sends it.
+                let options = self.loader_catalog(kind, args["unstable"].as_bool().unwrap_or(false));
+                to_value(launcher_shared::LoaderCatalog::pack(options))
+            }
+            "build_create_planned" => {
+                let planned: launcher_shared::PlannedBuild =
+                    match serde_json::from_value(args["build"].clone()) {
+                        Ok(planned) => planned,
+                        Err(e) => return Some(Err(AppError::new(ErrorCode::InvalidInput, e.to_string()))),
+                    };
+                let made = match planned.loader {
+                    LoaderKind::Minecraft => self.create(&planned.name, &planned.mc),
+                    kind => self.create_loader(
+                        &planned.name,
+                        kind,
+                        &planned.mc,
+                        planned.loader_version.as_deref().unwrap_or_default(),
+                    ),
+                };
+                made.and_then(|mut b| {
+                    b.description = planned.settings.description.trim().to_string();
+                    if let Some(build) = self.builds.iter_mut().find(|x| x.key == b.key) {
+                        build.description = b.description.clone();
+                    }
+                    self.emit_builds();
+                    toast(Level::Success, Text::key("version_install_success").param("version", &b.name));
+                    if !planned.picks.is_empty() {
+                        let done = planned.picks.len().to_string();
+                        toast(
+                            Level::Success,
+                            Text::key("build_planned_done")
+                                .param("name", &b.name)
+                                .param("done", &done)
+                                .param("total", &done),
+                        );
+                    }
+                    to_value(b)
+                })
             }
             "build_create_loader" => {
                 let kind: LoaderKind =

@@ -54,19 +54,19 @@ pub fn card_subtitle(build: &BuildDto) -> String {
     }
 }
 
-/// The placeholder icon of a build without a picture.
+/// The placeholder icon of a build without a picture: its loader's mark (the game's, for a plain one).
 pub fn loader_icon(loader: Option<&str>) -> &'static str {
     let loader = loader.unwrap_or_default().to_lowercase();
     if loader.contains("neoforge") {
-        "construction"
+        "loader:neoforge"
     } else if loader.contains("forge") {
-        "build"
+        "loader:forge"
     } else if loader.contains("fabric") {
-        "extension"
+        "loader:fabric"
     } else if loader.contains("quilt") {
-        "grid_view"
+        "loader:quilt"
     } else if loader.contains("minecraft") || loader.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-        "layers"
+        "loader:vanilla"
     } else {
         "videogame_asset"
     }
@@ -192,11 +192,12 @@ mod tests {
         bare.client = None;
         bare.version = None;
         assert_eq!(build_subtitle(&bare), "");
-        assert_eq!(loader_icon(Some("Minecraft")), "layers");
-        assert_eq!(loader_icon(Some("neoforge-21.1.77")), "construction");
-        assert_eq!(loader_icon(Some("forge")), "build");
-        assert_eq!(loader_icon(Some("fabric-loader")), "extension");
-        assert_eq!(loader_icon(Some("quilt")), "grid_view");
+        assert_eq!(loader_icon(Some("Minecraft")), "loader:vanilla");
+        assert_eq!(loader_icon(Some("1.21.1")), "loader:vanilla");
+        assert_eq!(loader_icon(Some("neoforge-21.1.77")), "loader:neoforge");
+        assert_eq!(loader_icon(Some("forge")), "loader:forge");
+        assert_eq!(loader_icon(Some("fabric-loader")), "loader:fabric");
+        assert_eq!(loader_icon(Some("quilt")), "loader:quilt");
         assert_eq!(loader_icon(None), "videogame_asset");
     }
 

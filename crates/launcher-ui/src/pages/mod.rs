@@ -11,6 +11,7 @@ pub mod profiles;
 pub mod screenshots;
 pub mod settings;
 pub mod setup;
+pub mod wizard;
 
 #[cfg(test)]
 mod tests {

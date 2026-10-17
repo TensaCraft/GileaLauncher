@@ -43,7 +43,7 @@ pub fn HomePage() -> impl IntoView {
         let entries = vec![MenuEntry::item("add", i18n.t("add_version")).icon("add")];
         menu.open_with(ev.client_x(), ev.client_y(), entries, move |id| {
             if id == "add" {
-                store.go("/builds/create");
+                store.go("/builds/new");
             }
         });
     };
@@ -68,7 +68,7 @@ pub fn HomePage() -> impl IntoView {
                     title=Signal::derive(move || i18n.t("empty_builds_title"))
                     desc=Signal::derive(move || i18n.t("empty_builds_desc"))
                 >
-                    <Button variant=Variant::Primary icon="add" on_click=move |_| store.go("/builds/create")>
+                    <Button variant=Variant::Primary icon="add" on_click=move |_| store.go("/builds/new")>
                         {move || i18n.t("create_build")}
                     </Button>
                 </EmptyState>

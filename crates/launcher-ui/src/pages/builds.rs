@@ -32,7 +32,7 @@ pub fn BuildsPage() -> impl IntoView {
             <Button icon="construction" on_click=move |_| store.go("/builds/components")>
                 {move || i18n.t("minecraft_components_nav")}
             </Button>
-            <Button variant=Variant::Primary icon="add" on_click=move |_| store.go("/builds/create")>
+            <Button variant=Variant::Primary icon="add" on_click=move |_| store.go("/builds/new")>
                 {move || i18n.t("add_version")}
             </Button>
         }
@@ -66,7 +66,7 @@ pub fn BuildsPage() -> impl IntoView {
                         title=Signal::derive(move || i18n.t("empty_builds_title"))
                         desc=Signal::derive(move || i18n.t("empty_builds_desc"))
                     >
-                        <Button variant=Variant::Primary icon="add" on_click=move |_| store.go("/builds/create")>
+                        <Button variant=Variant::Primary icon="add" on_click=move |_| store.go("/builds/new")>
                             {move || i18n.t("create_build")}
                         </Button>
                     </EmptyState>

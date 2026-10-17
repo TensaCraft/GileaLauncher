@@ -320,11 +320,11 @@ pub fn Catalog(
         <div class="create__bar">
             <ChipTabs
                 chips=vec![
-                    ChipDef { id: "minecraft", icon: "layers", label: Signal::derive(|| "Minecraft".to_string()), tone: TagTone::Vanilla },
-                    ChipDef { id: "fabric", icon: "extension", label: Signal::derive(|| "Fabric".to_string()), tone: TagTone::Fabric },
-                    ChipDef { id: "quilt", icon: "grid_view", label: Signal::derive(|| "Quilt".to_string()), tone: TagTone::Quilt },
-                    ChipDef { id: "forge", icon: "build", label: Signal::derive(|| "Forge".to_string()), tone: TagTone::Forge },
-                    ChipDef { id: "neoforge", icon: "construction", label: Signal::derive(|| "NeoForge".to_string()), tone: TagTone::NeoForge },
+                    ChipDef { id: "minecraft", icon: "loader:vanilla", label: Signal::derive(|| "Minecraft".to_string()), tone: TagTone::Vanilla },
+                    ChipDef { id: "fabric", icon: "loader:fabric", label: Signal::derive(|| "Fabric".to_string()), tone: TagTone::Fabric },
+                    ChipDef { id: "quilt", icon: "loader:quilt", label: Signal::derive(|| "Quilt".to_string()), tone: TagTone::Quilt },
+                    ChipDef { id: "forge", icon: "loader:forge", label: Signal::derive(|| "Forge".to_string()), tone: TagTone::Forge },
+                    ChipDef { id: "neoforge", icon: "loader:neoforge", label: Signal::derive(|| "NeoForge".to_string()), tone: TagTone::NeoForge },
                 ]
                 active=tab
             />
