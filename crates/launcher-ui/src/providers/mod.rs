@@ -14,6 +14,9 @@ pub mod pack_updates;
 pub mod panel;
 pub mod store;
 
+/// The original's pause after typing before a search goes.
+pub const DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(350);
+
 use launcher_shared::provider::{Need, ProviderInfo, provider_error_key};
 use launcher_shared::{AppError, AppInfo, ContentKind, Level, mods_supported};
 use leptos::task::spawn_local;

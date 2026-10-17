@@ -88,6 +88,7 @@ async fn searching_asks_for_this_builds_content() {
         query: "  sod ".into(),
         offset: 16,
         target: None,
+        limit: None,
     };
     let page = w.service.search(&args).await.unwrap();
     assert_eq!((page.hits.len(), page.total, page.offset, page.limit), (1, 40, 16, 16));
@@ -106,12 +107,32 @@ async fn searching_asks_for_this_builds_content() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_search_asks_for_the_page_size_the_player_chose() {
+    let w = world().await;
+    let (key, _) = build(&w, "Aero", "Fabric", FABRIC);
+    w.server.data.lock().unwrap().search = Some(json!({"total_hits": 40, "hits": []}));
+    let args = SearchArgs {
+        key,
+        kind: ContentKind::Mods,
+        query: String::new(),
+        offset: 0,
+        target: None,
+        limit: Some(25),
+    };
+    let page = w.service.search(&args).await.unwrap();
+    assert_eq!(page.limit, 25);
+    let seen = pairs(&w.server.seen()[0].0);
+    assert!(seen.contains(&("limit".into(), "25".into())), "{seen:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn vanilla_builds_search_only_resource_packs() {
     let w = world().await;
     let (key, _) = build(&w, "Vanilla", "Minecraft", "1.21.1");
     w.server.data.lock().unwrap().search = Some(json!({"hits": [], "total_hits": 0}));
     for kind in [ContentKind::Mods, ContentKind::ShaderPacks] {
-        let args = SearchArgs { key: key.clone(), kind, query: String::new(), offset: 0, target: None };
+        let args =
+            SearchArgs { key: key.clone(), kind, query: String::new(), offset: 0, target: None, limit: None };
         assert_eq!(w.service.search(&args).await.unwrap_err().code, ErrorCode::Unsupported, "{kind:?}");
     }
     let packs = SearchArgs {
@@ -120,6 +141,7 @@ async fn vanilla_builds_search_only_resource_packs() {
         query: String::new(),
         offset: 0,
         target: None,
+        limit: None,
     };
     assert!(w.service.search(&packs).await.is_ok());
     let missing = SearchArgs { key: "ghost".into(), ..packs };
@@ -576,7 +598,14 @@ async fn the_service_answers_as_a_content_provider() {
         "title": "Sodium", "project_type": "mod"}], "total_hits": 1}));
     let (key, _) = build(&w, "Aero", "Fabric", "fabric-loader-0.16.9-1.21.1");
     let provider: Arc<dyn ContentProvider> = w.service.clone();
-    let args = SearchArgs { key, kind: ContentKind::Mods, query: String::new(), offset: 0, target: None };
+    let args = SearchArgs {
+        key,
+        kind: ContentKind::Mods,
+        query: String::new(),
+        offset: 0,
+        target: None,
+        limit: None,
+    };
     let page = provider.search(args).await.unwrap();
     assert_eq!(page.hits[0].url.as_deref(), Some("https://modrinth.com/mod/sodium"));
     let packs = provider.modpacks(PacksArgs { query: String::new(), offset: 0 }).await.unwrap();
@@ -623,6 +652,7 @@ async fn searching_without_a_build_asks_for_its_target() {
         query: String::new(),
         offset: 0,
         target: target(LoaderKind::Fabric),
+        limit: None,
     };
     w.service.search(&args).await.unwrap();
     let seen = pairs(&w.server.seen()[0].0);

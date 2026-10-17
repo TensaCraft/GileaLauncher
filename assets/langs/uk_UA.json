@@ -1044,10 +1044,8 @@
   "wizard_account_default": "Як у лаунчері",
   "wizard_icon": "Іконка",
   "wizard_icon_and_description": "Іконка й опис",
-  "wizard_summary_game": "Гра",
   "wizard_summary_content": "Вміст",
   "wizard_summary_settings": "Налаштування",
-  "wizard_settings_default": "Як у налаштуваннях лаунчера",
   "wizard_remove": "Прибрати",
   "wizard_loading": "Завантаження…",
   "wizard_nothing_found": "Нічого не знайдено",
@@ -1067,5 +1065,11 @@
   "hint_close": "Закрити підказку",
   "hints_setting": "Підказки",
   "hints_setting_desc": "Показують, де що знайти, поки ви не спробуєте самі",
-  "hints_reset": "Показати підказки знову"
+  "hints_reset": "Показати підказки знову",
+  "items_per_page": "Елементів на сторінці",
+  "items_per_page_desc": "Скільки модів, ресурспаків і шейдерів показувати на одній сторінці пошуку.",
+  "wizard_summary_build": "Збірка",
+  "wizard_auto": "Автоматично",
+  "wizard_no_icon": "Без іконки",
+  "wizard_no_description": "Без опису"
 }

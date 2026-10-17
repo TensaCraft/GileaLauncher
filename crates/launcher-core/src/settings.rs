@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use launcher_shared::provider::{PAGE_SIZES, SEARCH_LIMIT};
 use launcher_shared::recent::{RECENT_DEFAULT, RECENT_MOST};
 use launcher_shared::{
     AppError, AppResult, CardPlay, ClickSound, ErrorCode, GameStartAction, HINTS_MOST, SUPPORTED_LANGS,
@@ -57,6 +58,10 @@ pub fn entry(update: SettingUpdate) -> AppResult<(&'static str, Option<serde_jso
             return Err(invalid("too many recent builds").with_param("count", count.to_string()));
         }
         SettingUpdate::HomeRecentBuilds(count) => (HOME_RECENT_KEY, Some(json!(count))),
+        SettingUpdate::ItemsPerPage(size) if !PAGE_SIZES.contains(&size) => {
+            return Err(invalid("a page size not offered").with_param("size", size.to_string()));
+        }
+        SettingUpdate::ItemsPerPage(size) => (ITEMS_PER_PAGE_KEY, Some(json!(size))),
         SettingUpdate::HomeRecentClear(clear) => (HOME_RECENT_CLEARED_KEY, clear.then(|| json!(now_ms()))),
         SettingUpdate::CardPlay(play) => (CARD_PLAY_KEY, Some(json!(play.as_config_str()))),
         SettingUpdate::Hints(v) => (HINTS_KEY, Some(json!(yes_no(v)))),
@@ -97,6 +102,8 @@ pub const HOME_RECENT_KEY: &str = "home_recent_builds";
 pub const HOME_RECENT_CLEARED_KEY: &str = "home_recent_cleared_ms";
 /// Where Home's build cards have their Play button (`CardPlay`).
 pub const CARD_PLAY_KEY: &str = "home_card_play";
+/// Results per page in the providers' search lists.
+pub const ITEMS_PER_PAGE_KEY: &str = "items_per_page";
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
@@ -176,6 +183,11 @@ impl SettingsService {
             card_play: CardPlay::from_config_str(&c.get_str(CARD_PLAY_KEY).unwrap_or_default()),
             hints: c.get_bool(HINTS_KEY, true),
             hints_done: learned_hints(c.get(HINTS_DONE_KEY)),
+            items_per_page: c
+                .get_u64(ITEMS_PER_PAGE_KEY)
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|n| PAGE_SIZES.contains(n))
+                .unwrap_or(SEARCH_LIMIT),
         }
     }
 
@@ -293,6 +305,18 @@ mod tests {
         assert_eq!(svc.apply(SettingUpdate::HomeRecentBuilds(11)).unwrap_err().code, ErrorCode::InvalidInput);
         svc.config.set("home_recent_builds", json!(400)).unwrap();
         assert_eq!(svc.snapshot().home_recent_builds, 10, "a hand-edited count is held to the most");
+    }
+
+    #[test]
+    fn search_lists_show_the_page_size_the_player_chose() {
+        let home = tempfile::tempdir().unwrap();
+        let svc = service(home.path());
+        assert_eq!(svc.snapshot().items_per_page, SEARCH_LIMIT, "the usual size until one is chosen");
+        assert_eq!(svc.apply(SettingUpdate::ItemsPerPage(25)).unwrap().items_per_page, 25);
+        assert_eq!(svc.config.get_u64(ITEMS_PER_PAGE_KEY), Some(25));
+        assert_eq!(svc.apply(SettingUpdate::ItemsPerPage(7)).unwrap_err().code, ErrorCode::InvalidInput);
+        svc.config.set(ITEMS_PER_PAGE_KEY, json!(400)).unwrap();
+        assert_eq!(svc.snapshot().items_per_page, SEARCH_LIMIT, "a hand-edited size not offered");
     }
 
     #[test]

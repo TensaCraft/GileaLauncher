@@ -305,6 +305,7 @@ mod tests {
             project_id: project.into(),
             slug: project.into(),
             title: title.into(),
+            icon_url: None,
         }
     }
 

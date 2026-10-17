@@ -403,6 +403,7 @@ mod tests {
             query: String::new(),
             offset: 16,
             target: None,
+            limit: None,
         });
         assert_eq!(page.await.unwrap().offset, 16);
         let packs = shop.modpacks(PacksArgs { query: String::new(), offset: 0 }).await.unwrap_err();

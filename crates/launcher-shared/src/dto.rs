@@ -283,6 +283,9 @@ pub struct SettingsSnapshot {
     /// The hints the player has followed or closed: they show no more.
     #[serde(default)]
     pub hints_done: Vec<String>,
+    /// Results per page in the providers' search lists (one of `provider::PAGE_SIZES`).
+    #[serde(default = "items_per_page_default")]
+    pub items_per_page: u32,
     /// How many changes were saved before this snapshot (this run): a later answer has a higher
     /// one.
     #[serde(default)]
@@ -291,6 +294,10 @@ pub struct SettingsSnapshot {
 
 fn hints_default() -> bool {
     true
+}
+
+fn items_per_page_default() -> u32 {
+    crate::provider::SEARCH_LIMIT
 }
 
 /// How many learned hints the launcher keeps.
@@ -326,6 +333,8 @@ pub enum SettingUpdate {
     GpuModeDefault(String),
     WindowSize(String),
     HomeRecentBuilds(u8),
+    /// Results per page in the providers' search lists (one of `provider::PAGE_SIZES`).
+    ItemsPerPage(u32),
     /// `true` clears «Продовжити гру» now; `false` gives its history back.
     HomeRecentClear(bool),
     CardPlay(CardPlay),

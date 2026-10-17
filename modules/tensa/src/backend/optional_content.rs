@@ -13,8 +13,7 @@ use launcher_core::storage::transaction::{ApplyHooks, FileTransaction, Transacti
 use launcher_core::storage::versions::Build;
 use launcher_shared::provider::{
     Action, Change, FileNote, InstallAnswer, InstallArgs, InstallOutcome, NewerVersion, Overview,
-    OverviewArgs, PlanDto, PlanItem, ProjectHit, SEARCH_LIMIT, SearchArgs, SearchPage, UpdateSummary,
-    UpdatesStatus,
+    OverviewArgs, PlanDto, PlanItem, ProjectHit, SearchArgs, SearchPage, UpdateSummary, UpdatesStatus,
 };
 use launcher_shared::{AppError, AppResult, ContentKind, ErrorCode, LoaderKind, Text};
 
@@ -72,7 +71,7 @@ fn file_name(relative: &str) -> &str {
 }
 
 pub async fn search(deps: &Deps, args: &SearchArgs) -> AppResult<SearchPage> {
-    let empty = SearchPage { hits: Vec::new(), total: 0, offset: args.offset, limit: SEARCH_LIMIT };
+    let empty = SearchPage { hits: Vec::new(), total: 0, offset: args.offset, limit: args.page_size() };
     if args.kind != ContentKind::Mods {
         return Ok(empty);
     }
@@ -91,7 +90,7 @@ pub async fn search(deps: &Deps, args: &SearchArgs) -> AppResult<SearchPage> {
     let hits = matching
         .iter()
         .skip(args.offset as usize)
-        .take(SEARCH_LIMIT as usize)
+        .take(args.page_size() as usize)
         .map(|item| ProjectHit {
             project_id: item.id.clone(),
             slug: item.id.clone(),

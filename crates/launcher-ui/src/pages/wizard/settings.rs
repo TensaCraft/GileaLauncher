@@ -28,7 +28,7 @@ fn take_memory(
 }
 
 /// A picked file's name, for the line under the button.
-fn file_name(path: &str) -> String {
+pub fn file_name(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 

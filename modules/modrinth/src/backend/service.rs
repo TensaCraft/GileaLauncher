@@ -36,8 +36,8 @@ use crate::types::{BuildArgs, modrinth_url, project_type};
 use launcher_shared::provider::{
     Action, Change, FileNote, InstallAnswer, InstallArgs, InstallOutcome, ModpackBuild, NewerVersion,
     Overview, OverviewArgs, PACKS_LIMIT, PackArgs, PackInstallArgs, PackInstalled, PackUpdateArgs,
-    PackUpdated, PackVersion, PacksArgs, PlanDto, SEARCH_LIMIT, SearchArgs, SearchPage, UpdateSummary,
-    UpdatesStatus, installed_key, installing_key, loader_name, update_texts,
+    PackUpdated, PackVersion, PacksArgs, PlanDto, SearchArgs, SearchPage, UpdateSummary, UpdatesStatus,
+    installed_key, installing_key, loader_name, update_texts,
 };
 
 /// The journal of Modrinth installs.
@@ -215,8 +215,9 @@ impl ModrinthService {
     pub async fn search(&self, args: &SearchArgs) -> AppResult<SearchPage> {
         let (loader, game_version) = self.search_for(args)?;
         let facets = search_facets(args.kind, loader, game_version.as_deref());
-        let raw = self.api.search(args.query.trim(), &facets, args.offset, SEARCH_LIMIT).await?;
-        Ok(search_page(&raw, args.offset, SEARCH_LIMIT))
+        let size = args.page_size();
+        let raw = self.api.search(args.query.trim(), &facets, args.offset, size).await?;
+        Ok(search_page(&raw, args.offset, size))
     }
 
     /// Build `game`'s files of `kind`, named by Modrinth too.

@@ -191,6 +191,7 @@ fn pick(provider: &str, project: &str, title: &str) -> PlannedPick {
         project_id: project.into(),
         slug: project.into(),
         title: title.into(),
+        icon_url: None,
     }
 }
 

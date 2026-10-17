@@ -1044,10 +1044,8 @@
   "wizard_account_default": "As in the launcher",
   "wizard_icon": "Icon",
   "wizard_icon_and_description": "Icon and description",
-  "wizard_summary_game": "Game",
   "wizard_summary_content": "Content",
   "wizard_summary_settings": "Settings",
-  "wizard_settings_default": "As in the launcher's settings",
   "wizard_remove": "Remove",
   "wizard_loading": "Loading…",
   "wizard_nothing_found": "Nothing found",
@@ -1067,5 +1065,11 @@
   "hint_close": "Close the hint",
   "hints_setting": "Hints",
   "hints_setting_desc": "Show where things are until you have tried them yourself",
-  "hints_reset": "Show the hints again"
+  "hints_reset": "Show the hints again",
+  "items_per_page": "Items per page",
+  "items_per_page_desc": "How many mods, resource packs and shaders one page of search results shows.",
+  "wizard_summary_build": "Build",
+  "wizard_auto": "Automatic",
+  "wizard_no_icon": "No icon",
+  "wizard_no_description": "No description"
 }

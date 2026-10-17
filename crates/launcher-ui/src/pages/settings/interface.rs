@@ -1,3 +1,4 @@
+use launcher_shared::provider::PAGE_SIZES;
 use launcher_shared::recent::RECENT_MOST;
 use launcher_shared::{
     CardPlay, ClickSound, SettingUpdate, WINDOW_MAX, WINDOW_MIN, WINDOW_PRESETS, WindowSize,
@@ -46,6 +47,11 @@ pub fn InterfaceSection() -> impl IntoView {
                 SelectOption::new(n.to_string(), label)
             })
             .collect::<Vec<_>>()
+    });
+    let per_page = RwSignal::new(store.settings.get_untracked().items_per_page.to_string());
+    Effect::new(move |_| per_page.set(store.settings.get().items_per_page.to_string()));
+    let per_page_options = Signal::derive(move || {
+        PAGE_SIZES.iter().map(|n| SelectOption::new(n.to_string(), n.to_string())).collect::<Vec<_>>()
     });
     let sounds_on = mirror_bool(|s| s.click_sound_enabled);
     let variant = RwSignal::new(store.settings.get_untracked().click_sound.as_config_str().to_string());
@@ -137,6 +143,20 @@ pub fn InterfaceSection() -> impl IntoView {
                         value=card_play
                         icon="play_circle"
                         on_change=Callback::new(move |v: String| writer.apply(SettingUpdate::CardPlay(CardPlay::from_config_str(&v))))
+                    />
+                </div>
+            </SettingRow>
+            <SettingRow title=t("items_per_page") desc=t("items_per_page_desc")>
+                <div style="width:220px">
+                    <Select
+                        options=per_page_options
+                        value=per_page
+                        icon="format_list_numbered"
+                        on_change=Callback::new(move |v: String| {
+                            if let Ok(size) = v.parse() {
+                                writer.apply(SettingUpdate::ItemsPerPage(size));
+                            }
+                        })
                     />
                 </div>
             </SettingRow>

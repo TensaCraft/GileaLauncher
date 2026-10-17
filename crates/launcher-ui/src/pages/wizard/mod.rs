@@ -236,10 +236,11 @@ pub fn BuildWizardPage() -> impl IntoView {
         waits_for(own, now, busy.get())
     });
     // Each step starts at its top.
+    let body_ref = NodeRef::<leptos::html::Div>::new();
     Effect::new(move |_| {
         step.track();
-        if let Ok(Some(page)) = document().query_selector(".content") {
-            page.set_scroll_top(0);
+        if let Some(body) = body_ref.get_untracked() {
+            body.set_scroll_top(0);
         }
     });
     let go = move |to: WizardStep| {
@@ -315,7 +316,7 @@ pub fn BuildWizardPage() -> impl IntoView {
                     <h2>{move || i18n.t(step.get().title_key())}</h2>
                     <p>{move || i18n.t(desc_key())}</p>
                 </header>
-                <div class="wizard__body">{body}</div>
+                <div node_ref=body_ref class="wizard__body">{body}</div>
                 <footer class="wizard__foot">
                     {move || match step.get().prev() {
                         Some(prev) => view! {
@@ -454,6 +455,7 @@ mod tests {
             project_id: "sodium".into(),
             slug: "sodium".into(),
             title: "Sodium".into(),
+            icon_url: None,
         };
         let mut state = WizardState::default();
         state.set_target("1.21.1", LoaderKind::Minecraft, &state::Catalogs::new());

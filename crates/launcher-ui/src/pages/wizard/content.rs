@@ -1,5 +1,6 @@
 //! «Вміст»: the providers' mods, resource packs and shader packs for the build to be, each one
-//! put into the plan (or taken out) instead of installed; the plan itself above the list.
+//! put into the plan (or taken out) instead of installed; the plan itself above the list. The tabs,
+//! the search and the pages stay where they are: only the list scrolls.
 
 use launcher_shared::provider::{ProjectHit, SearchArgs, SearchPage, SearchTarget};
 use launcher_shared::{ContentKind, PlannedPick};
@@ -7,15 +8,15 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    Button, EmptyState, Icon, IconAction, LatestRequest, SegOption, Segmented, TabDef, Tabs, TextInput,
+    Button, ChipDef, ChipTabs, EmptyState, Icon, IconAction, LatestRequest, SegOption, Segmented, TextInput,
     Variant,
 };
 
 use super::state::content_kinds;
 use super::{PicksDropped, Wizard};
-use crate::pages::content::tab_of;
+use crate::pages::content::{tab_icon, tab_of, tab_tone};
 use crate::providers::cards::{ListSkeleton, Pager, ProjectRow};
-use crate::providers::{api, content_providers, providers, source_label};
+use crate::providers::{DEBOUNCE, api, content_providers, providers, source_label};
 use crate::store::use_store;
 
 /// A page of results with what it was searched on: its picks are that provider's and that kind's,
@@ -35,6 +36,7 @@ impl Found {
             project_id: hit.project_id.clone(),
             slug: hit.slug.clone(),
             title: hit.title.clone(),
+            icon_url: hit.icon_url.clone(),
         }
     }
 }
@@ -51,12 +53,9 @@ fn kind_label(kind: ContentKind) -> &'static str {
     }
 }
 
-fn kind_icon(kind: ContentKind) -> &'static str {
-    match kind {
-        ContentKind::Mods => "extension",
-        ContentKind::ResourcePacks => "palette",
-        ContentKind::ShaderPacks => "wb_sunny",
-    }
+/// The kind's icon, as the build's own content tabs show it.
+pub fn kind_icon(kind: ContentKind) -> &'static str {
+    tab_icon(tab_of(kind))
 }
 
 #[component]
@@ -68,12 +67,14 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
     wizard.state.update(|s| s.offer_starters(&all.get_untracked()));
     let kinds = wizard.state.with_untracked(|s| content_kinds(s.loader));
     let tab = RwSignal::new(tab_of(kinds[0]));
-    let tabs = kinds
+    // The same chips, icons and colours as the build's own content tabs.
+    let chips = kinds
         .iter()
-        .map(|&kind| TabDef {
+        .map(|&kind| ChipDef {
             id: tab_of(kind),
             icon: kind_icon(kind),
             label: Signal::derive(move || i18n.t(kind_label(kind))),
+            tone: tab_tone(tab_of(kind)),
         })
         .collect::<Vec<_>>();
     let offered = Memo::new(move |_| {
@@ -102,6 +103,7 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
             .collect::<Vec<_>>()
     });
     let query = RwSignal::new(String::new());
+    let per_page = Memo::new(move |_| store.settings.with(|s| s.items_per_page));
     let page = RwSignal::new(None::<Result<Found, String>>);
     // Only the last search's answer is shown: an earlier one may come after it.
     let latest = StoredValue::new_local(LatestRequest::new());
@@ -119,6 +121,7 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
             query: query.get_untracked().trim().to_string(),
             offset,
             target: Some(SearchTarget { game_version, loader }),
+            limit: Some(per_page.get_untracked()),
         };
         page.set(None);
         spawn_local(async move {
@@ -132,8 +135,25 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
     Effect::new(move |_| {
         tab.track();
         source.track();
+        per_page.track();
         search(0);
     });
+    // Typing searches again after a pause; Enter at once.
+    let timer = StoredValue::new(None::<TimeoutHandle>);
+    let cancel_timer = move || {
+        if let Some(handle) = timer.try_get_value().flatten() {
+            handle.clear();
+        }
+    };
+    Effect::new(move |previous: Option<String>| {
+        let text = query.get().trim().to_string();
+        if previous.is_some_and(|p| p != text) {
+            cancel_timer();
+            timer.set_value(set_timeout_with_handle(move || search(0), DEBOUNCE).ok());
+        }
+        text
+    });
+    on_cleanup(cancel_timer);
     let shown_page = Signal::derive(move || page.get().and_then(Result::ok).map(|found| found.page));
     let show_plan = RwSignal::new(false);
     let count = move || wizard.state.with(|s| s.picks.len());
@@ -215,12 +235,19 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
             .into_any()
     };
 
+    let list = NodeRef::<leptos::html::Div>::new();
+    let to_page = move |offset: u32| {
+        if let Some(list) = list.get_untracked() {
+            list.set_scroll_top(0);
+        }
+        search(offset);
+    };
+
     view! {
         <div class="build-wizard__content">
             <PicksDropped wizard=wizard />
-            <div class="build-wizard__toolbar">
-                <Tabs tabs=tabs active=tab />
-                <span class="wizard__gap"></span>
+            <nav class="content__nav">
+                <ChipTabs chips=chips active=tab />
                 <Button
                     variant=Variant::Ghost
                     icon="checklist"
@@ -228,24 +255,30 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
                 >
                     {move || i18n.tp("wizard_plan", &[("count", count().to_string())])}
                 </Button>
-            </div>
+            </nav>
             <Show when=move || show_plan.get()>
                 <div class="build-wizard__plan">{plan}</div>
             </Show>
-            <div class="build-wizard__search">
-                <div class="grow">
-                    <TextInput
-                        value=query
-                        placeholder=Signal::derive(move || i18n.t("wizard_search"))
-                        on_enter=Callback::new(move |()| search(0))
-                    />
+            <div class="create__bar">
+                <div class="create__tools">
+                    <div class="create__search">
+                        <TextInput
+                            value=query
+                            icon="search"
+                            placeholder=Signal::derive(move || i18n.t("wizard_search"))
+                            on_enter=Callback::new(move |()| {
+                                cancel_timer();
+                                search(0);
+                            })
+                        />
+                    </div>
+                    <Show when=move || !offered.with(Vec::is_empty)>
+                        <Segmented options=source_options value=source />
+                    </Show>
                 </div>
-                <Show when=move || !offered.with(Vec::is_empty)>
-                    <Segmented options=source_options value=source />
-                </Show>
             </div>
-            <div class="builds__list">{rows}</div>
-            <Pager page=shown_page on_page=Callback::new(move |offset: u32| search(offset)) />
+            <div node_ref=list class="builds__list build-wizard__list">{rows}</div>
+            <Pager page=shown_page on_page=Callback::new(to_page) />
         </div>
     }
 }
@@ -263,7 +296,7 @@ mod tests {
             author: "x".into(),
             description: String::new(),
             downloads: 1,
-            icon_url: None,
+            icon_url: Some("https://cdn.example/faithful.png".into()),
             url: None,
         };
         // The answer of a search made on CurseForge's resource packs, though the tabs moved on.
@@ -278,5 +311,6 @@ mod tests {
             (pick.project_id.as_str(), pick.slug.as_str(), pick.title.as_str()),
             ("abc", "faithful", "Faithful")
         );
+        assert_eq!(pick.icon_url.as_deref(), Some("https://cdn.example/faithful.png"), "for the summary");
     }
 }

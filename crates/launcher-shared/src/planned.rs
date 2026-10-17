@@ -46,4 +46,7 @@ pub struct PlannedPick {
     pub project_id: String,
     pub slug: String,
     pub title: String,
+    /// Its picture, for the wizard's summary.
+    #[serde(default)]
+    pub icon_url: Option<String>,
 }

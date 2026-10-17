@@ -2,8 +2,6 @@
 //! page on the provider's site and "Install" — a new build from the version picked in the dialog
 //! (the original's ModpackInstallModal).
 
-use std::time::Duration;
-
 use launcher_shared::naming::{check_new_name, default_build_name};
 use launcher_shared::provider::{
     HeldFile, PackArgs, PackInstallArgs, PackVersion, PacksArgs, ProjectHit, ProviderInfo, SearchPage,
@@ -21,10 +19,9 @@ use ui_kit::{
 
 use super::cards::{ListSkeleton, Pager, ProjectRow};
 use super::held::{HeldDialog, HeldGoOn, use_skipped_held};
-use super::{api, describe, open_page};
+use super::{DEBOUNCE, api, describe, open_page};
 
 /// The original's pause after typing.
-const DEBOUNCE: Duration = Duration::from_millis(350);
 /// Characters of a modpack's description.
 const DESCRIPTION: usize = 160;
 

@@ -206,6 +206,7 @@ impl WizardState {
                 project_id: id.into(),
                 slug: slug.into(),
                 title: title.into(),
+                icon_url: None,
             });
         }
     }
@@ -322,6 +323,7 @@ mod tests {
             project_id: id.into(),
             slug: id.into(),
             title: id.to_uppercase(),
+            icon_url: None,
         }
     }
 

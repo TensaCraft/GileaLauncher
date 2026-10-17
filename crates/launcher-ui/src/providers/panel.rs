@@ -3,8 +3,6 @@
 //! loader, for mods); one project installs at a time. A project installed here with a newer version
 //! offers "Update" on its card, as its row in the Installed list does.
 
-use std::time::Duration;
-
 use launcher_shared::provider::{
     InstallArgs, ProjectHit, ProviderInfo, SearchArgs, SearchPage, filter_text, not_found_key, search_key,
 };
@@ -21,10 +19,8 @@ use super::cards::{ListSkeleton, Pager, ProjectRow};
 use super::flow::{InstallFlow, installs};
 use super::installed::{UpdateConfirm, load};
 use super::store::{UpdateAsk, store};
-use super::{api, describe, open_page};
-
-/// The original's pause after typing.
-const DEBOUNCE: Duration = Duration::from_millis(350);
+use super::{DEBOUNCE, api, describe, open_page};
+use crate::store::use_store;
 
 #[component]
 pub fn ProviderPanel(
@@ -56,6 +52,8 @@ pub fn ProviderPanel(
     let top = NodeRef::<leptos::html::Div>::new();
     let to_top = StoredValue::new(false);
     let timer = StoredValue::new(None::<TimeoutHandle>);
+    let store_settings = use_store().settings;
+    let per_page = Memo::new(move |_| store_settings.with(|s| s.items_per_page));
 
     let search = move |offset: u32| {
         let Some(request) = pages.begin() else { return };
@@ -66,6 +64,7 @@ pub fn ProviderPanel(
             query: query.get_untracked().trim().to_string(),
             offset,
             target: None,
+            limit: Some(per_page.get_untracked()),
         };
         // Taken now: the tab may be gone when the answer comes.
         let Some(provider) = info.try_get_value() else { return };
@@ -107,6 +106,14 @@ pub fn ProviderPanel(
             timer.set_value(set_timeout_with_handle(move || search(0), DEBOUNCE).ok());
         }
         text
+    });
+    // Another page size chosen in the settings: the first page again.
+    Effect::new(move |previous: Option<u32>| {
+        let now = per_page.get();
+        if previous.is_some_and(|p| p != now) {
+            search(0);
+        }
+        now
     });
     on_cleanup(cancel_timer);
     let offset_now =

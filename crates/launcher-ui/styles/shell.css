@@ -125,7 +125,14 @@
 .wizard__status.is-error { background: rgba(240, 82, 74, 0.1); border: 1px solid rgba(240, 82, 74, 0.45); color: var(--danger-text); }
 .wizard__status.is-info { background: rgba(45, 184, 218, 0.1); border: 1px solid rgba(45, 184, 218, 0.4); color: var(--info); }
 /* The build wizard: the first-run wizard's panel with its steps in a row across the top. */
-.build-wizard { max-width: 1180px; margin: 4px auto 16px; }
+/* It fills the page: the steps, the title and the buttons stay put, the step's body scrolls (the
+   content step's list alone). */
+.build-wizard { height: 100%; display: flex; flex-direction: column; }
+.build-wizard > .wizard__panel { flex: 1; min-height: 0; }
+.build-wizard .wizard__body { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; }
+.build-wizard .wizard__body > * { flex: none; }
+.build-wizard .wizard__body > .build-wizard__content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.build-wizard__list { flex: 1; min-height: 160px; overflow-y: auto; scrollbar-gutter: stable; padding-right: 4px; }
 .build-wizard__steps { display: flex; align-items: center; gap: 10px; padding: 12px 28px; border-bottom: 1px solid var(--line); background: rgba(5, 12, 10, 0.35); }
 .build-wizard__step { flex: none; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 14px 0 6px; border: 0; border-radius: 999px; background: none;
   color: var(--text-3); font: 500 13.5px var(--f-ui); white-space: nowrap; cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
@@ -143,12 +150,40 @@
 .build-wizard__more:hover { color: var(--text); }
 .build-wizard__unread { margin-top: 12px; align-items: center; }
 .build-wizard__basics > .field + .field, .build-wizard__basics > .build-wizard__more + .field { margin-top: 14px; }
-.build-wizard__toolbar, .build-wizard__search { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-.build-wizard__plan { display: grid; gap: 6px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--s-input); }
+.build-wizard__plan { display: grid; gap: 6px; max-height: 30vh; overflow-y: auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--s-input); }
 .build-wizard__pick { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); }
-.build-wizard__group { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+/* The summary: the build and its settings side by side, the content below them, every pick a tile
+   with its picture. */
+.build-wizard__summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; align-items: start; }
+.build-wizard__summary .section { margin-bottom: 14px; }
+.build-wizard__picks-section { grid-column: 1 / -1; }
+@media (max-width: 1100px) { .build-wizard__summary { grid-template-columns: minmax(0, 1fr); } }
+.build-wizard__build { display: flex; align-items: center; gap: 14px; }
+.build-wizard__logo { flex: none; display: grid; place-items: center; width: 56px; height: 56px; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--s-input); font-size: 32px; }
+.build-wizard__logo .icon { font-size: 30px; }
+.build-wizard__name { font: 600 18px var(--f-head); color: var(--text); margin-bottom: 2px; }
+.build-wizard__facts { display: grid; gap: 2px; }
+.build-wizard__fact { display: grid; grid-template-columns: 20px 150px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 32px; font-size: 13px; }
+.build-wizard__fact .icon { font-size: 18px; color: var(--text-3); }
+.build-wizard__fact-label { color: var(--text-3); }
+.build-wizard__fact-value { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.build-wizard__fact-value.hint { color: var(--text-3); }
+.build-wizard__kind { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; font: 600 13.5px var(--f-head); color: var(--text-2); }
+.build-wizard__kind .icon { font-size: 18px; }
+.build-wizard__kind--mods .icon { color: #86cfe6; }
+.build-wizard__kind--resourcepacks .icon { color: #cdb3f4; }
+.build-wizard__kind--shaders .icon { color: #e7ce93; }
+.build-wizard__count { min-width: 22px; height: 20px; padding: 0 7px; display: inline-grid; place-items: center; border-radius: 999px; background: rgba(123, 227, 210, 0.1); color: var(--text-2); font-size: 11.5px; }
+.build-wizard__picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.build-wizard__item { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--s-input); }
+.build-wizard__item-pic { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; object-fit: cover; background: rgba(123, 227, 210, 0.06); color: var(--text-3); }
+.build-wizard__item-pic .icon { font-size: 18px; }
+.build-wizard__item-text { min-width: 0; }
+.build-wizard__item-title { font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.build-wizard__item-source { font-size: 11.5px; color: var(--text-3); }
 .build-wizard__settings { display: grid; gap: 12px; }
-.build-wizard__content .wizard__status, .build-wizard__dropped { margin-bottom: 12px; }
+.build-wizard__basics .wizard__status, .build-wizard__dropped { margin-bottom: 12px; }
+.build-wizard__content .build-wizard__dropped { margin-bottom: 0; }
 .wizard__paths { display: grid; gap: 6px; font-size: 12.5px; color: var(--text-3); }
 .wizard__paths div { display: grid; grid-template-columns: 180px 1fr; gap: 10px; }
 .wizard__paths code { font-family: var(--f-mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }

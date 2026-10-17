@@ -78,8 +78,11 @@ pub fn provider_error_key(error: &AppError) -> Option<&'static str> {
     }
 }
 
-/// Results per page (the original's mods manager).
+/// Results per page (the original's mods manager), unless the player chose another.
 pub const SEARCH_LIMIT: u32 = 16;
+
+/// The page sizes a player can choose (Settings → Interface); CurseForge gives 50 at most.
+pub const PAGE_SIZES: [u32; 4] = [10, 16, 25, 50];
 
 /// `search`: one page of this build's kind of content (or, with no build yet, of `target`'s).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +94,16 @@ pub struct SearchArgs {
     /// What a build not made yet will run (the build wizard): searched for when `key` is empty.
     #[serde(default)]
     pub target: Option<SearchTarget>,
+    /// Results per page the player chose; `None` (or a size not offered) is `SEARCH_LIMIT`.
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+impl SearchArgs {
+    /// How many results the page holds.
+    pub fn page_size(&self) -> u32 {
+        self.limit.filter(|l| PAGE_SIZES.contains(l)).unwrap_or(SEARCH_LIMIT)
+    }
 }
 
 /// The Minecraft version and loader a search is for, when there is no build yet.
@@ -888,6 +901,26 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_search_takes_an_offered_page_size_or_the_usual_one() {
+        let args = |limit: Option<u32>| SearchArgs {
+            key: "b".into(),
+            kind: ContentKind::Mods,
+            query: String::new(),
+            offset: 0,
+            target: None,
+            limit,
+        };
+        assert_eq!(args(None).page_size(), SEARCH_LIMIT);
+        assert_eq!(args(Some(25)).page_size(), 25);
+        assert!(PAGE_SIZES.contains(&SEARCH_LIMIT), "the usual size is one of the offered");
+        assert_eq!(args(Some(7)).page_size(), SEARCH_LIMIT, "not offered");
+        assert_eq!(args(Some(1000)).page_size(), SEARCH_LIMIT, "more than the providers give");
+        let old: SearchArgs =
+            serde_json::from_value(json!({"key": "b", "kind": "mods", "query": "", "offset": 0})).unwrap();
+        assert_eq!(old.page_size(), SEARCH_LIMIT, "an older caller sends none");
+    }
 
     #[test]
     fn a_quilt_build_runs_fabric_mods_too() {

@@ -202,6 +202,7 @@ async fn the_provider_searches_plans_installs_and_names_its_files() {
             query: "cre".into(),
             offset: 0,
             target: None,
+            limit: None,
         })
         .await
         .unwrap();
@@ -481,6 +482,7 @@ async fn searching_without_a_build_asks_for_its_target() {
         query: "cre".into(),
         offset: 0,
         target: Some(target),
+        limit: None,
     };
     provider.search(args.clone()).await.unwrap();
     let search = w.server.seen().into_iter().find(|s| s.path == "/v1/mods/search").unwrap();
@@ -488,4 +490,24 @@ async fn searching_without_a_build_asks_for_its_target() {
     assert!(search.query.contains(&("gameVersion".into(), "1.21.1".into())), "{:?}", search.query);
     let nothing = SearchArgs { target: None, ..args };
     assert_eq!(provider.search(nothing).await.unwrap_err().code, ErrorCode::InvalidInput);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_search_asks_for_the_page_size_the_player_chose() {
+    let w = world().await;
+    let (key, _) = build(&w, "Aero", "Fabric", FABRIC_LOADER);
+    create_and_flywheel(&w.server);
+    let provider: &dyn ContentProvider = w.service.as_ref();
+    let args = SearchArgs {
+        key,
+        kind: ContentKind::Mods,
+        query: "cre".into(),
+        offset: 0,
+        target: None,
+        limit: Some(25),
+    };
+    let page = provider.search(args).await.unwrap();
+    assert_eq!(page.limit, 25);
+    let search = w.server.seen().into_iter().find(|s| s.path == "/v1/mods/search").unwrap();
+    assert!(search.query.contains(&("pageSize".into(), "25".into())), "{:?}", search.query);
 }

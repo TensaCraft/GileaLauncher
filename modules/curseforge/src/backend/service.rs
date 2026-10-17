@@ -29,8 +29,8 @@ use launcher_core::storage::versions::{Build, VersionStore};
 use launcher_shared::provider::{
     Action, Change, FileNote, InstallAnswer, InstallArgs, InstallOutcome, ModpackBuild, NewerVersion,
     Overview, OverviewArgs, PackArgs, PackInstallArgs, PackInstalled, PackUpdateArgs, PackUpdated,
-    PackVersion, PacksArgs, PlanDto, SEARCH_LIMIT, SearchArgs, SearchPage, UpdateSummary, UpdatesStatus,
-    installed_key, installing_key, loader_name, update_texts,
+    PackVersion, PacksArgs, PlanDto, SearchArgs, SearchPage, UpdateSummary, UpdatesStatus, installed_key,
+    installing_key, loader_name, update_texts,
 };
 use launcher_shared::{AppError, AppResult, ContentKind, ErrorCode, LoaderKind, Text, mods_supported};
 use reqwest::header::HeaderName;
@@ -253,13 +253,9 @@ impl CurseForgeService {
     /// A page of this build's kind of content on CurseForge.
     pub async fn search(&self, args: &SearchArgs) -> AppResult<SearchPage> {
         let (loader, game_version) = self.search_for(args)?;
+        let size = args.page_size();
         if args.offset >= SEARCH_CAP {
-            return Ok(SearchPage {
-                hits: Vec::new(),
-                total: SEARCH_CAP,
-                offset: args.offset,
-                limit: SEARCH_LIMIT,
-            });
+            return Ok(SearchPage { hits: Vec::new(), total: SEARCH_CAP, offset: args.offset, limit: size });
         }
         let query = SearchQuery {
             class_id: class_id(args.kind),
@@ -271,9 +267,9 @@ impl CurseForgeService {
                 .map(loader_types)
                 .unwrap_or_default(),
             index: args.offset,
-            page_size: SEARCH_LIMIT.min(SEARCH_CAP - args.offset),
+            page_size: size.min(SEARCH_CAP - args.offset),
         };
-        Ok(search_page(&self.api.search(&query).await?, args.offset, SEARCH_LIMIT))
+        Ok(search_page(&self.api.search(&query).await?, args.offset, size))
     }
 
     /// The CurseForge projects of `kind` in the build: those the launcher recorded, and the

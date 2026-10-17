@@ -85,7 +85,14 @@ fn whitelist(w: &World, items: Vec<Value>) {
 }
 
 fn search(key: &str, query: &str) -> SearchArgs {
-    SearchArgs { key: key.into(), kind: ContentKind::Mods, query: query.into(), offset: 0, target: None }
+    SearchArgs {
+        key: key.into(),
+        kind: ContentKind::Mods,
+        query: query.into(),
+        offset: 0,
+        target: None,
+        limit: None,
+    }
 }
 
 fn mods(w: &World, build: &Build) -> Vec<String> {
@@ -126,6 +133,21 @@ async fn the_source_lists_the_builds_whitelist_and_filters_it() {
     own.client = Some("fabric".into());
     w.deps.versions.create(&mut own).unwrap();
     assert!(provider.search(search(&own.key, "")).await.unwrap().hits.is_empty(), "not a server build");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_whitelist_pages_by_the_size_the_player_chose() {
+    let w = World::start().await;
+    let build = server_build(&w);
+    let items = (0..12)
+        .map(|i| {
+            entry(&w, &format!("m{i:02}"), &format!("Mod {i:02}"), &format!("m{i:02}.jar"), &jar("m", "1"))
+        })
+        .collect();
+    whitelist(&w, items);
+    let provider = ServerBuilds::new(w.deps.clone());
+    let page = provider.search(SearchArgs { limit: Some(10), ..search(&build.key, "") }).await.unwrap();
+    assert_eq!((page.hits.len(), page.limit, page.total), (10, 10, 12));
 }
 
 #[tokio::test(flavor = "multi_thread")]
