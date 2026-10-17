@@ -11,8 +11,8 @@ use ui_kit::{
     Variant,
 };
 
-use super::Wizard;
 use super::state::content_kinds;
+use super::{PicksDropped, Wizard};
 use crate::pages::content::tab_of;
 use crate::providers::cards::{ListSkeleton, Pager, ProjectRow};
 use crate::providers::{api, content_providers, providers, source_label};
@@ -217,9 +217,7 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
 
     view! {
         <div class="build-wizard__content">
-            <Show when=move || wizard.state.with(|s| s.picks_dropped)>
-                <div class="wizard__status is-info"><Icon name="info" /><span>{move || i18n.t("wizard_picks_dropped")}</span></div>
-            </Show>
+            <PicksDropped wizard=wizard />
             <div class="build-wizard__toolbar">
                 <Tabs tabs=tabs active=tab />
                 <span class="wizard__gap"></span>

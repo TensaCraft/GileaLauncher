@@ -175,6 +175,28 @@ fn button_reason(
     (!under_its_field).then_some(reason)
 }
 
+/// The note that a change of version or type dropped the picks (a translation key), until the
+/// player changes the plan.
+fn dropped_note(state: &WizardState) -> Option<&'static str> {
+    state.picks_dropped.then_some("wizard_picks_dropped")
+}
+
+/// The dropped picks, told on «Вміст» and on «Підсумок» (a player may jump straight there).
+#[component]
+fn PicksDropped(wizard: Wizard) -> impl IntoView {
+    let i18n = use_i18n();
+    move || {
+        wizard.state.with(dropped_note).map(|key| {
+            view! {
+                <div class="wizard__status is-info build-wizard__dropped">
+                    <Icon name="info" />
+                    <span>{move || i18n.t(key)}</span>
+                </div>
+            }
+        })
+    }
+}
+
 /// The line under the step's title (a plain game's content step names resource packs only).
 fn step_desc(step: WizardStep, loader: LoaderKind) -> &'static str {
     match step {
@@ -420,5 +442,24 @@ mod tests {
         assert_eq!(step_desc(WizardStep::Content, LoaderKind::Minecraft), "wizard_desc_content_vanilla");
         assert_eq!(step_desc(WizardStep::Content, LoaderKind::Fabric), "wizard_desc_content");
         assert_eq!(step_desc(WizardStep::Summary, LoaderKind::Minecraft), "wizard_desc_summary");
+    }
+
+    #[test]
+    fn the_dropped_picks_are_noted_until_the_player_changes_the_plan() {
+        let sodium = launcher_shared::PlannedPick {
+            provider: "modrinth".into(),
+            kind: launcher_shared::ContentKind::Mods,
+            project_id: "sodium".into(),
+            slug: "sodium".into(),
+            title: "Sodium".into(),
+        };
+        let mut state = WizardState::default();
+        state.set_target("1.21.1", LoaderKind::Minecraft, &state::Catalogs::new());
+        assert_eq!(dropped_note(&state), None, "nothing picked, nothing dropped");
+        state.add_pick(sodium.clone());
+        state.set_target("1.20.1", LoaderKind::Minecraft, &state::Catalogs::new());
+        assert_eq!(dropped_note(&state), Some("wizard_picks_dropped"), "seen on «Вміст» or «Підсумок»");
+        state.add_pick(sodium);
+        assert_eq!(dropped_note(&state), None);
     }
 }

@@ -1,12 +1,13 @@
 //! «Підсумок»: what «Створити й встановити» will do — the game and its loader, the picked
-//! content by kind, and the settings that differ from the launcher's defaults.
+//! content by kind, and the settings that differ from the launcher's defaults; picks a change of
+//! version or type dropped are told here too.
 
 use launcher_shared::{ContentKind, LoaderKind};
 use leptos::prelude::*;
 use ui_kit::Icon;
 use ui_kit::i18n::use_i18n;
 
-use super::Wizard;
+use super::{PicksDropped, Wizard};
 use crate::builds::gpu::mode_label;
 
 #[component]
@@ -54,6 +55,7 @@ pub fn Summary(wizard: Wizard) -> impl IntoView {
     let no_settings = settings.is_empty();
 
     view! {
+        <PicksDropped wizard=wizard />
         <dl class="sync-facts build-wizard__summary">
             <dt>{i18n.t("version_name_label")}</dt>
             <dd>{state.name.trim().to_string()}</dd>
