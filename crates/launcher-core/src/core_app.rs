@@ -568,10 +568,12 @@ mod tests {
         };
         let app = CoreApp::bootstrap(env.clone(), Arc::new(NullSink), Vec::new(), opts()).unwrap();
         assert!(app.versions.list().is_empty());
-        app.versions.create(&mut crate::storage::versions::Build::new("Aeronautics")).unwrap();
-        assert!(app.paths.games_dir.join("aeronautics").join("version.json").is_file());
+        // Held before the build is listed: the start's background work (moving files, the daily
+        // clean) holds each listed build a moment, and finding this one held it passes it by.
         let lease = app.instances.try_acquire(&app.paths.games_dir.join("aeronautics"), "launch").unwrap();
         assert_eq!(lease.kind, "launch");
+        app.versions.create(&mut crate::storage::versions::Build::new("Aeronautics")).unwrap();
+        assert!(app.paths.games_dir.join("aeronautics").join("version.json").is_file());
         let again = CoreApp::bootstrap(env, Arc::new(NullSink), Vec::new(), opts()).unwrap();
         assert_eq!(again.versions.get("aeronautics").unwrap().name, "Aeronautics");
     }
