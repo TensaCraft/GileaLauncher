@@ -31,6 +31,13 @@ pub fn apply_update(s: &mut SettingsSnapshot, update: &SettingUpdate) {
         SettingUpdate::HomeRecentClear(clear) => {
             s.home_recent_cleared_ms = clear.then(|| js_sys::Date::now() as u64);
         }
+        SettingUpdate::Hints(v) => s.hints = v,
+        SettingUpdate::HintLearned(id) => {
+            if !s.hints_done.contains(&id) {
+                s.hints_done.push(id);
+            }
+        }
+        SettingUpdate::HintsReset => s.hints_done.clear(),
     }
 }
 
@@ -214,6 +221,13 @@ pub fn install() {
         home_recent_builds: query_value("recent").and_then(|n| n.parse().ok()).unwrap_or(5),
         home_recent_cleared_ms: None,
         card_play: launcher_shared::CardPlay::from_config_str(&query_value("cards").unwrap_or_default()),
+        // `?hints=off` starts with hints off, `?hints=learned` with both learned already.
+        hints: query_value("hints").as_deref() != Some("off"),
+        hints_done: if query_value("hints").as_deref() == Some("learned") {
+            vec!["build_content".into(), "content_sources".into()]
+        } else {
+            Vec::new()
+        },
         revision: 0,
     }));
     let info = AppInfo {
@@ -602,6 +616,18 @@ mod tests {
         assert!(s.compact_sidebar);
         assert_eq!(s.click_sound, ClickSound::TypewriterSoftClick);
         assert!(!s.auto_update);
+    }
+
+    #[test]
+    fn the_mock_learns_hints_once_and_forgets_them_on_reset() {
+        let mut s = SettingsSnapshot { hints: true, ..Default::default() };
+        apply_update(&mut s, &SettingUpdate::HintLearned("build_content".into()));
+        apply_update(&mut s, &SettingUpdate::HintLearned("build_content".into()));
+        assert_eq!(s.hints_done, ["build_content"]);
+        apply_update(&mut s, &SettingUpdate::Hints(false));
+        assert!(!s.hints);
+        apply_update(&mut s, &SettingUpdate::HintsReset);
+        assert!(s.hints_done.is_empty());
     }
 
     #[test]

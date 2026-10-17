@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use launcher_shared::recent::{RECENT_DEFAULT, RECENT_MOST};
 use launcher_shared::{
-    AppError, AppResult, CardPlay, ClickSound, ErrorCode, GameStartAction, SUPPORTED_LANGS, SettingUpdate,
-    SettingsSnapshot, WindowSize,
+    AppError, AppResult, CardPlay, ClickSound, ErrorCode, GameStartAction, HINTS_MOST, SUPPORTED_LANGS,
+    SettingUpdate, SettingsSnapshot, WindowSize, hint_id_ok,
 };
 use serde_json::json;
 
@@ -59,8 +59,20 @@ pub fn entry(update: SettingUpdate) -> AppResult<(&'static str, Option<serde_jso
         SettingUpdate::HomeRecentBuilds(count) => (HOME_RECENT_KEY, Some(json!(count))),
         SettingUpdate::HomeRecentClear(clear) => (HOME_RECENT_CLEARED_KEY, clear.then(|| json!(now_ms()))),
         SettingUpdate::CardPlay(play) => (CARD_PLAY_KEY, Some(json!(play.as_config_str()))),
+        SettingUpdate::Hints(v) => (HINTS_KEY, Some(json!(yes_no(v)))),
+        SettingUpdate::HintsReset => (HINTS_DONE_KEY, None),
+        // It adds to what is stored: `SettingsService::apply` reads the list.
+        SettingUpdate::HintLearned(_) => {
+            return Err(invalid("a learned hint is added by the settings service"));
+        }
     };
     Ok(entry)
+}
+
+/// The learned hints `stored` lists (what cannot be read counts as not learned).
+fn learned_hints(stored: Option<serde_json::Value>) -> Vec<String> {
+    let Some(serde_json::Value::Array(items)) = stored else { return Vec::new() };
+    items.into_iter().filter_map(|v| v.as_str().map(str::to_string)).filter(|id| hint_id_ok(id)).collect()
 }
 
 /// What the launcher does once the game it started runs: the user's choice, else what the old
@@ -74,6 +86,10 @@ pub fn game_start_action(config: &ConfigStore) -> GameStartAction {
 }
 
 pub const MINECRAFT_DIR_KEY: &str = "minecraft_game_dir";
+/// One-time hints on (`yes`) or off.
+pub const HINTS_KEY: &str = "hints";
+/// The ids of the hints the player has followed or closed.
+pub const HINTS_DONE_KEY: &str = "hints_done";
 pub const WINDOW_SIZE_KEY: &str = "window_size";
 /// How many builds Home's «Продовжити гру» shows.
 pub const HOME_RECENT_KEY: &str = "home_recent_builds";
@@ -158,12 +174,32 @@ impl SettingsService {
                 .map_or(RECENT_DEFAULT, |n| n.min(u64::from(RECENT_MOST)) as u8),
             home_recent_cleared_ms: c.get_u64(HOME_RECENT_CLEARED_KEY),
             card_play: CardPlay::from_config_str(&c.get_str(CARD_PLAY_KEY).unwrap_or_default()),
+            hints: c.get_bool(HINTS_KEY, true),
+            hints_done: learned_hints(c.get(HINTS_DONE_KEY)),
         }
     }
 
     pub fn apply(&self, update: SettingUpdate) -> AppResult<SettingsSnapshot> {
-        let (key, value) = entry(update)?;
         let mut revision = self.revision.lock().unwrap_or_else(|e| e.into_inner());
+        let (key, value) = match update {
+            // Added to the stored list, read here: a window that learns before it has its first
+            // snapshot cannot wipe what was learned earlier.
+            SettingUpdate::HintLearned(id) => {
+                if !hint_id_ok(&id) {
+                    return Err(AppError::new(ErrorCode::InvalidInput, "bad hint id").with_param("id", id));
+                }
+                let mut learned = learned_hints(self.config.get(HINTS_DONE_KEY));
+                if learned.contains(&id) {
+                    (HINTS_DONE_KEY, Some(json!(learned)))
+                } else if learned.len() >= HINTS_MOST {
+                    return Err(AppError::new(ErrorCode::InvalidInput, "too many learned hints"));
+                } else {
+                    learned.push(id);
+                    (HINTS_DONE_KEY, Some(json!(learned)))
+                }
+            }
+            other => entry(other)?,
+        };
         match value {
             Some(value) => self.config.set(key, value),
             None => self.config.delete(key),
@@ -257,6 +293,65 @@ mod tests {
         assert_eq!(svc.apply(SettingUpdate::HomeRecentBuilds(11)).unwrap_err().code, ErrorCode::InvalidInput);
         svc.config.set("home_recent_builds", json!(400)).unwrap();
         assert_eq!(svc.snapshot().home_recent_builds, 10, "a hand-edited count is held to the most");
+    }
+
+    #[test]
+    fn hints_are_on_and_none_learned_by_default() {
+        let home = tempfile::tempdir().unwrap();
+        let s = service(home.path()).snapshot();
+        assert!(s.hints);
+        assert!(s.hints_done.is_empty());
+    }
+
+    #[test]
+    fn a_learned_hint_is_added_once_and_keeps_the_others() {
+        let home = tempfile::tempdir().unwrap();
+        let svc = service(home.path());
+        svc.apply(SettingUpdate::HintLearned("build_content".into())).unwrap();
+        let s = svc.apply(SettingUpdate::HintLearned("content_sources".into())).unwrap();
+        assert_eq!(s.hints_done, ["build_content", "content_sources"]);
+        let s = svc.apply(SettingUpdate::HintLearned("build_content".into())).unwrap();
+        assert_eq!(s.hints_done, ["build_content", "content_sources"], "no duplicate");
+        let s = svc.apply(SettingUpdate::HintsReset).unwrap();
+        assert!(s.hints_done.is_empty());
+        assert_eq!(svc.config.get("hints_done"), None, "nothing learned, no key");
+        let s = svc.apply(SettingUpdate::Hints(false)).unwrap();
+        assert!(!s.hints);
+        assert_eq!(svc.config.get_str("hints").as_deref(), Some("no"));
+    }
+
+    #[test]
+    fn bad_hint_ids_and_a_full_list_are_refused() {
+        let home = tempfile::tempdir().unwrap();
+        let svc = service(home.path());
+        for bad in [String::new(), "Build".into(), "a-b".into(), "x".repeat(65)] {
+            assert_eq!(
+                svc.apply(SettingUpdate::HintLearned(bad.clone())).unwrap_err().code,
+                ErrorCode::InvalidInput,
+                "{bad:?}"
+            );
+        }
+        for n in 0..32 {
+            svc.apply(SettingUpdate::HintLearned(format!("h{n}"))).unwrap();
+        }
+        assert_eq!(
+            svc.apply(SettingUpdate::HintLearned("h32".into())).unwrap_err().code,
+            ErrorCode::InvalidInput,
+            "a 33rd id"
+        );
+        assert_eq!(svc.snapshot().hints_done.len(), 32);
+    }
+
+    #[test]
+    fn a_hand_edited_hint_list_keeps_only_what_it_can_read() {
+        let home = tempfile::tempdir().unwrap();
+        let svc = service(home.path());
+        svc.config.set("hints_done", json!(["build_content", 7, "Bad Id"])).unwrap();
+        assert_eq!(svc.snapshot().hints_done, ["build_content"]);
+        svc.config.set("hints_done", json!("build_content")).unwrap();
+        assert!(svc.snapshot().hints_done.is_empty(), "not a list: nothing learned");
+        let s = svc.apply(SettingUpdate::HintLearned("content_sources".into())).unwrap();
+        assert_eq!(s.hints_done, ["content_sources"]);
     }
 
     #[test]

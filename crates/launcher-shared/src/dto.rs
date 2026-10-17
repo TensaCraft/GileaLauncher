@@ -277,10 +277,29 @@ pub struct SettingsSnapshot {
     /// Where Home's build cards have their Play button.
     #[serde(default)]
     pub card_play: CardPlay,
+    /// One-time hints show (the first profile's shows anyway).
+    #[serde(default = "hints_default")]
+    pub hints: bool,
+    /// The hints the player has followed or closed: they show no more.
+    #[serde(default)]
+    pub hints_done: Vec<String>,
     /// How many changes were saved before this snapshot (this run): a later answer has a higher
     /// one.
     #[serde(default)]
     pub revision: u64,
+}
+
+fn hints_default() -> bool {
+    true
+}
+
+/// How many learned hints the launcher keeps.
+pub const HINTS_MOST: usize = 32;
+
+/// A hint's id as the settings keep it: 1–64 characters of `a-z`, `0-9` and `_`.
+pub fn hint_id_ok(id: &str) -> bool {
+    (1..=64).contains(&id.len())
+        && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 impl SettingsSnapshot {
@@ -310,6 +329,12 @@ pub enum SettingUpdate {
     /// `true` clears «Продовжити гру» now; `false` gives its history back.
     HomeRecentClear(bool),
     CardPlay(CardPlay),
+    /// One-time hints on or off.
+    Hints(bool),
+    /// The player followed or closed this hint: added to the learned ones (the core keeps the list).
+    HintLearned(String),
+    /// Every hint shows again.
+    HintsReset,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

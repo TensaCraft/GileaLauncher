@@ -650,3 +650,33 @@ fn a_build_card_s_play_button_is_one_of_three_places() {
     .unwrap();
     assert_eq!(old.card_play, CardPlay::Center, "a snapshot without it plays from the middle");
 }
+
+#[test]
+fn hints_are_on_and_learned_one_at_a_time() {
+    let old: SettingsSnapshot = serde_json::from_value(json!({
+        "lang": "uk_UA", "auto_update": true, "include_beta_updates": false,
+        "ask_profile_on_launch": false, "compact_sidebar": true, "click_sound_enabled": true,
+        "click_sound": "gate_latch_click", "minecraft_dir": "M", "minecraft_dir_is_default": true
+    }))
+    .unwrap();
+    assert!(old.hints, "a snapshot without the switch shows hints");
+    assert!(old.hints_done.is_empty());
+    let learned = SettingUpdate::HintLearned("build_content".into());
+    assert_eq!(
+        serde_json::to_value(&learned).unwrap(),
+        json!({"key": "hint_learned", "value": "build_content"})
+    );
+    assert_eq!(serde_json::to_value(SettingUpdate::HintsReset).unwrap(), json!({"key": "hints_reset"}));
+    assert_eq!(
+        serde_json::to_value(SettingUpdate::Hints(false)).unwrap(),
+        json!({"key": "hints", "value": false})
+    );
+    let back: SettingUpdate = serde_json::from_value(json!({"key": "hints_reset"})).unwrap();
+    assert_eq!(back, SettingUpdate::HintsReset);
+    assert!(launcher_shared::hint_id_ok("content_sources"));
+    assert!(
+        !launcher_shared::hint_id_ok("")
+            && !launcher_shared::hint_id_ok("A")
+            && !launcher_shared::hint_id_ok(&"a".repeat(65))
+    );
+}
