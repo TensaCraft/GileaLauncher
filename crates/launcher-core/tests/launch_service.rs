@@ -951,3 +951,37 @@ async fn a_launch_waits_for_its_build_s_sync() {
     assert!(started.is_ok(), "the launch waits for the pass: {started:?}");
     w.wait_for(finished);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_launch_at_start_waits_out_the_launcher_s_own_tidying() {
+    // A shortcut's launch comes right at start, while the start moves files ("layout") and runs
+    // the daily clean ("storage"), each holding a build a moment.
+    for kind in ["storage", "layout"] {
+        let w = world().await;
+        w.auth.create_offline("Steve").unwrap();
+        let key = w.build("Aero", &["-Dfake.after=300"]).await;
+        let game = game_dir(&w.versions.get(&key).unwrap(), &w.mc);
+        let lease = w.deps.instances.try_acquire(&game, kind).unwrap();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            drop(lease);
+        });
+        let started = w.launcher.launch(request(&key)).await;
+        releaser.join().unwrap();
+        assert!(started.is_ok(), "{kind}: the launch waits for it: {started:?}");
+        w.wait_for(finished);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_launch_still_refuses_a_build_an_install_holds() {
+    let w = world().await;
+    w.auth.create_offline("Steve").unwrap();
+    let key = w.build("Aero", &[]).await;
+    let game = game_dir(&w.versions.get(&key).unwrap(), &w.mc);
+    let _install = w.deps.instances.try_acquire(&game, "install").unwrap();
+    let asked = Instant::now();
+    let refused = w.launcher.launch(request(&key)).await.unwrap_err();
+    assert_eq!(refused.code, launcher_shared::ErrorCode::InstanceBusy);
+    assert!(asked.elapsed() < Duration::from_secs(2), "refused at once, not after a wait");
+}

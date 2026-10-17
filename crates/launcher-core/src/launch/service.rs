@@ -36,8 +36,14 @@ use crate::storage::config::ConfigStore;
 use crate::storage::transaction::recover_interrupted;
 use crate::storage::versions::{Build, VersionStore};
 
-/// How long a launch waits for a sync pass over its build to end.
-const SYNC_WAIT: Duration = Duration::from_secs(60);
+/// How long a launch waits for the launcher's own hold on its build to end.
+const HOLD_WAIT: Duration = Duration::from_secs(60);
+
+/// Holds a launch waits out instead of refusing: the launcher's own, which end by themselves — a
+/// sync pass, and the start's file move and daily clean (a shortcut's launch comes right then).
+fn waits_out(kind: &str) -> bool {
+    matches!(kind, "sync" | "layout" | "storage")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LaunchTimings {
@@ -273,14 +279,14 @@ impl LaunchService {
                 .with_param("version", &build.name)
                 .with_param("seconds", seconds.to_string()));
         }
-        // A sync pass holds the build while it reads and writes its files: the launch waits for it.
+        // The launcher's own hold on the build (a sync pass, the start's tidying): the launch waits.
         let waited = Instant::now();
         let lease = loop {
             match d.instances.try_acquire(&folder, "launch") {
                 Ok(lease) => break lease,
                 Err(_)
-                    if d.instances.active_kind(&folder).as_deref() == Some("sync")
-                        && waited.elapsed() < SYNC_WAIT =>
+                    if d.instances.active_kind(&folder).as_deref().is_some_and(waits_out)
+                        && waited.elapsed() < HOLD_WAIT =>
                 {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                 }
