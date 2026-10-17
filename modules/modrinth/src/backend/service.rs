@@ -192,10 +192,29 @@ impl ModrinthService {
         })
     }
 
+    /// The loader (mods only) and game version a search is for: the build's, or with no build
+    /// its `target`'s.
+    fn search_for(&self, args: &SearchArgs) -> AppResult<(Option<&'static str>, Option<String>)> {
+        if !args.key.trim().is_empty() {
+            let target = self.target(&args.key, args.kind)?;
+            return Ok((target.loader, target.game_version));
+        }
+        let target = args
+            .target
+            .as_ref()
+            .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "a search needs a build or a target"))?;
+        if args.kind != ContentKind::ResourcePacks && !target.runs_mods() {
+            return Err(AppError::new(ErrorCode::Unsupported, "vanilla Minecraft runs no mods")
+                .with_param("version", target.game_version.clone()));
+        }
+        let loader = (args.kind == ContentKind::Mods).then(|| target.mods_loader()).flatten();
+        Ok((loader, Some(target.game_version.clone()).filter(|v| !v.trim().is_empty())))
+    }
+
     /// A page of this build's kind of content on Modrinth.
     pub async fn search(&self, args: &SearchArgs) -> AppResult<SearchPage> {
-        let target = self.target(&args.key, args.kind)?;
-        let facets = search_facets(args.kind, target.loader, target.game_version.as_deref());
+        let (loader, game_version) = self.search_for(args)?;
+        let facets = search_facets(args.kind, loader, game_version.as_deref());
         let raw = self.api.search(args.query.trim(), &facets, args.offset, SEARCH_LIMIT).await?;
         Ok(search_page(&raw, args.offset, SEARCH_LIMIT))
     }

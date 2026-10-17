@@ -4,8 +4,10 @@ use std::fs;
 
 use launcher_core::providers::ContentProvider;
 use launcher_core::storage::journal::JOURNAL_DIR;
-use launcher_shared::provider::{InstallArgs, NewerVersion, OverviewArgs, SearchArgs, UpdatesStatus};
-use launcher_shared::{ContentKind, ErrorCode};
+use launcher_shared::provider::{
+    InstallArgs, NewerVersion, OverviewArgs, SearchArgs, SearchTarget, UpdatesStatus,
+};
+use launcher_shared::{ContentKind, ErrorCode, LoaderKind};
 use module_curseforge::backend::provenance::PROVENANCE;
 use module_curseforge::backend::service::JOURNAL;
 use serde_json::{Value, json};
@@ -194,7 +196,13 @@ async fn the_provider_searches_plans_installs_and_names_its_files() {
     create_and_flywheel(&w.server);
     let provider: &dyn ContentProvider = w.service.as_ref();
     let page = provider
-        .search(SearchArgs { key: key.clone(), kind: ContentKind::Mods, query: "cre".into(), offset: 0 })
+        .search(SearchArgs {
+            key: key.clone(),
+            kind: ContentKind::Mods,
+            query: "cre".into(),
+            offset: 0,
+            target: None,
+        })
         .await
         .unwrap();
     assert_eq!(page.hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["Create"]);
@@ -459,4 +467,25 @@ async fn a_mod_installed_alone_leaves_its_dependencies_out() {
     assert!(plan.can_install() && !plan.requires_confirmation());
     install(&w, alone).await.unwrap();
     assert_eq!(files(&dir, "mods"), ["create.jar"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn searching_without_a_build_asks_for_its_target() {
+    let w = world().await;
+    create_and_flywheel(&w.server);
+    let provider: &dyn ContentProvider = w.service.as_ref();
+    let target = SearchTarget { game_version: "1.21.1".into(), loader: LoaderKind::Fabric };
+    let args = SearchArgs {
+        key: String::new(),
+        kind: ContentKind::Mods,
+        query: "cre".into(),
+        offset: 0,
+        target: Some(target),
+    };
+    provider.search(args.clone()).await.unwrap();
+    let search = w.server.seen().into_iter().find(|s| s.path == "/v1/mods/search").unwrap();
+    assert!(search.query.contains(&("modLoaderType".into(), "4".into())), "{:?}", search.query);
+    assert!(search.query.contains(&("gameVersion".into(), "1.21.1".into())), "{:?}", search.query);
+    let nothing = SearchArgs { target: None, ..args };
+    assert_eq!(provider.search(nothing).await.unwrap_err().code, ErrorCode::InvalidInput);
 }

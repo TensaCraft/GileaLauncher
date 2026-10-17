@@ -8,9 +8,9 @@ use support::*;
 
 use launcher_core::providers::ContentProvider;
 use launcher_core::storage::journal::JOURNAL_DIR;
-use launcher_shared::provider::{Action, InstallAnswer, InstallArgs, Pick, SearchArgs};
+use launcher_shared::provider::{Action, InstallAnswer, InstallArgs, Pick, SearchArgs, SearchTarget};
 use launcher_shared::provider::{PACKS_LIMIT, PacksArgs};
-use launcher_shared::{ContentKind, ErrorCode};
+use launcher_shared::{ContentKind, ErrorCode, LoaderKind};
 use module_modrinth::backend::resolver::FABRIC_API;
 use module_modrinth::backend::service::JOURNAL;
 use std::sync::Arc;
@@ -82,7 +82,13 @@ async fn searching_asks_for_this_builds_content() {
     let (key, _) = build(&w, "Aero", "Fabric", FABRIC);
     w.server.data.lock().unwrap().search = Some(json!({"total_hits": 40, "hits": [
         {"project_id": "AANobbMI", "slug": "sodium", "title": "Sodium", "author": "jellysquid3", "downloads": 100}]}));
-    let args = SearchArgs { key: key.clone(), kind: ContentKind::Mods, query: "  sod ".into(), offset: 16 };
+    let args = SearchArgs {
+        key: key.clone(),
+        kind: ContentKind::Mods,
+        query: "  sod ".into(),
+        offset: 16,
+        target: None,
+    };
     let page = w.service.search(&args).await.unwrap();
     assert_eq!((page.hits.len(), page.total, page.offset, page.limit), (1, 40, 16, 16));
     let seen = pairs(&w.server.seen()[0].0);
@@ -105,11 +111,16 @@ async fn vanilla_builds_search_only_resource_packs() {
     let (key, _) = build(&w, "Vanilla", "Minecraft", "1.21.1");
     w.server.data.lock().unwrap().search = Some(json!({"hits": [], "total_hits": 0}));
     for kind in [ContentKind::Mods, ContentKind::ShaderPacks] {
-        let args = SearchArgs { key: key.clone(), kind, query: String::new(), offset: 0 };
+        let args = SearchArgs { key: key.clone(), kind, query: String::new(), offset: 0, target: None };
         assert_eq!(w.service.search(&args).await.unwrap_err().code, ErrorCode::Unsupported, "{kind:?}");
     }
-    let packs =
-        SearchArgs { key: key.clone(), kind: ContentKind::ResourcePacks, query: String::new(), offset: 0 };
+    let packs = SearchArgs {
+        key: key.clone(),
+        kind: ContentKind::ResourcePacks,
+        query: String::new(),
+        offset: 0,
+        target: None,
+    };
     assert!(w.service.search(&packs).await.is_ok());
     let missing = SearchArgs { key: "ghost".into(), ..packs };
     assert_eq!(w.service.search(&missing).await.unwrap_err().code, ErrorCode::VersionNotFound);
@@ -565,7 +576,7 @@ async fn the_service_answers_as_a_content_provider() {
         "title": "Sodium", "project_type": "mod"}], "total_hits": 1}));
     let (key, _) = build(&w, "Aero", "Fabric", "fabric-loader-0.16.9-1.21.1");
     let provider: Arc<dyn ContentProvider> = w.service.clone();
-    let args = SearchArgs { key, kind: ContentKind::Mods, query: String::new(), offset: 0 };
+    let args = SearchArgs { key, kind: ContentKind::Mods, query: String::new(), offset: 0, target: None };
     let page = provider.search(args).await.unwrap();
     assert_eq!(page.hits[0].url.as_deref(), Some("https://modrinth.com/mod/sodium"));
     let packs = provider.modpacks(PacksArgs { query: String::new(), offset: 0 }).await.unwrap();
@@ -599,4 +610,28 @@ async fn a_mod_installed_alone_leaves_every_dependency_out() {
     assert!(plan.can_install() && !plan.requires_confirmation());
     install(&w, alone).await.unwrap();
     assert_eq!(mods(&dir), ["main-1.jar"], "the mod alone, no Fabric API either");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn searching_without_a_build_asks_for_its_target() {
+    let w = world().await;
+    w.server.data.lock().unwrap().search = Some(json!({"total_hits": 0, "hits": []}));
+    let target = |loader| Some(SearchTarget { game_version: "1.21.1".into(), loader });
+    let args = SearchArgs {
+        key: String::new(),
+        kind: ContentKind::Mods,
+        query: String::new(),
+        offset: 0,
+        target: target(LoaderKind::Fabric),
+    };
+    w.service.search(&args).await.unwrap();
+    let seen = pairs(&w.server.seen()[0].0);
+    let facets = seen.iter().find(|(name, _)| name == "facets").map(|(_, v)| v.as_str());
+    assert_eq!(facets, Some(r#"[["project_type:mod"],["categories:fabric"],["versions:1.21.1"]]"#));
+    let vanilla = SearchArgs { target: target(LoaderKind::Minecraft), ..args.clone() };
+    assert_eq!(w.service.search(&vanilla).await.unwrap_err().code, ErrorCode::Unsupported);
+    let packs = SearchArgs { kind: ContentKind::ResourcePacks, ..vanilla };
+    assert!(w.service.search(&packs).await.is_ok());
+    let nothing = SearchArgs { target: None, ..args };
+    assert_eq!(w.service.search(&nothing).await.unwrap_err().code, ErrorCode::InvalidInput);
 }

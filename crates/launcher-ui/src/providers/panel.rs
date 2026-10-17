@@ -62,6 +62,7 @@ pub fn ProviderPanel(
             kind,
             query: query.get_untracked().trim().to_string(),
             offset,
+            target: None,
         };
         // Taken now: the tab may be gone when the answer comes.
         let Some(provider) = info.try_get_value() else { return };

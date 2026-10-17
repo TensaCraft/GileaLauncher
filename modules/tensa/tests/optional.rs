@@ -85,7 +85,7 @@ fn whitelist(w: &World, items: Vec<Value>) {
 }
 
 fn search(key: &str, query: &str) -> SearchArgs {
-    SearchArgs { key: key.into(), kind: ContentKind::Mods, query: query.into(), offset: 0 }
+    SearchArgs { key: key.into(), kind: ContentKind::Mods, query: query.into(), offset: 0, target: None }
 }
 
 fn mods(w: &World, build: &Build) -> Vec<String> {

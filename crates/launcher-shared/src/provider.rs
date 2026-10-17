@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AppError, ContentKind, ErrorCode};
+use crate::{AppError, ContentKind, ErrorCode, LoaderKind};
 
 /// What a provider offers; everything is optional — the app asks for nothing else.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,13 +81,35 @@ pub fn provider_error_key(error: &AppError) -> Option<&'static str> {
 /// Results per page (the original's mods manager).
 pub const SEARCH_LIMIT: u32 = 16;
 
-/// `search`: one page of this build's kind of content.
+/// `search`: one page of this build's kind of content (or, with no build yet, of `target`'s).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchArgs {
     pub key: String,
     pub kind: ContentKind,
     pub query: String,
     pub offset: u32,
+    /// What a build not made yet will run (the build wizard): searched for when `key` is empty.
+    #[serde(default)]
+    pub target: Option<SearchTarget>,
+}
+
+/// The Minecraft version and loader a search is for, when there is no build yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchTarget {
+    pub game_version: String,
+    pub loader: LoaderKind,
+}
+
+impl SearchTarget {
+    /// It runs mods (and shader packs): a mod loader.
+    pub fn runs_mods(&self) -> bool {
+        crate::mods_supported(Some(self.loader.display_name()))
+    }
+
+    /// The providers' name of its loader, which mods are filtered by.
+    pub fn mods_loader(&self) -> Option<&'static str> {
+        loader_name(None, Some(self.loader.display_name()))
+    }
 }
 
 /// `plan` / `install`: a project's install, with what the user saw and approved.
@@ -889,6 +911,17 @@ mod tests {
             content_clients: Vec::new(),
             content_label: None,
         }
+    }
+
+    #[test]
+    fn a_search_target_tells_its_loader() {
+        let fabric = SearchTarget { game_version: "1.21.1".into(), loader: LoaderKind::Fabric };
+        assert_eq!((fabric.mods_loader(), fabric.runs_mods()), (Some("fabric"), true));
+        let vanilla = SearchTarget { game_version: "1.21.1".into(), loader: LoaderKind::Minecraft };
+        assert_eq!((vanilla.mods_loader(), vanilla.runs_mods()), (None, false));
+        let args: SearchArgs =
+            serde_json::from_str(r#"{"key":"k","kind":"mods","query":"","offset":0}"#).unwrap();
+        assert_eq!(args.target, None);
     }
 
     #[test]
