@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 
 use super::icon::Icon;
+use super::nudge::NudgeMark;
 use crate::sound;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -61,6 +62,9 @@ pub fn Button(
     #[prop(optional, into)] title: MaybeProp<String>,
     #[prop(optional, into)] on_click: Option<Callback<()>>,
     #[prop(optional, into)] class: String,
+    /// A hint pointing at the button (`NudgeLayer`).
+    #[prop(optional, into)]
+    nudge: MaybeProp<NudgeMark>,
     #[prop(optional)] children: Option<Children>,
 ) -> impl IntoView {
     let icon_only = children.is_none() && icon.is_some();
@@ -83,6 +87,10 @@ pub fn Button(
             data-tip=move || title.get()
             data-tip-side="top"
             aria-label=move || title.get()
+            data-nudge=move || nudge.get().map(|m| m.id)
+            data-nudge-text=move || nudge.get().map(|m| m.text)
+            data-nudge-side=move || nudge.get().map(|m| m.side.attr())
+            data-nudge-close=move || nudge.get().and_then(|m| m.close)
             on:click=move |_| {
                 if busy() || off() {
                     return;

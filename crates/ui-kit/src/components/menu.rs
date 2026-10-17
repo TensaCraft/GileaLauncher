@@ -84,6 +84,16 @@ pub struct ContextMenu {
 }
 
 impl ContextMenu {
+    /// A menu is open (tracked).
+    pub fn is_open(&self) -> bool {
+        self.pos.with(Option::is_some)
+    }
+
+    /// A menu is open, read outside the reactive graph (the hint layer's frames ask it).
+    pub fn is_open_untracked(&self) -> bool {
+        self.pos.with_untracked(Option::is_some)
+    }
+
     pub fn open_at(&self, x: i32, y: i32, entries: Vec<MenuEntry>) {
         self.handler.set_value(None);
         let (vw, vh) = web_sys::window()

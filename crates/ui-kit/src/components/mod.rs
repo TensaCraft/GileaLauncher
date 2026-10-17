@@ -11,6 +11,7 @@ pub mod icon;
 pub mod layout;
 pub mod loader_mark;
 pub mod menu;
+pub mod nudge;
 pub mod select;
 pub mod slider;
 pub mod tag;
@@ -29,6 +30,7 @@ pub use float::{MenuPlace, Rect, TipLayer, TipSide, menu_place, tip_place, viewp
 pub use icon::Icon;
 pub use layout::{ChipDef, ChipTabs, ListRow, NavEntry, Section, SettingRow, SettingsNav, TabDef, Tabs};
 pub use menu::{ContextMenu, ContextMenuHost, MenuEntry, provide_context_menu, use_context_menu};
+pub use nudge::{NudgeLayer, NudgeMark, NudgePlace, NudgeSide, nudge_place};
 pub use select::{Select, SelectOption};
 pub use slider::Slider;
 pub use tag::{Tag, TagTone};

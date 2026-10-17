@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 
+use super::nudge::NudgeMark;
 use crate::sound;
 
 #[component]
@@ -64,11 +65,13 @@ pub struct SegOption {
     pub icon: Option<String>,
     /// A count beside the label (how many there are).
     pub badge: Option<String>,
+    /// A hint pointing at this choice (`NudgeLayer`).
+    pub nudge: Option<NudgeMark>,
 }
 
 impl SegOption {
     pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
-        Self { value: value.into(), label: label.into(), icon: None, badge: None }
+        Self { value: value.into(), label: label.into(), icon: None, badge: None, nudge: None }
     }
 
     pub fn with_icon(mut self, icon: impl Into<String>) -> Self {
@@ -79,6 +82,12 @@ impl SegOption {
     /// Shows `count` beside the label (nothing when it is unknown or zero).
     pub fn with_count(mut self, count: Option<usize>) -> Self {
         self.badge = count.filter(|n| *n > 0).map(|n| n.to_string());
+        self
+    }
+
+    /// Points `mark`, when there is one, at this choice.
+    pub fn with_nudge(mut self, mark: Option<NudgeMark>) -> Self {
+        self.nudge = mark;
         self
     }
 }
@@ -116,6 +125,7 @@ pub fn Segmented(
                     .into_iter()
                     .map(|opt| {
                         let v = opt.value.clone();
+                        let mark = opt.nudge.clone();
                         let is_on = {
                             let v = v.clone();
                             move || value.get() == v
@@ -126,6 +136,10 @@ pub fn Segmented(
                                 role="radio"
                                 class="seg__btn"
                                 class:is-on=is_on
+                                data-nudge=mark.as_ref().map(|m| m.id.clone())
+                                data-nudge-text=mark.as_ref().map(|m| m.text.clone())
+                                data-nudge-side=mark.as_ref().map(|m| m.side.attr())
+                                data-nudge-close=mark.and_then(|m| m.close)
                                 on:click=move |_| {
                                     if value.get_untracked() != v {
                                         sound::play_click();

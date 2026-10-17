@@ -8,7 +8,10 @@ use launcher_shared::CardPlay;
 use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 
+use wasm_bindgen::JsCast;
+
 use super::icon::Icon;
+use super::nudge::NudgeMark;
 use super::tag::TagTone;
 use crate::sound;
 
@@ -66,6 +69,12 @@ pub fn BuildCard(
     /// Modules' marks, at the top right.
     #[prop(optional)]
     badges: Option<AnyView>,
+    /// A click on the card (not on its button) opens the build.
+    #[prop(optional, into)]
+    on_open: Option<Callback<()>>,
+    /// A hint pointing at the card (`NudgeLayer`).
+    #[prop(optional, into)]
+    nudge: MaybeProp<NudgeMark>,
 ) -> impl IntoView {
     let style = use_context::<CardPlayStyle>().map_or_else(|| Signal::stored(CardPlay::Center), |s| s.0);
     let src = card_image(image.as_deref());
@@ -114,6 +123,22 @@ pub fn BuildCard(
             class:card--center=move || style.get() == CardPlay::Center
             class:card--bar=move || style.get() == CardPlay::Bar
             class:card--corner=move || style.get() == CardPlay::Corner
+            class:is-link=on_open.is_some()
+            data-nudge=move || nudge.get().map(|m| m.id)
+            data-nudge-text=move || nudge.get().map(|m| m.text)
+            data-nudge-side=move || nudge.get().map(|m| m.side.attr())
+            data-nudge-close=move || nudge.get().and_then(|m| m.close)
+            on:click=move |ev: MouseEvent| {
+                let on_button = ev
+                    .target()
+                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                    .and_then(|e| e.closest(".card__play").ok().flatten())
+                    .is_some();
+                if let Some(open) = on_open.filter(|_| !on_button) {
+                    sound::play_click();
+                    open.run(());
+                }
+            }
             on:contextmenu=move |ev: MouseEvent| {
                 if let Some(cb) = on_menu {
                     ev.prevent_default();
