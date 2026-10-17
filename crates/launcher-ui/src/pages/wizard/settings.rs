@@ -5,9 +5,10 @@ use launcher_shared::MemoryInfo;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{Button, Field, Icon, Section, Select, SelectOption, TextArea, Variant, ipc};
+use ui_kit::{Button, Field, Icon, Section, Select, SelectOption, Variant, ipc};
 
 use super::Wizard;
+use crate::builds::description::DescriptionField;
 use crate::builds::gpu::GpuChoice;
 use crate::builds::ram::RamSetting;
 use crate::store::use_store;
@@ -119,9 +120,7 @@ pub fn Settings(wizard: Wizard) -> impl IntoView {
                         })}
                     </div>
                 </Field>
-                <Field label=t("build_description_label")>
-                    <TextArea value=description rows=2 placeholder=t("build_description_hint") />
-                </Field>
+                <DescriptionField value=description />
             </Section>
         </div>
     }

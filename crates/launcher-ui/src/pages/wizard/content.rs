@@ -138,7 +138,6 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
     let show_plan = RwSignal::new(false);
     let count = move || wizard.state.with(|s| s.picks.len());
     let toggle = move |pick: PlannedPick| {
-        wizard.dropped.set(false);
         wizard.state.update(|s| {
             if s.has_pick(&pick.provider, &pick.project_id) {
                 s.remove_pick(&pick.provider, &pick.project_id);
@@ -218,8 +217,8 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
 
     view! {
         <div class="build-wizard__content">
-            <Show when=move || wizard.dropped.get()>
-                <div class="wizard__status is-error"><Icon name="info" /><span>{move || i18n.t("wizard_picks_dropped")}</span></div>
+            <Show when=move || wizard.state.with(|s| s.picks_dropped)>
+                <div class="wizard__status is-info"><Icon name="info" /><span>{move || i18n.t("wizard_picks_dropped")}</span></div>
             </Show>
             <div class="build-wizard__toolbar">
                 <Tabs tabs=tabs active=tab />

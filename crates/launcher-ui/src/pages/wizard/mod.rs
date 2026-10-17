@@ -14,6 +14,7 @@ use serde_json::json;
 use ui_kit::i18n::{I18nCtx, use_i18n};
 use ui_kit::{Button, Icon, Variant, ipc, use_toasts};
 
+use crate::builds::description::DESCRIPTION_TOO_LONG;
 use crate::builds::{check_new_name, default_build_name};
 use crate::shell::PageHeader;
 use crate::store::{AppStore, use_store};
@@ -45,8 +46,6 @@ pub struct Wizard {
     pub catalogs: RwSignal<Catalogs>,
     /// Minecraft versions: `None` while loading, an error text when they could not be read.
     pub versions: RwSignal<Option<Result<Vec<CatalogVersion>, String>>>,
-    /// The picks were dropped by a change of version or type.
-    pub dropped: RwSignal<bool>,
     store: AppStore,
     i18n: I18nCtx,
 }
@@ -61,7 +60,6 @@ impl Wizard {
             auto_name: RwSignal::new(String::new()),
             catalogs: RwSignal::new(Catalogs::new()),
             versions: RwSignal::new(None),
-            dropped: RwSignal::new(false),
         }
     }
 
@@ -70,11 +68,7 @@ impl Wizard {
     pub fn retarget(&self, mc: &str, loader: LoaderKind) {
         let store = self.store;
         let catalogs = self.catalogs.get_untracked();
-        let mut dropped = false;
-        self.state.update(|s| dropped = s.set_target(mc, loader, &catalogs));
-        if dropped {
-            self.dropped.set(true);
-        }
+        self.state.update(|s| s.set_target(mc, loader, &catalogs));
         let now = self.state.with_untracked(|s| (s.loader, s.mc.clone()));
         let title = format!("{} {}", now.0.display_name(), now.1);
         let fresh = store.builds.with_untracked(|b| default_build_name(&title, b));
@@ -119,18 +113,30 @@ impl Wizard {
     /// Every loader's catalog; one that cannot be read is unavailable, the others work.
     pub fn load_loaders(&self) {
         for loader in LOADERS {
-            let this = *self;
-            spawn_local(async move {
-                let args = LoaderCatalogArgs { loader, unstable: false };
-                let answer: Result<LoaderCatalog, AppError> = ipc::invoke("catalog_loader", &args).await;
-                this.take_catalog(loader, answer.ok());
-            });
+            self.load_loader(loader);
         }
     }
 
-    /// `loader`'s catalog that came (`None`: it could not be read). A wizard already closed lets
-    /// it go.
-    fn take_catalog(&self, loader: LoaderKind, catalog: Option<LoaderCatalog>) {
+    /// `loader`'s catalog (asked again after a failure: its card shows it on its way meanwhile).
+    pub fn load_loader(&self, loader: LoaderKind) {
+        self.forget_catalog(loader);
+        let this = *self;
+        spawn_local(async move {
+            let args = LoaderCatalogArgs { loader, unstable: false };
+            let answer: Result<LoaderCatalog, AppError> = ipc::invoke("catalog_loader", &args).await;
+            this.take_catalog(loader, answer.map_err(|e| this.i18n.error(&e)));
+        });
+    }
+
+    fn forget_catalog(&self, loader: LoaderKind) {
+        self.catalogs.update(|all| {
+            all.remove(&loader);
+        });
+    }
+
+    /// `loader`'s catalog that came, or why it could not be read. A wizard already closed lets it
+    /// go.
+    fn take_catalog(&self, loader: LoaderKind, catalog: Result<LoaderCatalog, String>) {
         let Some(catalogs) = self.catalogs.try_update(|all| {
             all.insert(loader, catalog);
             all.clone()
@@ -155,6 +161,18 @@ fn waits_for(ready: Result<(), &'static str>, step: WizardStep, busy: bool) -> R
         return Err("wizard_busy");
     }
     Ok(())
+}
+
+/// What the main button says of why it waits: nothing of a reason its field on the step shows.
+fn button_reason(
+    ready: Result<(), &'static str>,
+    name_problem: Option<&'static str>,
+    step: WizardStep,
+) -> Option<&'static str> {
+    let reason = ready.err()?;
+    let under_its_field =
+        Some(reason) == name_problem || (step == WizardStep::Settings && reason == DESCRIPTION_TOO_LONG);
+    (!under_its_field).then_some(reason)
 }
 
 /// The line under the step's title (a plain game's content step names resource packs only).
@@ -261,11 +279,8 @@ pub fn BuildWizardPage() -> impl IntoView {
         WizardStep::Settings => view! { <settings::Settings wizard=wizard /> }.into_any(),
         WizardStep::Summary => view! { <summary::Summary wizard=wizard /> }.into_any(),
     };
-    // Why «Далі» waits (the name's own problem shows under its field).
-    let why = move || match ready.get() {
-        Err(reason) if Some(reason) != name_problem.get() => Some(i18n.t(reason)),
-        _ => None,
-    };
+    // Why «Далі» waits.
+    let why = move || button_reason(ready.get(), name_problem.get(), step.get()).map(|reason| i18n.t(reason));
 
     view! {
         <PageHeader title_key="wizard_title" back="/builds" />
@@ -322,27 +337,55 @@ pub fn BuildWizardPage() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
+    use launcher_shared::{LoaderBuild, LoaderOption};
     use ui_kit::i18n::{Dictionary, I18n, provide_i18n};
     use ui_kit::provide_toasts;
 
+    use super::state::{LoaderState, loader_state};
     use super::*;
     use crate::store::provide_store;
 
-    #[test]
-    fn answers_that_come_after_the_wizard_closed_are_let_go() {
+    fn app() -> Owner {
         let app = Owner::new();
         app.with(|| {
             provide_i18n(I18n::new("uk_UA", Dictionary::default(), Dictionary::default()));
             provide_toasts();
             provide_store();
         });
+        app
+    }
+
+    #[test]
+    fn answers_that_come_after_the_wizard_closed_are_let_go() {
+        let app = app();
         let page = app.with(Owner::new);
         let wizard = page.with(Wizard::new);
         // The player left for another page while the catalogs were on their way.
         page.cleanup();
         let version = CatalogVersion { id: "1.21.1".into(), kind: "release".into(), release_time: None };
         wizard.take_versions(vec![version], false);
-        wizard.take_catalog(LoaderKind::Fabric, None);
+        wizard.take_catalog(LoaderKind::Fabric, Err("offline".into()));
+        app.cleanup();
+    }
+
+    #[test]
+    fn a_loader_asked_again_is_on_its_way_until_its_answer_comes() {
+        let app = app();
+        let wizard = app.with(Wizard::new);
+        let forge =
+            move || wizard.catalogs.with_untracked(|all| loader_state(LoaderKind::Forge, "1.21.1", all));
+        wizard.take_catalog(LoaderKind::Forge, Err("offline".into()));
+        assert_eq!(forge(), LoaderState::Failed("offline".into()));
+        wizard.forget_catalog(LoaderKind::Forge);
+        assert_eq!(forge(), LoaderState::Loading, "«Спробувати ще» shows it on its way");
+        let option = LoaderOption {
+            mc: "1.21.1".into(),
+            snapshot: false,
+            builds: vec![LoaderBuild { version: "52.1.0".into(), stable: true }],
+            default_version: "52.1.0".into(),
+        };
+        wizard.take_catalog(LoaderKind::Forge, Ok(LoaderCatalog::pack(vec![option])));
+        assert_eq!(forge(), LoaderState::Available);
         app.cleanup();
     }
 
@@ -352,6 +395,24 @@ mod tests {
         assert_eq!(waits_for(Ok(()), WizardStep::Summary, false), Ok(()));
         assert_eq!(waits_for(Ok(()), WizardStep::Content, true), Ok(()), "only the creation collides");
         assert_eq!(waits_for(Err("wizard_no_version"), WizardStep::Summary, true), Err("wizard_no_version"));
+    }
+
+    #[test]
+    fn a_reason_its_field_shows_is_not_said_again_by_the_button() {
+        let name = Some("version_name_empty");
+        assert_eq!(button_reason(Err("version_name_empty"), name, WizardStep::Basics), None);
+        assert_eq!(
+            button_reason(Err("wizard_no_version"), name, WizardStep::Basics),
+            Some("wizard_no_version")
+        );
+        let long = Err("build_description_too_long");
+        assert_eq!(button_reason(long, None, WizardStep::Settings), None, "under the description");
+        assert_eq!(
+            button_reason(long, None, WizardStep::Summary),
+            Some("build_description_too_long"),
+            "the field is a step back"
+        );
+        assert_eq!(button_reason(Ok(()), None, WizardStep::Summary), None);
     }
 
     #[test]

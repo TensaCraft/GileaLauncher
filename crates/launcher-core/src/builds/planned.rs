@@ -89,7 +89,8 @@ pub async fn apply_plan(
 ) -> PlanOutcome {
     if let Err(e) = apply_settings(core, key, settings) {
         tracing::warn!("The wizard's settings of {key} were not saved: {}", e.detail);
-        core.feedback.warning(Text::key("build_planned_settings_failed").param("version", key));
+        let name = core.versions.get(key).map_or_else(|| key.to_string(), |b| b.name);
+        core.feedback.warning(Text::key("build_planned_settings_failed").param("name", name));
     }
     let mut outcome = PlanOutcome::default();
     for pick in picks {
@@ -109,8 +110,8 @@ pub async fn apply_plan(
     outcome
 }
 
-/// Installs the build `args` describes (`created` hears of it at once), then its plan; one note
-/// of how the picks went.
+/// Installs the build `args` describes (`created` hears of it at once), then its plan; a note of
+/// the picks installed (none when nothing was) and one of those that were not.
 pub async fn create_planned(
     core: &Arc<CoreApp>,
     args: PlannedBuild,
@@ -128,7 +129,7 @@ pub async fn create_planned(
     };
     created(&build);
     let outcome = apply_plan(core, &build.key, &args.settings, &args.picks).await;
-    if !args.picks.is_empty() {
+    if !outcome.done.is_empty() {
         let note = Text::key("build_planned_done")
             .param("name", &build.name)
             .param("done", outcome.done.len().to_string())
@@ -148,15 +149,15 @@ pub async fn create_planned(
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use launcher_shared::ContentKind;
     use launcher_shared::provider::{
         Action, Change, InstallAnswer, InstallArgs, InstallOutcome, PlanDto, PlanIssue, PlanItem,
         ProviderInfo,
     };
+    use launcher_shared::{ActivityEntry, Alert, ContentKind, OpsSnapshot, Toast};
 
     use super::*;
     use crate::core_app::{BootstrapOptions, CoreApp};
-    use crate::feedback::NullSink;
+    use crate::feedback::EventSink;
     use crate::modules::Module;
     use crate::paths::{Os, PathEnv};
     use crate::providers::{ContentProvider, ProviderFuture};
@@ -243,11 +244,25 @@ mod tests {
         }
     }
 
+    /// The alerts the launcher raised.
+    #[derive(Default)]
+    struct Heard(Mutex<Vec<Alert>>);
+
+    impl EventSink for Heard {
+        fn ops(&self, _: &OpsSnapshot) {}
+        fn activity(&self, _: &ActivityEntry) {}
+        fn toast(&self, _: &Toast) {}
+        fn alert(&self, alert: &Alert) {
+            self.0.lock().unwrap().push(alert.clone());
+        }
+    }
+
     struct World {
         _home: tempfile::TempDir,
         _repo: tempfile::TempDir,
         core: Arc<CoreApp>,
         calls: Arc<Calls>,
+        heard: Arc<Heard>,
         key: String,
     }
 
@@ -266,12 +281,21 @@ mod tests {
             opener: Arc::new(crate::auth::NoOpener),
         };
         let module: Box<dyn Module> = Box::new(ShopModule(calls.clone()));
-        let core = Arc::new(CoreApp::bootstrap(env, Arc::new(NullSink), vec![module], opts).unwrap());
-        let mut build = Build::new("Wizard");
+        let heard = Arc::new(Heard::default());
+        let core = Arc::new(CoreApp::bootstrap(env, heard.clone(), vec![module], opts).unwrap());
+        let mut build = Build::new("Моя збірка");
         build.version = Some("1.21.1".into());
         build.client = Some("Fabric".into());
         core.versions.create(&mut build).unwrap();
-        World { _home: home, _repo: repo, core, calls, key: build.key }
+        World { _home: home, _repo: repo, core, calls, heard, key: build.key }
+    }
+
+    /// The parameter `name` of the alert `key` the launcher raised.
+    fn alert_param(heard: &Heard, key: &str, name: &str) -> Option<String> {
+        heard.0.lock().unwrap().iter().find_map(|alert| match &alert.message {
+            Text::Key { key: k, params } if k == key => params.get(name).cloned(),
+            _ => None,
+        })
     }
 
     fn pick(provider: &str, project: &str, title: &str) -> PlannedPick {
@@ -334,6 +358,21 @@ mod tests {
         apply_plan(&w.core, &w.key, &settings, &[]).await;
         let after = w.core.builds.settings(&w.key).unwrap();
         assert_eq!((after.max_ram_gb, after.description.as_str()), (Some(6), "Для друзів"));
+    }
+
+    #[tokio::test]
+    async fn settings_that_were_not_saved_are_told_by_the_builds_name() {
+        let w = world();
+        let settings = PlannedSettings {
+            image_path: Some(w._home.path().join("missing.png").to_string_lossy().into_owned()),
+            ..PlannedSettings::default()
+        };
+        apply_plan(&w.core, &w.key, &settings, &[]).await;
+        assert_ne!(w.key, "Моя збірка");
+        assert_eq!(
+            alert_param(&w.heard, "build_planned_settings_failed", "name").as_deref(),
+            Some("Моя збірка")
+        );
     }
 
     #[tokio::test]

@@ -569,6 +569,16 @@ impl LoaderCatalog {
         }
         options
     }
+
+    /// The builds offered for Minecraft `mc` (none when it is not listed); the other versions
+    /// stay packed.
+    pub fn builds_for(&self, mc: &str) -> Vec<LoaderBuild> {
+        match self.options.iter().find(|o| o.mc == mc) {
+            Some(option) if option.builds.is_empty() => self.builds.clone(),
+            Some(option) => option.builds.clone(),
+            None => Vec::new(),
+        }
+    }
 }
 
 /// One installed version in `versions/`.
@@ -803,5 +813,17 @@ mod loader_catalog_tests {
         assert_eq!(catalog.options[2].builds, builds(&["14.23.5"]));
         assert_eq!(catalog.unpack(), options);
         assert_eq!(LoaderCatalog::pack(Vec::new()).unpack(), Vec::new());
+    }
+
+    #[test]
+    fn one_versions_builds_come_without_unpacking_the_rest() {
+        let catalog = LoaderCatalog::pack(vec![
+            option("1.21.1", builds(&["0.17.2", "0.16.9"])),
+            option("1.20.1", builds(&["0.17.2", "0.16.9"])),
+            option("1.12.2", builds(&["14.23.5"])),
+        ]);
+        assert_eq!(catalog.builds_for("1.20.1"), builds(&["0.17.2", "0.16.9"]), "the shared ones");
+        assert_eq!(catalog.builds_for("1.12.2"), builds(&["14.23.5"]), "its own");
+        assert_eq!(catalog.builds_for("1.8.9"), Vec::new(), "a version it does not have");
     }
 }

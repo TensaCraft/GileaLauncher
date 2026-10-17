@@ -6,9 +6,10 @@ use std::collections::HashMap;
 
 use launcher_shared::provider::ProviderInfo;
 use launcher_shared::{
-    CatalogVersion, ContentKind, DESCRIPTION_MAX, LoaderCatalog, LoaderKind, PlannedBuild, PlannedPick,
-    PlannedSettings,
+    CatalogVersion, ContentKind, LoaderCatalog, LoaderKind, PlannedBuild, PlannedPick, PlannedSettings,
 };
+
+use crate::builds::description::description_problem;
 
 /// Fabric API on Modrinth: what nearly every Fabric mod needs.
 pub const FABRIC_API: &str = "P7dR8mSH";
@@ -51,16 +52,37 @@ impl WizardStep {
     }
 }
 
-/// Each loader's catalog: `None` when it could not be read; a loader not in it was not asked yet.
-pub type Catalogs = HashMap<LoaderKind, Option<LoaderCatalog>>;
+/// Each loader's catalog, or why it could not be read; a loader not in it has not answered yet.
+pub type Catalogs = HashMap<LoaderKind, Result<LoaderCatalog, String>>;
+
+/// What a loader's card says of a Minecraft version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoaderState {
+    Available,
+    /// Its catalog has not come yet.
+    Loading,
+    /// Its catalog could not be read: why.
+    Failed(String),
+    /// It has no build for the version.
+    Missing,
+}
+
+/// Whether `loader` has a build for Minecraft `mc` (vanilla always does), or why it is not known.
+pub fn loader_state(loader: LoaderKind, mc: &str, catalogs: &Catalogs) -> LoaderState {
+    if loader == LoaderKind::Minecraft {
+        return LoaderState::Available;
+    }
+    match catalogs.get(&loader) {
+        None => LoaderState::Loading,
+        Some(Err(e)) => LoaderState::Failed(e.clone()),
+        Some(Ok(c)) if c.options.iter().any(|o| o.mc == mc) => LoaderState::Available,
+        Some(Ok(_)) => LoaderState::Missing,
+    }
+}
 
 /// The loader has a build for Minecraft `mc` (vanilla always does).
 pub fn loader_available(loader: LoaderKind, mc: &str, catalogs: &Catalogs) -> bool {
-    loader == LoaderKind::Minecraft
-        || catalogs
-            .get(&loader)
-            .and_then(Option::as_ref)
-            .is_some_and(|c| c.options.iter().any(|o| o.mc == mc))
+    loader_state(loader, mc, catalogs) == LoaderState::Available
 }
 
 /// The recommended loader build for `mc` (empty for vanilla or when there is none).
@@ -70,7 +92,7 @@ pub fn default_loader_version(loader: LoaderKind, mc: &str, catalogs: &Catalogs)
     }
     catalogs
         .get(&loader)
-        .and_then(Option::as_ref)
+        .and_then(|c| c.as_ref().ok())
         .and_then(|c| c.options.iter().find(|o| o.mc == mc))
         .map(|o| o.default_version.clone())
         .unwrap_or_default()
@@ -102,6 +124,8 @@ pub struct WizardState {
     pub settings: PlannedSettings,
     /// The starter picks were offered for this target (and stay removed once removed).
     pub starters_offered: bool,
+    /// A change of target dropped the picks, and the player has not changed the plan since.
+    pub picks_dropped: bool,
 }
 
 impl Default for WizardState {
@@ -115,43 +139,49 @@ impl Default for WizardState {
             picks: Vec::new(),
             settings: PlannedSettings::default(),
             starters_offered: false,
+            picks_dropped: false,
         }
     }
 }
 
 impl WizardState {
     /// Minecraft `mc` with `loader` (vanilla when it has no build for `mc`). Another target than
-    /// before drops the picks (they were found for the old one); `true` when there were some.
-    pub fn set_target(&mut self, mc: &str, loader: LoaderKind, catalogs: &Catalogs) -> bool {
+    /// before drops the picks (they were found for the old one), and says so when there were some.
+    pub fn set_target(&mut self, mc: &str, loader: LoaderKind, catalogs: &Catalogs) {
         let loader = if loader_available(loader, mc, catalogs) { loader } else { LoaderKind::Minecraft };
         if self.mc == mc && self.loader == loader {
             if self.loader_version.is_empty() {
                 self.loader_version = default_loader_version(loader, mc, catalogs);
             }
-            return false;
+            return;
         }
         self.mc = mc.to_string();
         self.loader = loader;
         self.loader_version = default_loader_version(loader, mc, catalogs);
         self.starters_offered = false;
-        let dropped = !self.picks.is_empty();
+        self.picks_dropped |= !self.picks.is_empty();
         self.picks.clear();
-        dropped
     }
 
     pub fn has_pick(&self, provider: &str, project_id: &str) -> bool {
         self.picks.iter().any(|p| p.provider == provider && p.project_id == project_id)
     }
 
-    /// Into the plan, once.
+    /// The player's pick into the plan, once.
     pub fn add_pick(&mut self, pick: PlannedPick) {
-        if !self.has_pick(&pick.provider, &pick.project_id) {
-            self.picks.push(pick);
-        }
+        self.picks_dropped = false;
+        self.insert_pick(pick);
     }
 
     pub fn remove_pick(&mut self, provider: &str, project_id: &str) {
+        self.picks_dropped = false;
         self.picks.retain(|p| !(p.provider == provider && p.project_id == project_id));
+    }
+
+    fn insert_pick(&mut self, pick: PlannedPick) {
+        if !self.has_pick(&pick.provider, &pick.project_id) {
+            self.picks.push(pick);
+        }
     }
 
     /// The loader's own API (Fabric API, QFAPI), picked the first time the content step opens
@@ -170,7 +200,7 @@ impl WizardState {
             _ => None,
         };
         if let Some((id, slug, title)) = starter {
-            self.add_pick(PlannedPick {
+            self.insert_pick(PlannedPick {
                 provider: MODRINTH.into(),
                 kind: ContentKind::Mods,
                 project_id: id.into(),
@@ -226,9 +256,7 @@ impl WizardState {
                 }
                 Ok(())
             }
-            WizardStep::Settings if self.settings.description.chars().count() > DESCRIPTION_MAX => {
-                Err("wizard_description_too_long")
-            }
+            WizardStep::Settings => description_problem(&self.settings.description).map_or(Ok(()), Err),
             _ => Ok(()),
         }
     }
@@ -252,7 +280,7 @@ mod tests {
 
     use super::*;
 
-    fn catalog(versions: &[&str]) -> Option<LoaderCatalog> {
+    fn catalog(versions: &[&str]) -> Result<LoaderCatalog, String> {
         let options = versions
             .iter()
             .map(|mc| LoaderOption {
@@ -262,14 +290,14 @@ mod tests {
                 default_version: "0.16.10".into(),
             })
             .collect();
-        Some(LoaderCatalog::pack(options))
+        Ok(LoaderCatalog::pack(options))
     }
 
     fn catalogs() -> Catalogs {
         let mut all = Catalogs::new();
         all.insert(LoaderKind::Fabric, catalog(&["1.21.1", "1.20.1"]));
         all.insert(LoaderKind::NeoForge, catalog(&["1.21.1"]));
-        all.insert(LoaderKind::Forge, None);
+        all.insert(LoaderKind::Forge, Err("offline".into()));
         all
     }
 
@@ -326,6 +354,16 @@ mod tests {
     }
 
     #[test]
+    fn a_loader_card_tells_a_catalog_on_its_way_or_unread_from_one_without_the_version() {
+        let all = catalogs();
+        assert_eq!(loader_state(LoaderKind::Minecraft, "1.21.1", &all), LoaderState::Available);
+        assert_eq!(loader_state(LoaderKind::Fabric, "1.20.1", &all), LoaderState::Available);
+        assert_eq!(loader_state(LoaderKind::NeoForge, "1.20.1", &all), LoaderState::Missing);
+        assert_eq!(loader_state(LoaderKind::Forge, "1.21.1", &all), LoaderState::Failed("offline".into()));
+        assert_eq!(loader_state(LoaderKind::Quilt, "1.21.1", &all), LoaderState::Loading, "not come yet");
+    }
+
+    #[test]
     fn a_new_version_keeps_the_loader_it_still_has_or_falls_back_to_vanilla() {
         let mut state = fabric_on("1.21.1");
         state.set_target("1.20.1", LoaderKind::Fabric, &catalogs());
@@ -337,14 +375,33 @@ mod tests {
     }
 
     #[test]
-    fn changing_the_target_drops_the_picks_once_and_says_so() {
+    fn changing_the_target_drops_the_picks_and_says_so() {
         let mut state = fabric_on("1.21.1");
         state.add_pick(pick("sodium"));
-        assert!(!state.set_target("1.21.1", LoaderKind::Fabric, &catalogs()), "the same target keeps them");
-        assert_eq!(state.picks.len(), 1);
-        assert!(state.set_target("1.20.1", LoaderKind::Fabric, &catalogs()), "another version drops them");
-        assert!(state.picks.is_empty());
-        assert!(!state.set_target("1.21.1", LoaderKind::Fabric, &catalogs()), "nothing more to drop");
+        state.set_target("1.21.1", LoaderKind::Fabric, &catalogs());
+        assert_eq!((state.picks.len(), state.picks_dropped), (1, false), "the same target keeps them");
+        state.set_target("1.20.1", LoaderKind::Fabric, &catalogs());
+        assert_eq!((state.picks.len(), state.picks_dropped), (0, true), "another version drops them");
+        state.set_target("1.21.1", LoaderKind::Fabric, &catalogs());
+        assert!(state.picks_dropped, "still to be told, with nothing more to drop");
+    }
+
+    #[test]
+    fn the_dropped_picks_are_told_until_the_player_changes_the_plan() {
+        let dropped = || {
+            let mut state = fabric_on("1.21.1");
+            state.add_pick(pick("sodium"));
+            state.set_target("1.20.1", LoaderKind::Fabric, &catalogs());
+            state.offer_starters(&[provider("modrinth")]);
+            assert!(state.picks_dropped, "the wizard's own starter is no change of the player's");
+            state
+        };
+        let mut removed = dropped();
+        removed.remove_pick("modrinth", FABRIC_API);
+        assert!(!removed.picks_dropped, "a pick taken out of the plan");
+        let mut added = dropped();
+        added.add_pick(pick("iris"));
+        assert!(!added.picks_dropped, "a pick put into it");
     }
 
     #[test]
@@ -409,7 +466,7 @@ mod tests {
     fn a_long_description_is_not_ready() {
         let mut state = fabric_on("1.21.1");
         state.settings.description = "а".repeat(301);
-        assert_eq!(state.ready(WizardStep::Settings, None, &catalogs()), Err("wizard_description_too_long"));
+        assert_eq!(state.ready(WizardStep::Settings, None, &catalogs()), Err("build_description_too_long"));
         state.settings.description = "а".repeat(300);
         assert_eq!(state.ready(WizardStep::Settings, None, &catalogs()), Ok(()));
     }
@@ -425,7 +482,7 @@ mod tests {
             "a name taken after the basics were passed"
         );
         state.settings.description = "а".repeat(301);
-        assert_eq!(state.ready(WizardStep::Summary, None, &all), Err("wizard_description_too_long"));
+        assert_eq!(state.ready(WizardStep::Summary, None, &all), Err("build_description_too_long"));
     }
 
     #[test]

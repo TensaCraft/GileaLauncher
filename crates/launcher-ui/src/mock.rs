@@ -265,6 +265,7 @@ pub fn install() {
             query_value("builds").as_deref() == Some("none"),
             query_value("catalog").as_deref() == Some("error"),
         )
+        .with_failing_loaders(query_value("catalog").as_deref() == Some("loaders"))
         .with_no_profile(query_value("launch").as_deref() == Some("noprofile")),
     ));
     let components = Rc::new(RefCell::new(crate::mock_components::MockComponents::new()));

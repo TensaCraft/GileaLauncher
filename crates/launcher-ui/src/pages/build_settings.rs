@@ -11,10 +11,11 @@ use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
     Button, Checkbox, CodeEditor, Dialog, DialogFooter, Field, Icon, NavEntry, Section, Select, SelectOption,
-    SettingRow, SettingsNav, Size, TextArea, TextInput, Variant, card_image, ipc, use_toasts,
+    SettingRow, SettingsNav, Size, TextInput, Variant, card_image, ipc, use_toasts,
 };
 
 use crate::builds::catalog::{CreateRow, build_choices, load_rows};
+use crate::builds::description::{DescriptionField, description_problem};
 use crate::builds::gpu::GpuChoice;
 use crate::builds::ram::RamSetting;
 use crate::builds::{LatestRequest, ram_slider};
@@ -543,6 +544,11 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
             tab.set("general");
             return;
         }
+        // The backend would cut it; its field says why it is not saved.
+        if description.with_untracked(|text| description_problem(text)).is_some() {
+            tab.set("general");
+            return;
+        }
         let update = form.update();
         saving.set(true);
         let key = key();
@@ -650,9 +656,7 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                 <Field label=t("version_name_label") error=Signal::derive(move || name_error.get())>
                     <TextInput value=name invalid=Signal::derive(move || name_error.get().is_some()) />
                 </Field>
-                <Field label=t("build_description_label")>
-                    <TextArea value=description rows=2 placeholder=t("build_description_hint") />
-                </Field>
+                <DescriptionField value=description />
                 <Field label=t("loaders_label")>
                     <div class="wrap">
                         <div class="grow">

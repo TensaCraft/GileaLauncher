@@ -1,6 +1,7 @@
 //! Browser-preview backend for builds, the Minecraft catalog, Java and memory.
-//! `?builds=none` starts without builds, `?catalog=error` makes the catalog fail and
-//! `?launch=noprofile` answers Play with `no_profile`.
+//! `?builds=none` starts without builds, `?catalog=error` makes the catalog fail,
+//! `?catalog=loaders` makes Forge's and Quilt's catalogs fail once and `?launch=noprofile` answers
+//! Play with `no_profile`.
 
 use std::collections::HashMap;
 
@@ -61,6 +62,8 @@ pub struct MockBuilds {
     custom_java: Vec<JavaEntry>,
     settings: HashMap<String, BuildSettingsDto>,
     catalog_fails: bool,
+    /// The loaders whose catalog fails the next time it is asked for.
+    failing_loaders: Vec<LoaderKind>,
     no_profile: bool,
     /// The order the user dragged the builds into.
     order: Vec<String>,
@@ -88,9 +91,17 @@ impl MockBuilds {
             custom_java: Vec::new(),
             settings: HashMap::new(),
             catalog_fails,
+            failing_loaders: Vec::new(),
             no_profile: false,
             order: Vec::new(),
         }
+    }
+
+    pub fn with_failing_loaders(mut self, failing: bool) -> MockBuilds {
+        if failing {
+            self.failing_loaders = vec![LoaderKind::Forge, LoaderKind::Quilt];
+        }
+        self
     }
 
     pub fn with_no_profile(mut self, no_profile: bool) -> MockBuilds {
@@ -474,6 +485,11 @@ impl MockBuilds {
             "catalog_loader" => {
                 let kind: LoaderKind =
                     serde_json::from_value(args["loader"].clone()).unwrap_or(LoaderKind::Fabric);
+                if let Some(at) = self.failing_loaders.iter().position(|k| *k == kind) {
+                    self.failing_loaders.remove(at);
+                    return Some(Err(AppError::new(ErrorCode::DownloadFailed, "mock")
+                        .with_param("error", "the loader's catalog is offline")));
+                }
                 // Packed as the app sends it.
                 let options = self.loader_catalog(kind, args["unstable"].as_bool().unwrap_or(false));
                 to_value(launcher_shared::LoaderCatalog::pack(options))
@@ -610,6 +626,17 @@ mod tests {
         assert!(m.catalog(true).unwrap().iter().any(|v| v.kind == "snapshot"));
         assert_eq!(MockBuilds::new(false, true).catalog(false).unwrap_err().code, ErrorCode::DownloadFailed);
         assert!(MockBuilds::new(true, false).snapshot().builds.is_empty());
+    }
+
+    #[test]
+    fn failing_loader_catalogs_fail_once_then_answer() {
+        let mut m = MockBuilds::new(false, false).with_failing_loaders(true);
+        let ask = |m: &mut MockBuilds, loader: &str| {
+            m.handle("catalog_loader", &json!({ "loader": loader, "unstable": false })).unwrap()
+        };
+        assert_eq!(ask(&mut m, "forge").unwrap_err().code, ErrorCode::DownloadFailed);
+        assert!(ask(&mut m, "fabric").is_ok(), "the others answer");
+        assert!(ask(&mut m, "forge").is_ok(), "«Спробувати ще» gets it");
     }
 
     #[test]

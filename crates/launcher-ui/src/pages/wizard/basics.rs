@@ -1,14 +1,14 @@
 //! «Основне»: the build's name, its Minecraft version and vanilla or a mod loader (its build under
 //! «Додатково»), and the way to the old catalog.
 
-use launcher_shared::LoaderKind;
+use launcher_shared::{CatalogVersion, LoaderKind};
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
     Button, Checkbox, ChoiceCards, ChoiceOption, Field, Icon, Select, SelectOption, TextInput, Variant,
 };
 
-use super::state::loader_available;
+use super::state::{Catalogs, LoaderState, loader_state};
 use super::{LOADERS, Wizard};
 use crate::builds::loader_icon;
 use crate::store::use_store;
@@ -26,6 +26,43 @@ fn loader_mark(kind: LoaderKind) -> &'static str {
     loader_icon(Some(kind.display_name()))
 }
 
+/// The line under a loader's card.
+fn loader_hint(state: &LoaderState) -> &'static str {
+    match state {
+        LoaderState::Available => "wizard_loader_desc",
+        LoaderState::Loading => "wizard_loading",
+        LoaderState::Failed(_) => "wizard_loader_failed_hint",
+        LoaderState::Missing => "wizard_loader_unavailable_hint",
+    }
+}
+
+/// The loaders whose catalog could not be read, in the cards' order, with the first one's reason.
+fn unread_loaders(catalogs: &Catalogs) -> Option<(Vec<LoaderKind>, String)> {
+    let unread: Vec<(LoaderKind, &String)> =
+        LOADERS.into_iter().filter_map(|k| catalogs.get(&k)?.as_ref().err().map(|e| (k, e))).collect();
+    let reason = unread.first()?.1.clone();
+    Some((unread.into_iter().map(|(k, _)| k).collect(), reason))
+}
+
+/// The name's problem, said once the versions came: until then the wizard has given no name.
+fn name_problem_shown(
+    problem: Option<&'static str>,
+    versions: &Option<Result<Vec<CatalogVersion>, String>>,
+) -> Option<&'static str> {
+    problem.filter(|_| versions.is_some())
+}
+
+/// `value` into `field`, waking those who read it only when it is another.
+fn follow<T: PartialEq + Send + Sync + 'static>(field: RwSignal<T>, value: T) {
+    field.maybe_update(|shown| {
+        let changed = *shown != value;
+        if changed {
+            *shown = value;
+        }
+        changed
+    });
+}
+
 #[component]
 pub fn Basics(wizard: Wizard, name_problem: Memo<Option<&'static str>>) -> impl IntoView {
     let i18n = use_i18n();
@@ -40,12 +77,13 @@ pub fn Basics(wizard: Wizard, name_problem: Memo<Option<&'static str>>) -> impl 
     Effect::new(move |_| {
         let (now_mc, now_loader, now_build) =
             wizard.state.with(|s| (s.mc.clone(), s.loader, s.loader_version.clone()));
-        mc.set(now_mc);
-        loader.set(loader_value(now_loader));
-        loader_build.set(now_build);
+        follow(mc, now_mc);
+        follow(loader, loader_value(now_loader));
+        follow(loader_build, now_build);
     });
     let name_error = Signal::derive(move || {
-        name_problem.get().map(|key| i18n.tp(key, &[("name", wizard.name.get().trim().to_string())]))
+        let problem = wizard.versions.with(|v| name_problem_shown(name_problem.get(), v));
+        problem.map(|key| i18n.tp(key, &[("name", wizard.name.get().trim().to_string())]))
     });
     let version_options = Signal::derive(move || {
         wizard.versions.with(|v| match v {
@@ -63,7 +101,6 @@ pub fn Basics(wizard: Wizard, name_problem: Memo<Option<&'static str>>) -> impl 
     });
     let loader_options = Signal::derive(move || {
         let version = mc.get();
-        let catalogs = wizard.catalogs.get();
         let mut options = vec![
             ChoiceOption::new(
                 loader_value(LoaderKind::Minecraft),
@@ -72,21 +109,24 @@ pub fn Basics(wizard: Wizard, name_problem: Memo<Option<&'static str>>) -> impl 
             )
             .with_desc(i18n.t("wizard_vanilla_desc")),
         ];
-        for kind in LOADERS {
-            let available = loader_available(kind, &version, &catalogs);
-            let desc = if available {
-                i18n.t("wizard_loader_desc")
-            } else {
-                i18n.t("wizard_loader_unavailable_hint")
-            };
-            options.push(
-                ChoiceOption::new(loader_value(kind), kind.display_name(), loader_mark(kind))
-                    .with_desc(desc)
-                    .with_disabled(!available),
-            );
-        }
+        wizard.catalogs.with(|catalogs| {
+            for kind in LOADERS {
+                let state = loader_state(kind, &version, catalogs);
+                options.push(
+                    ChoiceOption::new(loader_value(kind), kind.display_name(), loader_mark(kind))
+                        .with_desc(i18n.t(loader_hint(&state)))
+                        .with_disabled(state != LoaderState::Available),
+                );
+            }
+        });
         options
     });
+    let unread = Memo::new(move |_| wizard.catalogs.with(unread_loaders));
+    let retry_loaders = move || {
+        for kind in unread.get_untracked().map(|(kinds, _)| kinds).unwrap_or_default() {
+            wizard.load_loader(kind);
+        }
+    };
     let on_loader = Callback::new(move |picked: String| {
         let version = wizard.state.with_untracked(|s| s.mc.clone());
         wizard.retarget(&version, loader_of(&picked));
@@ -94,26 +134,16 @@ pub fn Basics(wizard: Wizard, name_problem: Memo<Option<&'static str>>) -> impl 
     let build_options = Signal::derive(move || {
         let (version, kind) = wizard.state.with(|s| (s.mc.clone(), s.loader));
         let beta = i18n.t("version_create_unstable_loader_badge");
-        wizard.catalogs.with(|all| {
-            all.get(&kind)
-                .and_then(Option::as_ref)
-                .map(|catalog| {
-                    catalog
-                        .clone()
-                        .unpack()
-                        .into_iter()
-                        .find(|o| o.mc == version)
-                        .map(|o| o.builds)
-                        .unwrap_or_default()
-                })
-                .unwrap_or_default()
-                .into_iter()
-                .map(|b| {
-                    let label = if b.stable { b.version.clone() } else { format!("{} · {beta}", b.version) };
-                    SelectOption::new(b.version, label)
-                })
-                .collect::<Vec<_>>()
-        })
+        let builds = wizard.catalogs.with(|all| {
+            all.get(&kind).and_then(|c| c.as_ref().ok()).map(|c| c.builds_for(&version)).unwrap_or_default()
+        });
+        builds
+            .into_iter()
+            .map(|b| {
+                let label = if b.stable { b.version.clone() } else { format!("{} · {beta}", b.version) };
+                SelectOption::new(b.version, label)
+            })
+            .collect::<Vec<_>>()
     });
     let on_build = Callback::new(move |picked: String| wizard.state.update(|s| s.loader_version = picked));
     let is_loader = move || wizard.state.with(|s| s.loader != LoaderKind::Minecraft);
@@ -145,6 +175,18 @@ pub fn Basics(wizard: Wizard, name_problem: Memo<Option<&'static str>>) -> impl 
             </Field>
             <div class="wizard__ask">{move || i18n.t("wizard_type")}</div>
             <ChoiceCards options=loader_options value=loader on_change=on_loader columns=5 label=t("wizard_type") />
+            {move || unread.get().map(|(kinds, reason)| {
+                let names = kinds.iter().map(|k| k.display_name()).collect::<Vec<_>>().join(", ");
+                view! {
+                    <div class="wizard__status is-error build-wizard__unread">
+                        <Icon name="error_outline" />
+                        <span class="grow">{i18n.tp("wizard_loaders_failed", &[("loaders", names), ("error", reason)])}</span>
+                        <Button variant=Variant::Ghost icon="refresh" on_click=move |_| retry_loaders()>
+                            {move || i18n.t("wizard_retry")}
+                        </Button>
+                    </div>
+                }
+            })}
             <Show when=is_loader>
                 <button type="button" class="build-wizard__more" on:click=move |_| advanced.update(|a| *a = !*a)>
                     {move || view! { <Icon name=if advanced.get() { "expand_less" } else { "expand_more" } /> }}
@@ -162,5 +204,85 @@ pub fn Basics(wizard: Wizard, name_problem: Memo<Option<&'static str>>) -> impl 
                 </Button>
             </div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use launcher_shared::{CatalogVersion, LoaderCatalog};
+
+    use super::*;
+    use crate::pages::wizard::state::Catalogs;
+
+    #[test]
+    fn a_card_tells_a_catalog_on_its_way_or_unread_apart_from_one_without_the_version() {
+        assert_eq!(loader_hint(&LoaderState::Available), "wizard_loader_desc");
+        assert_eq!(loader_hint(&LoaderState::Loading), "wizard_loading");
+        assert_eq!(loader_hint(&LoaderState::Failed("offline".into())), "wizard_loader_failed_hint");
+        assert_eq!(loader_hint(&LoaderState::Missing), "wizard_loader_unavailable_hint");
+    }
+
+    #[test]
+    fn the_unread_catalogs_are_named_in_the_cards_order_with_the_first_reason() {
+        let mut all = Catalogs::new();
+        all.insert(LoaderKind::Quilt, Err("timed out".into()));
+        all.insert(LoaderKind::Fabric, Ok(LoaderCatalog::default()));
+        all.insert(LoaderKind::Forge, Err("offline".into()));
+        assert_eq!(
+            unread_loaders(&all),
+            Some((vec![LoaderKind::Forge, LoaderKind::Quilt], "offline".to_string()))
+        );
+        all.remove(&LoaderKind::Forge);
+        all.remove(&LoaderKind::Quilt);
+        assert_eq!(unread_loaders(&all), None, "on its way or read");
+    }
+
+    #[test]
+    fn the_name_says_nothing_while_the_versions_are_on_their_way() {
+        let came = Some(Ok(vec![CatalogVersion {
+            id: "1.21.1".into(),
+            kind: "release".into(),
+            release_time: None,
+        }]));
+        assert_eq!(name_problem_shown(Some("version_name_empty"), &None), None);
+        assert_eq!(name_problem_shown(Some("version_name_empty"), &came), Some("version_name_empty"));
+        assert_eq!(
+            name_problem_shown(Some("version_name_empty"), &Some(Err("offline".into()))),
+            Some("version_name_empty"),
+            "they will not come by themselves"
+        );
+        assert_eq!(name_problem_shown(None, &came), None);
+    }
+
+    #[test]
+    fn a_field_that_already_shows_the_value_wakes_nobody() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let field = RwSignal::new("1.21.1".to_string());
+            let reads = Arc::new(AtomicUsize::new(0));
+            let watcher = {
+                let reads = reads.clone();
+                Memo::new_with_compare(
+                    move |_| {
+                        reads.fetch_add(1, Ordering::SeqCst);
+                        field.get()
+                    },
+                    |_, _| true,
+                )
+            };
+            let _ = watcher.get();
+            let heard = reads.load(Ordering::SeqCst);
+            follow(field, "1.21.1".to_string());
+            let _ = watcher.get();
+            assert_eq!(reads.load(Ordering::SeqCst), heard, "the same value");
+            follow(field, "1.20.1".to_string());
+            let _ = watcher.get();
+            assert_eq!(reads.load(Ordering::SeqCst), heard + 1, "another one");
+            assert_eq!(field.get_untracked(), "1.20.1");
+        });
+        owner.cleanup();
     }
 }

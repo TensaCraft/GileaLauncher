@@ -123,6 +123,7 @@
 .wizard__status ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); }
 .wizard__status.is-ok { background: rgba(69, 194, 126, 0.1); border: 1px solid rgba(69, 194, 126, 0.4); color: var(--ok); }
 .wizard__status.is-error { background: rgba(240, 82, 74, 0.1); border: 1px solid rgba(240, 82, 74, 0.45); color: var(--danger-text); }
+.wizard__status.is-info { background: rgba(45, 184, 218, 0.1); border: 1px solid rgba(45, 184, 218, 0.4); color: var(--info); }
 /* The build wizard: the first-run wizard's panel with its steps in a row across the top. */
 .build-wizard { max-width: 1180px; margin: 4px auto 16px; }
 .build-wizard__steps { display: flex; align-items: center; gap: 10px; padding: 12px 28px; border-bottom: 1px solid var(--line); background: rgba(5, 12, 10, 0.35); }
@@ -140,6 +141,7 @@
 .build-wizard__why { font-size: 12.5px; color: var(--text-3); }
 .build-wizard__more { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; padding: 0; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text-2); cursor: pointer; }
 .build-wizard__more:hover { color: var(--text); }
+.build-wizard__unread { margin-top: 12px; align-items: center; }
 .build-wizard__basics > .field + .field, .build-wizard__basics > .build-wizard__more + .field { margin-top: 14px; }
 .build-wizard__toolbar, .build-wizard__search { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .build-wizard__plan { display: grid; gap: 6px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--s-input); }
