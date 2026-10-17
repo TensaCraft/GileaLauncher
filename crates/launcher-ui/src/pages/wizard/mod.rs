@@ -250,10 +250,12 @@ pub fn BuildWizardPage() -> impl IntoView {
         let planned = wizard.state.get_untracked().planned();
         store.go("/builds");
         spawn_local(async move {
-            if let Err(e) =
-                ipc::invoke::<_, BuildDto>("build_create_planned", &json!({ "build": planned })).await
-            {
-                toasts.show(Level::Error, i18n.error(&e), None);
+            match ipc::invoke::<_, BuildDto>("build_create_planned", &json!({ "build": planned })).await {
+                // The hints point at the new build.
+                Ok(made) => {
+                    store.fresh_build.try_set(Some(made.key));
+                }
+                Err(e) => toasts.show(Level::Error, i18n.error(&e), None),
             }
         });
     };

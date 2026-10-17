@@ -13,13 +13,14 @@ use leptos_router::NavigateOptions;
 use leptos_router::hooks::{use_navigate, use_query_map};
 use ui_kit::i18n::use_i18n;
 use ui_kit::module::ModuleTab;
-use ui_kit::{ActionTone, ChipDef, ChipTabs, IconAction, SegOption, Segmented, TagTone};
+use ui_kit::{ActionTone, ChipDef, ChipTabs, IconAction, NudgeSide, SegOption, Segmented, TagTone};
 
 use self::delete::DeletePanel;
 use self::installed::InstalledPanel;
 use self::screenshots::ScreenshotsPanel;
 use crate::builds::launch::use_launch_flow;
 use crate::builds::query_escape;
+use crate::hints::{BUILD_CONTENT, CONTENT_SOURCES, sources_hint_key, use_hints};
 use crate::modules::use_module_parts;
 use crate::pages::build_settings::BuildSettingsPanel;
 use crate::providers::panel::ProviderPanel;
@@ -263,6 +264,16 @@ pub fn ContentPage(key: String) -> impl IntoView {
     });
     // The picked source stays across tabs; where a tab does not offer it, "Installed" shows.
     let source = RwSignal::new(INSTALLED.to_string());
+    // A search the installed list found nothing for, carried to the source it opens.
+    let carry_query = RwSignal::new(None::<String>);
+    let open_source = Callback::new(move |(id, query): (String, String)| {
+        let query = query.trim().to_string();
+        carry_query.set((!query.is_empty()).then_some(query));
+        source.set(id);
+    });
+    // Opened, the page has shown where a build's content is.
+    let hints = use_hints();
+    hints.learn(BUILD_CONTENT);
     // How many the open tab has installed: a count on "Installed" (the installed list tells it).
     let installed_count = RwSignal::new(None::<usize>);
     Effect::new(move |_| {
@@ -280,15 +291,28 @@ pub fn ContentPage(key: String) -> impl IntoView {
         let picked = source.get();
         if offered.with(|ps| ps.iter().any(|p| p.id == picked)) { picked } else { INSTALLED.to_string() }
     });
+    // A source opened (here or from the list's buttons): the page has shown where new content is.
+    Effect::new(move |_| {
+        if active.get() != INSTALLED {
+            hints.learn(CONTENT_SOURCES);
+        }
+    });
+    // Where new content is found: a hint on the first source while the installed list shows.
+    let sources_hint = move || {
+        let kind = kind_of_tab(tab.get())?;
+        (hints.may_show(CONTENT_SOURCES) && active.with(|a| a == INSTALLED))
+            .then(|| hints.mark(CONTENT_SOURCES, i18n.t(sources_hint_key(kind)), NudgeSide::Bottom))
+    };
     let source_options = Signal::derive(move || {
         let mut options = vec![
             SegOption::new(INSTALLED, i18n.t("installed_content_tab"))
                 .with_icon("inventory_2")
                 .with_count(installed_count.get()),
         ];
+        let mut hint = sources_hint();
         options.extend(offered.get().into_iter().map(|p| {
             let label = source_label(&p, |key| i18n.t(key));
-            SegOption::new(p.id, label).with_icon(p.icon)
+            SegOption::new(p.id, label).with_icon(p.icon).with_nudge(hint.take())
         }));
         options
     });
@@ -362,11 +386,20 @@ pub fn ContentPage(key: String) -> impl IntoView {
                 let providers = offered.get();
                 Some(match providers.iter().find(|p| p.id == active).cloned() {
                     Some(provider) => {
-                        view! { <ProviderPanel provider=provider key=key kind=kind current=build sources=sources /> }
+                        let query = carry_query.try_update_untracked(Option::take).flatten();
+                        view! { <ProviderPanel provider=provider key=key kind=kind current=build sources=sources query=query /> }
                             .into_any()
                     }
                     None => view! {
-                        <InstalledPanel key=key kind=kind current=build providers=providers sources=sources count=installed_count />
+                        <InstalledPanel
+                            key=key
+                            kind=kind
+                            current=build
+                            providers=providers
+                            sources=sources
+                            count=installed_count
+                            on_source=open_source
+                        />
                     }
                     .into_any(),
                 })

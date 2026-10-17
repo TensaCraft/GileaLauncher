@@ -116,7 +116,10 @@ impl BuildActions {
         spawn_local(async move {
             let args = CreateArgs { name: name.clone(), version };
             match ipc::invoke::<_, BuildDto>("build_create_vanilla", &args).await {
-                Ok(_) => finish(done, true),
+                Ok(made) => {
+                    this.store.fresh_build.try_set(Some(made.key));
+                    finish(done, true)
+                }
                 Err(e) => {
                     let error = this.i18n.error(&e);
                     this.warn(
@@ -145,7 +148,10 @@ impl BuildActions {
         spawn_local(async move {
             let args = CreateLoaderArgs { name: name.clone(), loader: kind, mc, loader_version };
             match ipc::invoke::<_, BuildDto>("build_create_loader", &args).await {
-                Ok(_) => finish(done, true),
+                Ok(made) => {
+                    this.store.fresh_build.try_set(Some(made.key));
+                    finish(done, true)
+                }
                 Err(e) => {
                     let error = this.i18n.error(&e);
                     this.warn(

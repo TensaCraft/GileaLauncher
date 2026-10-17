@@ -72,12 +72,11 @@ pub fn Sidebar() -> impl IntoView {
     let location = use_location();
     let contacts = has_contacts();
     let default_profile = move || store.profiles.with(|list| list.iter().find(|p| p.is_default).cloned());
-    let nudge = move || {
-        calls_for_profile(
-            store.profiles_loaded.get(),
-            store.profiles.with(Vec::len),
-            is_active(&location.pathname.get(), "/profiles"),
-        )
+    // No profile yet: the profile button calls for one (the hint layer draws its hint).
+    let hints = crate::hints::use_hints();
+    let nudge = move || hints.may_show(crate::hints::PROFILE);
+    let mark = move || {
+        nudge().then(|| hints.mark(crate::hints::PROFILE, i18n.t("profile_nudge"), ui_kit::NudgeSide::Right))
     };
     let pages = StoredValue::new(use_context::<ModulePages>().unwrap_or_default().0);
     let items = move || {
@@ -121,6 +120,9 @@ pub fn Sidebar() -> impl IntoView {
                 class="sidebar__item sidebar__user"
                 class:is-active=move || is_active(&location.pathname.get(), "/profiles")
                 class:is-nudge=nudge
+                data-nudge=move || mark().map(|m| m.id)
+                data-nudge-text=move || mark().map(|m| m.text)
+                data-nudge-side=move || mark().map(|m| m.side.attr())
                 data-tip=tip("profile_title")
                 on:click=move |_| sound::play_click()
             >
@@ -132,8 +134,6 @@ pub fn Sidebar() -> impl IntoView {
                 <span class="sidebar__label">
                     {move || default_profile().map(|p| p.name).unwrap_or_else(|| i18n.t("profile_empty"))}
                 </span>
-                // No profile yet: a hint beside the button says what to do.
-                {move || nudge().then(|| view! { <span class="sidebar__nudge" role="status">{i18n.t("profile_nudge")}</span> })}
             </a>
         </aside>
     }

@@ -7,7 +7,7 @@ use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
 use ui_kit::reorder::{Reorder, Reorderable};
-use ui_kit::{ActionTone, Button, EmptyState, Icon, IconAction, Tag, TagTone, Variant};
+use ui_kit::{ActionTone, Button, EmptyState, Icon, IconAction, NudgeSide, Size, Tag, TagTone, Variant};
 
 use crate::builds::actions::use_build_actions;
 use crate::builds::dialogs::{use_build_dialogs, use_build_menu};
@@ -121,6 +121,30 @@ fn BuildRow(item: BuildDto, update_pack: Callback<(ProviderInfo, ModpackBuild)>)
         })
     };
     let store = use_store();
+    // The content hint, while this row is the build it points at.
+    let content_hint = {
+        let (hints, build) = (crate::hints::use_hints(), build.clone());
+        Signal::derive(move || crate::hints::build_mark(hints, &build, false, NudgeSide::Left))
+    };
+    // The build just made sorts last: its row comes into sight once, so its hint shows.
+    let row = NodeRef::<leptos::html::Div>::new();
+    {
+        let key = build.key.clone();
+        Effect::new(move |shown: Option<bool>| {
+            if shown == Some(true) {
+                return true;
+            }
+            let hinted = content_hint.with(Option::is_some);
+            let fresh = store.fresh_build.with(|f| crate::hints::reveals_fresh(f.as_deref(), &key, hinted));
+            match row.get() {
+                Some(el) if fresh => {
+                    el.scroll_into_view_with_bool(false);
+                    true
+                }
+                _ => false,
+            }
+        });
+    }
     let for_row = build.key.clone();
     // The build's first content tab: mods, or resource packs without a mod loader.
     let first_tab = crate::pages::content::tab_for("mods", build.client.as_deref());
@@ -147,7 +171,13 @@ fn BuildRow(item: BuildDto, update_pack: Callback<(ProviderInfo, ModpackBuild)>)
             .into_any(),
     };
     view! {
-        <div class="list-row build-row is-link" class:is-running=running on:contextmenu=on_menu on:click=on_open>
+        <div
+            class="list-row build-row is-link"
+            class:is-running=running
+            node_ref=row
+            on:contextmenu=on_menu
+            on:click=on_open
+        >
             <div class="build-row__icon">{picture}</div>
             <div class="build-row__text">
                 <div class="build-row__name">{build.name.clone()}</div>
@@ -157,6 +187,18 @@ fn BuildRow(item: BuildDto, update_pack: Callback<(ProviderInfo, ModpackBuild)>)
             {running.then(|| view! { <Tag tone=TagTone::Vanilla>{move || i18n.t("version_running_badge")}</Tag> })}
             <div class="build-row__actions">
                 {pack_update}
+                // Named, not just an icon: the way to the build's mods (the row opens the same). First of the
+                // permanent actions: its hint lies over the row's empty middle, not over Play.
+                <span class="build-row__content" on:click=|ev| ev.stop_propagation()>
+                    <Button
+                        size=Size::Md
+                        icon=crate::pages::content::tab_icon(first_tab)
+                        nudge=content_hint
+                        on_click=Callback::new(move |()| store.go(&crate::pages::content::content_path(&for_content, first_tab)))
+                    >
+                        {move || i18n.t("manage_mods")}
+                    </Button>
+                </span>
                 <IconAction
                     icon=icon
                     tone=if running { ActionTone::Danger } else { ActionTone::Ok }
@@ -165,11 +207,6 @@ fn BuildRow(item: BuildDto, update_pack: Callback<(ProviderInfo, ModpackBuild)>)
                     on_click=main
                 />
                 <IconAction icon="content_copy" title=t("copy") on_click=Callback::new(move |()| dialogs.copy(for_copy.clone())) />
-                <IconAction
-                    icon=crate::pages::content::tab_icon(first_tab)
-                    title=t("manage_mods")
-                    on_click=Callback::new(move |()| store.go(&crate::pages::content::content_path(&for_content, first_tab)))
-                />
                 <IconAction
                     icon="tune"
                     title=t("version_settings_content_tab")

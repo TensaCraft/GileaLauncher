@@ -117,8 +117,18 @@ pub fn Shell(children: Children) -> impl IntoView {
     on_cleanup(move || resize.remove());
 
     let drag = provide_window_drag();
+    // One-time hints: the layer looks for a marked control while one may show.
+    let hints = crate::hints::provide_hints();
+    let learn = Callback::new(move |id: String| {
+        for known in [crate::hints::BUILD_CONTENT, crate::hints::CONTENT_SOURCES] {
+            if id == known {
+                hints.learn(known);
+            }
+        }
+    });
 
     view! {
+        <ui_kit::NudgeLayer active=Signal::derive(move || hints.any()) on_close=learn />
         <div
             class="launcher-app"
             class:is-compact=move || store.settings.get().compact_sidebar

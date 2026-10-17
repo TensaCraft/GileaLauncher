@@ -172,6 +172,7 @@ fn PackInstallDialog(
     let info = StoredValue::new(provider);
     let t = move |k: &'static str| Signal::derive(move || i18n.t(k));
     let navigate = StoredValue::new(use_navigate());
+    let store = crate::store::use_store();
     let latest = StoredValue::new_local(LatestRequest::new());
     let name = RwSignal::new(String::new());
     let error = RwSignal::new(None::<String>);
@@ -230,6 +231,8 @@ fn PackInstallDialog(
         spawn_local(async move {
             match api::install_modpack(&provider.id, &args).await {
                 Ok(done) => {
+                    // The hints point at the new build.
+                    store.fresh_build.try_set(Some(done.key.clone()));
                     skipped.note(provider.clone(), done.key, done.name, done.skipped);
                     let _ = navigate.try_with_value(|go| go("/builds", Default::default()));
                 }

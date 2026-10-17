@@ -4,7 +4,9 @@ use launcher_shared::{
 };
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{Button, Field, Section, Select, SelectOption, SettingRow, Switch, TextInput, Variant, sound};
+use ui_kit::{
+    Button, Field, IconAction, Section, Select, SelectOption, SettingRow, Switch, TextInput, Variant, sound,
+};
 
 use super::mirror_bool;
 use crate::store::{use_settings_writer, use_store};
@@ -26,6 +28,7 @@ pub fn InterfaceSection() -> impl IntoView {
     let writer = use_settings_writer();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
     let compact = mirror_bool(|s| s.compact_sidebar);
+    let hints = mirror_bool(|s| s.hints);
     let card_play = RwSignal::new(store.settings.get_untracked().card_play.as_config_str().to_string());
     Effect::new(move |_| card_play.set(store.settings.get().card_play.as_config_str().to_string()));
     let card_plays = Signal::derive(move || {
@@ -100,6 +103,18 @@ pub fn InterfaceSection() -> impl IntoView {
         <Section icon="dashboard" title=t("interface") desc=t("interface_desc")>
             <SettingRow title=t("compact_sidebar") desc=t("compact_sidebar_desc")>
                 <Switch checked=compact on_change=Callback::new(move |v| writer.apply(SettingUpdate::CompactSidebar(v))) />
+            </SettingRow>
+            <SettingRow title=t("hints_setting") desc=t("hints_setting_desc")>
+                // Just an icon with a tooltip, while some hint is learned.
+                <Show when=move || store.settings.with(|s| s.hints && !s.hints_done.is_empty())>
+                    <IconAction
+                        icon="restart_alt"
+                        compact=true
+                        title=t("hints_reset")
+                        on_click=Callback::new(move |()| writer.apply(SettingUpdate::HintsReset))
+                    />
+                </Show>
+                <Switch checked=hints on_change=Callback::new(move |v| writer.apply(SettingUpdate::Hints(v))) />
             </SettingRow>
             <SettingRow title=t("home_recent_builds") desc=t("home_recent_builds_desc")>
                 <div style="width:220px">

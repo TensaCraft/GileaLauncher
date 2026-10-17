@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
 use ui_kit::module::provide_home_cards;
 use ui_kit::reorder::{Reorder, Reorderable};
-use ui_kit::{BuildCard, Button, EmptyState, MenuEntry, Size, Variant, use_context_menu};
+use ui_kit::{BuildCard, Button, EmptyState, MenuEntry, NudgeSide, Size, Variant, use_context_menu};
 
 use crate::builds::actions::use_build_actions;
 use crate::builds::dialogs::use_build_menu;
@@ -36,6 +36,7 @@ pub fn HomePage() -> impl IntoView {
     let i18n = use_i18n();
     let store = use_store();
     let flow = use_launch_flow();
+    let hints = crate::hints::use_hints();
     let build_menu = use_build_menu();
     let menu = use_context_menu();
     let page_menu = move |ev: MouseEvent| {
@@ -91,6 +92,15 @@ pub fn HomePage() -> impl IntoView {
                             let for_play = build.clone();
                             let for_menu = build.clone();
                             let for_stop = build.key.clone();
+                            // A click on the card opens the build's content, as a Builds row does.
+                            let open = crate::pages::content::content_path(
+                                &build.key,
+                                crate::pages::content::tab_for("mods", build.client.as_deref()),
+                            );
+                            let content_hint = {
+                                let build = build.clone();
+                                Signal::derive(move || crate::hints::build_mark(hints, &build, true, NudgeSide::Right))
+                            };
                             view! {
                                 <Reorderable reorder=drag key=build.key.clone() horizontal=true on_drop=dropped>
                                 <BuildCard
@@ -108,6 +118,8 @@ pub fn HomePage() -> impl IntoView {
                                     stop_label=Signal::derive(move || i18n.t("version_stop"))
                                     on_menu=Callback::new(move |(x, y)| build_menu.open(for_menu.clone(), x, y))
                                     badges=view! { <crate::modules::BuildBadges key=build.key.clone() /> }.into_any()
+                                    on_open=Callback::new(move |()| store.go(&open))
+                                    nudge=content_hint
                                 />
                                 </Reorderable>
                             }

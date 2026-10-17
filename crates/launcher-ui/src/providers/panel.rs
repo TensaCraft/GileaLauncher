@@ -35,6 +35,9 @@ pub fn ProviderPanel(
     /// The page's switch of where to look, placed right after the search.
     #[prop(optional)]
     sources: Option<ViewFn>,
+    /// What to search for at once (a search the installed list found nothing for).
+    #[prop(default = None)]
+    query: Option<String>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let toasts = use_toasts();
@@ -42,7 +45,7 @@ pub fn ProviderPanel(
     let key = StoredValue::new(key);
     let id = StoredValue::new(provider.id.clone());
     let info = StoredValue::new(provider.clone());
-    let query = RwSignal::new(String::new());
+    let query = RwSignal::new(query.unwrap_or_default());
     // `None` until the first answer: a new search keeps the page shown until its own answer comes,
     // and a failed one keeps it with a toast (the page does not collapse and jump to the top). The
     // error is already translated.

@@ -1,6 +1,7 @@
 mod app;
 mod builds;
 mod fold;
+mod hints;
 mod mock;
 #[cfg(feature = "mod-backups")]
 mod mock_backups;

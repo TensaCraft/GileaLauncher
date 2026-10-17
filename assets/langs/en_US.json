@@ -1053,5 +1053,19 @@
   "wizard_nothing_found": "Nothing found",
   "wizard_memory": "Memory",
   "wizard_busy": "Wait: another operation is running",
-  "wizard_desc_content_vanilla": "Add resource packs to the plan: they are installed with the build. You can skip this and add them later."
+  "wizard_desc_content_vanilla": "Add resource packs to the plan: they are installed with the build. You can skip this and add them later.",
+  "content_find_desc": "Find them in a catalog and install them",
+  "content_find_query": "Look for “{query}” in a catalog",
+  "hint_build_content": "Click to add mods, resource packs and shaders.\nRight-click a build for more",
+  "hint_build_content_vanilla": "Click to add resource packs.\nRight-click a build for more",
+  "hint_build_card": "Click the card to add mods, resource packs and shaders.\nRight-click for the build's menu",
+  "hint_build_card_vanilla": "Click the card to add resource packs.\nRight-click for the build's menu",
+  "hint_build_ready": "Your build is ready!",
+  "hint_sources_mods": "Click to find and install new mods",
+  "hint_sources_resourcepacks": "Click to find and install new resource packs",
+  "hint_sources_shaders": "Click to find and install new shaders",
+  "hint_close": "Close the hint",
+  "hints_setting": "Hints",
+  "hints_setting_desc": "Show where things are until you have tried them yourself",
+  "hints_reset": "Show the hints again"
 }

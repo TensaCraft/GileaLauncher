@@ -28,6 +28,8 @@ pub struct AppStore {
     pub builds_loaded: RwSignal<bool>,
     /// Keys of builds whose launch is still being started.
     pub launching: RwSignal<BTreeSet<String>>,
+    /// The build the player made last in this run (a new build or a modpack): hints point at it.
+    pub fresh_build: RwSignal<Option<String>>,
     /// Microsoft sign-in progress (`app://auth`).
     pub auth: RwSignal<AuthState>,
     /// Avatar `src` per profile key; `None` while loading or when there is none.
@@ -88,6 +90,7 @@ pub fn provide_store() -> AppStore {
         settings: RwSignal::new(SettingsSnapshot {
             compact_sidebar: true,
             click_sound_enabled: true,
+            hints: true,
             ..Default::default()
         }),
         ops: RwSignal::new(OpsSnapshot::default()),
@@ -98,6 +101,7 @@ pub fn provide_store() -> AppStore {
         builds: RwSignal::new(Vec::new()),
         builds_loaded: RwSignal::new(false),
         launching: RwSignal::new(BTreeSet::new()),
+        fresh_build: RwSignal::new(None),
         auth: RwSignal::new(AuthState::Idle),
         avatars: RwSignal::new(BTreeMap::new()),
         alert: RwSignal::new(None),

@@ -59,6 +59,15 @@ pub fn list_state(list: &Option<Result<ContentList, String>>, visible: usize) ->
     }
 }
 
+/// The sources an empty or unmatched list offers — (provider id, label, icon) — named and ordered
+/// as the page's switch shows them.
+pub fn source_buttons(
+    providers: &[ProviderInfo],
+    t: impl Fn(&str) -> String,
+) -> Vec<(String, String, String)> {
+    providers.iter().map(|p| (p.id.clone(), crate::providers::source_label(p, &t), p.icon.clone())).collect()
+}
+
 #[component]
 pub fn InstalledPanel(
     key: String,
@@ -73,6 +82,10 @@ pub fn InstalledPanel(
     /// Told how many the list has.
     #[prop(optional)]
     count: Option<RwSignal<Option<usize>>>,
+    /// Opens a source (provider id) with a search (empty: none): an empty or unmatched list offers
+    /// the sources.
+    #[prop(optional)]
+    on_source: Option<Callback<(String, String)>>,
 ) -> impl IntoView {
     let build = current;
     let providers = StoredValue::new(providers);
@@ -261,6 +274,31 @@ pub fn InstalledPanel(
         })
     });
     let state = Memo::new(move |_| list.with(|l| list_state(l, visible.with(Vec::len))));
+    // The sources an empty or unmatched list offers, named as on the switch; the search goes along.
+    let finder = move || -> Option<AnyView> {
+        let open = on_source?;
+        let buttons = source_buttons(&providers.get_value(), |k| i18n.t(k));
+        (!buttons.is_empty()).then(|| {
+            view! {
+                <div class="content-find">
+                    {buttons
+                        .into_iter()
+                        .map(|(id, label, icon)| view! {
+                            <Button
+                                icon=icon
+                                on_click=Callback::new(move |()| {
+                                    open.run((id.clone(), query.get_untracked().trim().to_string()))
+                                })
+                            >
+                                {label}
+                            </Button>
+                        })
+                        .collect_view()}
+                </div>
+            }
+            .into_any()
+        })
+    };
     let body = move || {
         match state.get() {
         ListState::Loading => view! {
@@ -281,10 +319,26 @@ pub fn InstalledPanel(
             view! { <EmptyState icon="block" title=t("mods_not_supported") desc=t("mods_not_supported_desc") /> }
                 .into_any()
         }
-        ListState::Empty => view! { <EmptyState icon="inventory_2" title=t(texts.empty) /> }.into_any(),
-        ListState::NoMatch => {
-            view! { <EmptyState icon="search_off" title=t("no_installed_content_found") /> }.into_any()
-        }
+        ListState::Empty => match finder() {
+            Some(sources) => view! {
+                <EmptyState icon="inventory_2" title=t(texts.empty) desc=t("content_find_desc")>{sources}</EmptyState>
+            }
+            .into_any(),
+            None => view! { <EmptyState icon="inventory_2" title=t(texts.empty) /> }.into_any(),
+        },
+        ListState::NoMatch => match finder() {
+            Some(sources) => view! {
+                <EmptyState
+                    icon="search_off"
+                    title=t("no_installed_content_found")
+                    desc=Signal::derive(move || i18n.tp("content_find_query", &[("query", query.get().trim().to_string())]))
+                >
+                    {sources}
+                </EmptyState>
+            }
+            .into_any(),
+            None => view! { <EmptyState icon="search_off" title=t("no_installed_content_found") /> }.into_any(),
+        },
         ListState::Rows => view! {
             <div class="builds__list">
                 <For
@@ -448,6 +502,38 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    fn provider(id: &str, label: Option<&str>, clients: &[&str]) -> ProviderInfo {
+        ProviderInfo {
+            id: id.into(),
+            name: id.to_uppercase(),
+            icon: format!("{id}_icon"),
+            content: vec![ContentKind::Mods],
+            updates: Vec::new(),
+            modpacks: false,
+            modpack_updates: false,
+            content_clients: clients.iter().map(|c| c.to_string()).collect(),
+            content_label: label.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn the_source_buttons_follow_the_switch_with_the_server_first() {
+        let modrinth = provider("modrinth", None, &[]);
+        let tensa = provider("tensa", Some("tensa_optional_mods"), &["TensaCraft"]);
+        let offered =
+            crate::providers::content_providers(&[modrinth, tensa], ContentKind::Mods, Some("TensaCraft"));
+        let buttons = source_buttons(&offered, |k| format!("<{k}>"));
+        assert_eq!(
+            buttons,
+            [
+                ("tensa".to_string(), "<tensa_optional_mods>".to_string(), "tensa_icon".to_string()),
+                ("modrinth".to_string(), "MODRINTH".to_string(), "modrinth_icon".to_string()),
+            ],
+            "the switch's own labels and icons, in its order"
+        );
+        assert!(source_buttons(&[], |k| k.to_string()).is_empty(), "no sources, no buttons");
     }
 
     #[test]
