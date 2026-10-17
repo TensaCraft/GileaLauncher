@@ -37,7 +37,8 @@ fn update_from(settings: &BuildSettingsDto) -> BuildSettingsUpdate {
     }
 }
 
-/// The wizard's settings over build `key`'s own.
+/// The wizard's settings over build `key`'s own; the icon after them, on its own, so a picture
+/// that cannot be read takes nothing else with it.
 fn apply_settings(core: &CoreApp, key: &str, settings: &PlannedSettings) -> AppResult<()> {
     let mut update = update_from(&core.builds.settings(key)?);
     if settings.max_ram_gb.is_some() {
@@ -49,11 +50,16 @@ fn apply_settings(core: &CoreApp, key: &str, settings: &PlannedSettings) -> AppR
     if settings.profile.is_some() {
         update.profile = settings.profile.clone();
     }
-    update.image_path = settings.image_path.clone();
     if !settings.description.trim().is_empty() {
         update.description = Some(settings.description.clone());
     }
-    core.builds.update_settings(key, update).map(|_| ())
+    core.builds.update_settings(key, update)?;
+    if let Some(image) = settings.image_path.clone() {
+        let icon =
+            BuildSettingsUpdate { image_path: Some(image), ..update_from(&core.builds.settings(key)?) };
+        core.builds.update_settings(key, icon)?;
+    }
+    Ok(())
 }
 
 /// One pick into build `key`: its plan, then its install with the plan's required changes.
@@ -314,6 +320,20 @@ mod tests {
         let after = w.core.builds.settings(&w.key).unwrap();
         assert_eq!((after.max_ram_gb, after.description.as_str()), (Some(6), "Для друзів"));
         assert_eq!((after.gpu_mode, after.name), (before.gpu_mode, before.name), "the rest kept");
+    }
+
+    #[tokio::test]
+    async fn an_icon_that_cannot_be_read_leaves_the_other_settings_saved() {
+        let w = world();
+        let settings = PlannedSettings {
+            max_ram_gb: Some(6),
+            image_path: Some(w._home.path().join("missing.png").to_string_lossy().into_owned()),
+            description: "Для друзів".into(),
+            ..PlannedSettings::default()
+        };
+        apply_plan(&w.core, &w.key, &settings, &[]).await;
+        let after = w.core.builds.settings(&w.key).unwrap();
+        assert_eq!((after.max_ram_gb, after.description.as_str()), (Some(6), "Для друзів"));
     }
 
     #[tokio::test]

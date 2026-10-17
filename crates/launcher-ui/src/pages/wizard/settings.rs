@@ -12,6 +12,20 @@ use crate::builds::gpu::GpuChoice;
 use crate::builds::ram::RamSetting;
 use crate::store::use_store;
 
+/// The memory the system reports; the slider shows the advice while the limit is automatic. A
+/// step already closed lets it go.
+fn take_memory(
+    info: MemoryInfo,
+    memory: RwSignal<Option<MemoryInfo>>,
+    auto_ram: RwSignal<bool>,
+    ram: RwSignal<f64>,
+) {
+    let _ = memory.try_set(Some(info));
+    if auto_ram.try_get_untracked() == Some(true) {
+        let _ = ram.try_set(info.recommended_heap_gb as f64);
+    }
+}
+
 /// A picked file's name, for the line under the button.
 fn file_name(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
@@ -28,10 +42,7 @@ pub fn Settings(wizard: Wizard) -> impl IntoView {
     let memory = RwSignal::new(None::<MemoryInfo>);
     spawn_local(async move {
         if let Ok(info) = ipc::call::<MemoryInfo>("memory_info").await {
-            let _ = memory.try_set(Some(info));
-            if auto_ram.get_untracked() {
-                let _ = ram.try_set(info.recommended_heap_gb as f64);
-            }
+            take_memory(info, memory, auto_ram, ram);
         }
     });
     Effect::new(move |_| {
@@ -74,7 +85,7 @@ pub fn Settings(wizard: Wizard) -> impl IntoView {
     let pick_icon = move || {
         spawn_local(async move {
             if let Ok(Some(path)) = ipc::call::<Option<String>>("pick_image_file").await {
-                wizard.state.update(|s| s.settings.image_path = Some(path));
+                let _ = wizard.state.try_update(|s| s.settings.image_path = Some(path));
             }
         });
     };
@@ -118,6 +129,18 @@ pub fn Settings(wizard: Wizard) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_that_comes_after_the_step_closed_is_let_go() {
+        let step = Owner::new();
+        let (memory, auto_ram, ram) =
+            step.with(|| (RwSignal::new(None::<MemoryInfo>), RwSignal::new(true), RwSignal::new(4.0)));
+        step.cleanup();
+        let info = MemoryInfo { total_gb: 16, min_heap_gb: 1, max_heap_gb: 14, recommended_heap_gb: 6 };
+        take_memory(info, memory, auto_ram, ram);
+    }
+
     #[test]
     fn a_picked_icon_is_named_by_its_file() {
         assert_eq!(super::file_name(r"C:\Users\Player\Pictures\cube.png"), "cube.png");

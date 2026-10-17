@@ -94,20 +94,26 @@ impl Wizard {
         spawn_local(async move {
             match ipc::invoke::<_, Vec<CatalogVersion>>("catalog_minecraft", &CatalogArgs { snapshots }).await
             {
-                Ok(list) => {
-                    let (mc, loader) = this.state.with_untracked(|s| (s.mc.clone(), s.loader));
-                    if !list.iter().any(|v| v.id == mc)
-                        && let Some(newest) = newest_release(&list, snapshots)
-                    {
-                        this.retarget(&newest, loader);
-                    }
-                    let _ = this.versions.try_set(Some(Ok(list)));
-                }
+                Ok(list) => this.take_versions(list, snapshots),
                 Err(e) => {
                     let _ = this.versions.try_set(Some(Err(i18n.error(&e))));
                 }
             }
         });
+    }
+
+    /// The versions that came; a version no longer listed falls back to the newest. A wizard
+    /// already closed lets them go.
+    fn take_versions(&self, list: Vec<CatalogVersion>, snapshots: bool) {
+        let Some((mc, loader)) = self.state.try_with_untracked(|s| (s.mc.clone(), s.loader)) else {
+            return;
+        };
+        if !list.iter().any(|v| v.id == mc)
+            && let Some(newest) = newest_release(&list, snapshots)
+        {
+            self.retarget(&newest, loader);
+        }
+        let _ = self.versions.try_set(Some(Ok(list)));
     }
 
     /// Every loader's catalog; one that cannot be read is unavailable, the others work.
@@ -117,19 +123,48 @@ impl Wizard {
             spawn_local(async move {
                 let args = LoaderCatalogArgs { loader, unstable: false };
                 let answer: Result<LoaderCatalog, AppError> = ipc::invoke("catalog_loader", &args).await;
-                let _ = this.catalogs.try_update(|all| {
-                    all.insert(loader, answer.ok());
-                });
-                // The chosen loader's recommended build, now that it is known.
-                let (mc, chosen) = this.state.with_untracked(|s| (s.mc.clone(), s.loader));
-                if chosen == loader && !mc.is_empty() {
-                    let catalogs = this.catalogs.get_untracked();
-                    this.state.update(|s| {
-                        s.set_target(&mc, chosen, &catalogs);
-                    });
-                }
+                this.take_catalog(loader, answer.ok());
             });
         }
+    }
+
+    /// `loader`'s catalog that came (`None`: it could not be read). A wizard already closed lets
+    /// it go.
+    fn take_catalog(&self, loader: LoaderKind, catalog: Option<LoaderCatalog>) {
+        let Some(catalogs) = self.catalogs.try_update(|all| {
+            all.insert(loader, catalog);
+            all.clone()
+        }) else {
+            return;
+        };
+        // The chosen loader's recommended build, now that it is known.
+        let _ = self.state.try_update(|s| {
+            if s.loader == loader && !s.mc.is_empty() {
+                let mc = s.mc.clone();
+                s.set_target(&mc, loader, &catalogs);
+            }
+        });
+    }
+}
+
+/// Whether the step's main button waits: the step's own reason, or another operation running,
+/// which the creation would be refused for (and the plan lost with the page already left).
+fn waits_for(ready: Result<(), &'static str>, step: WizardStep, busy: bool) -> Result<(), &'static str> {
+    ready?;
+    if step == WizardStep::Summary && busy {
+        return Err("wizard_busy");
+    }
+    Ok(())
+}
+
+/// The line under the step's title (a plain game's content step names resource packs only).
+fn step_desc(step: WizardStep, loader: LoaderKind) -> &'static str {
+    match step {
+        WizardStep::Basics => "wizard_desc_basics",
+        WizardStep::Content if loader == LoaderKind::Minecraft => "wizard_desc_content_vanilla",
+        WizardStep::Content => "wizard_desc_content",
+        WizardStep::Settings => "wizard_desc_settings",
+        WizardStep::Summary => "wizard_desc_summary",
     }
 }
 
@@ -152,10 +187,13 @@ pub fn BuildWizardPage() -> impl IntoView {
         let name = wizard.name.get();
         store.builds.with(|b| check_new_name(&name, b).err().map(|p| p.key()))
     });
+    let busy = Memo::new(move |_| store.ops.with(|o| o.busy));
     let ready = Memo::new(move |_| {
         let now = step.get();
-        let catalogs = wizard.catalogs.get();
-        wizard.state.with(|s| s.ready(now, name_problem.get(), &catalogs))
+        let own = wizard
+            .catalogs
+            .with(|catalogs| wizard.state.with(|s| s.ready(now, name_problem.get(), catalogs)));
+        waits_for(own, now, busy.get())
     });
     // Each step starts at its top.
     Effect::new(move |_| {
@@ -195,7 +233,12 @@ pub fn BuildWizardPage() -> impl IntoView {
                         class:is-on=each == now
                         class:is-done=done
                         aria-current=(each == now).then_some("step")
-                        disabled=move || reached.get() < i
+                        disabled=move || {
+                            reached.get() < i
+                                || !wizard.catalogs.with(|catalogs| {
+                                    wizard.state.with(|s| s.can_open(each, name_problem.get(), catalogs))
+                                })
+                        }
                         on:click=move |_| step.set(each)
                     >
                         <span class="build-wizard__mark">
@@ -211,12 +254,7 @@ pub fn BuildWizardPage() -> impl IntoView {
             })
             .collect_view()
     };
-    let desc_key = move || match step.get() {
-        WizardStep::Basics => "wizard_desc_basics",
-        WizardStep::Content => "wizard_desc_content",
-        WizardStep::Settings => "wizard_desc_settings",
-        WizardStep::Summary => "wizard_desc_summary",
-    };
+    let desc_key = move || step_desc(step.get(), wizard.state.with(|s| s.loader));
     let body = move || match step.get() {
         WizardStep::Basics => view! { <basics::Basics wizard=wizard name_problem=name_problem /> }.into_any(),
         WizardStep::Content => view! { <content::Content wizard=wizard /> }.into_any(),
@@ -279,5 +317,47 @@ pub fn BuildWizardPage() -> impl IntoView {
                 </footer>
             </section>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ui_kit::i18n::{Dictionary, I18n, provide_i18n};
+    use ui_kit::provide_toasts;
+
+    use super::*;
+    use crate::store::provide_store;
+
+    #[test]
+    fn answers_that_come_after_the_wizard_closed_are_let_go() {
+        let app = Owner::new();
+        app.with(|| {
+            provide_i18n(I18n::new("uk_UA", Dictionary::default(), Dictionary::default()));
+            provide_toasts();
+            provide_store();
+        });
+        let page = app.with(Owner::new);
+        let wizard = page.with(Wizard::new);
+        // The player left for another page while the catalogs were on their way.
+        page.cleanup();
+        let version = CatalogVersion { id: "1.21.1".into(), kind: "release".into(), release_time: None };
+        wizard.take_versions(vec![version], false);
+        wizard.take_catalog(LoaderKind::Fabric, None);
+        app.cleanup();
+    }
+
+    #[test]
+    fn creating_waits_while_another_operation_runs() {
+        assert_eq!(waits_for(Ok(()), WizardStep::Summary, true), Err("wizard_busy"));
+        assert_eq!(waits_for(Ok(()), WizardStep::Summary, false), Ok(()));
+        assert_eq!(waits_for(Ok(()), WizardStep::Content, true), Ok(()), "only the creation collides");
+        assert_eq!(waits_for(Err("wizard_no_version"), WizardStep::Summary, true), Err("wizard_no_version"));
+    }
+
+    #[test]
+    fn vanilla_s_content_step_says_nothing_of_mods() {
+        assert_eq!(step_desc(WizardStep::Content, LoaderKind::Minecraft), "wizard_desc_content_vanilla");
+        assert_eq!(step_desc(WizardStep::Content, LoaderKind::Fabric), "wizard_desc_content");
+        assert_eq!(step_desc(WizardStep::Summary, LoaderKind::Minecraft), "wizard_desc_summary");
     }
 }

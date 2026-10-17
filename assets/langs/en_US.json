@@ -1048,5 +1048,7 @@
   "wizard_remove": "Remove",
   "wizard_loading": "Loading…",
   "wizard_nothing_found": "Nothing found",
-  "wizard_memory": "Memory"
+  "wizard_memory": "Memory",
+  "wizard_busy": "Wait: another operation is running",
+  "wizard_desc_content_vanilla": "Add resource packs to the plan: they are installed with the build. You can skip this and add them later."
 }

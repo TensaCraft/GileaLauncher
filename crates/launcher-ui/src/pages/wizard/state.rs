@@ -180,9 +180,31 @@ impl WizardState {
         }
     }
 
-    /// Whether `step` lets the player go on; the reason (a translation key) when not.
-    /// `name_problem`: what the name check said of the name.
+    /// Whether `step` and every step before it let the player go on; the first reason (a
+    /// translation key) when not. `name_problem`: what the name check said of the name.
     pub fn ready(
+        &self,
+        step: WizardStep,
+        name_problem: Option<&'static str>,
+        catalogs: &Catalogs,
+    ) -> Result<(), &'static str> {
+        WizardStep::ALL[..=step.index()]
+            .iter()
+            .try_for_each(|&each| self.own_ready(each, name_problem, catalogs))
+    }
+
+    /// Whether the player may open `step` from the row of steps: every step before it is ready.
+    pub fn can_open(
+        &self,
+        step: WizardStep,
+        name_problem: Option<&'static str>,
+        catalogs: &Catalogs,
+    ) -> bool {
+        step.prev().is_none_or(|before| self.ready(before, name_problem, catalogs).is_ok())
+    }
+
+    /// What `step` itself asks for.
+    fn own_ready(
         &self,
         step: WizardStep,
         name_problem: Option<&'static str>,
@@ -390,6 +412,30 @@ mod tests {
         assert_eq!(state.ready(WizardStep::Settings, None, &catalogs()), Err("wizard_description_too_long"));
         state.settings.description = "а".repeat(300);
         assert_eq!(state.ready(WizardStep::Settings, None, &catalogs()), Ok(()));
+    }
+
+    #[test]
+    fn the_summary_waits_for_every_step_before_it() {
+        let all = catalogs();
+        let mut state = fabric_on("1.21.1");
+        assert_eq!(state.ready(WizardStep::Summary, None, &all), Ok(()));
+        assert_eq!(
+            state.ready(WizardStep::Summary, Some("version_exists"), &all),
+            Err("version_exists"),
+            "a name taken after the basics were passed"
+        );
+        state.settings.description = "а".repeat(301);
+        assert_eq!(state.ready(WizardStep::Summary, None, &all), Err("wizard_description_too_long"));
+    }
+
+    #[test]
+    fn a_step_opens_once_the_steps_before_it_are_ready() {
+        let all = catalogs();
+        let state = fabric_on("1.21.1");
+        assert!(state.can_open(WizardStep::Basics, Some("version_name_empty"), &all), "the first one always");
+        assert!(state.can_open(WizardStep::Summary, None, &all));
+        assert!(!state.can_open(WizardStep::Content, Some("version_name_empty"), &all));
+        assert!(!state.can_open(WizardStep::Summary, Some("version_name_empty"), &all));
     }
 
     #[test]

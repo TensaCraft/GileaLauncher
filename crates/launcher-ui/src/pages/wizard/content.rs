@@ -6,7 +6,10 @@ use launcher_shared::{ContentKind, PlannedPick};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{Button, EmptyState, Icon, IconAction, SegOption, Segmented, TabDef, Tabs, TextInput, Variant};
+use ui_kit::{
+    Button, EmptyState, Icon, IconAction, LatestRequest, SegOption, Segmented, TabDef, Tabs, TextInput,
+    Variant,
+};
 
 use super::Wizard;
 use super::state::content_kinds;
@@ -14,6 +17,27 @@ use crate::pages::content::tab_of;
 use crate::providers::cards::{ListSkeleton, Pager, ProjectRow};
 use crate::providers::{api, content_providers, providers, source_label};
 use crate::store::use_store;
+
+/// A page of results with what it was searched on: its picks are that provider's and that kind's,
+/// whatever the tabs show by the time it is clicked.
+#[derive(Clone)]
+struct Found {
+    provider: String,
+    kind: ContentKind,
+    page: SearchPage,
+}
+
+impl Found {
+    fn pick(&self, hit: &ProjectHit) -> PlannedPick {
+        PlannedPick {
+            provider: self.provider.clone(),
+            kind: self.kind,
+            project_id: hit.project_id.clone(),
+            slug: hit.slug.clone(),
+            title: hit.title.clone(),
+        }
+    }
+}
 
 fn kind_of(tab: &str) -> ContentKind {
     ContentKind::ALL.into_iter().find(|k| tab_of(*k) == tab).unwrap_or(ContentKind::Mods)
@@ -78,24 +102,31 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
             .collect::<Vec<_>>()
     });
     let query = RwSignal::new(String::new());
-    let page = RwSignal::new(None::<Result<SearchPage, String>>);
+    let page = RwSignal::new(None::<Result<Found, String>>);
+    // Only the last search's answer is shown: an earlier one may come after it.
+    let latest = StoredValue::new_local(LatestRequest::new());
     let search = move |offset: u32| {
         let provider = source.get_untracked();
         if provider.is_empty() {
             return;
         }
+        let Some(request) = latest.try_with_value(|l| l.begin()) else { return };
         let (game_version, loader) = wizard.state.with_untracked(|s| (s.mc.clone(), s.loader));
+        let kind = kind_of(tab.get_untracked());
         let args = SearchArgs {
             key: String::new(),
-            kind: kind_of(tab.get_untracked()),
+            kind,
             query: query.get_untracked().trim().to_string(),
             offset,
             target: Some(SearchTarget { game_version, loader }),
         };
         page.set(None);
         spawn_local(async move {
-            let answer = api::search(&provider, &args).await.map_err(|e| i18n.error(&e));
-            let _ = page.try_set(Some(answer));
+            let answer = api::search(&provider, &args).await;
+            let found = answer.map(|page| Found { provider, kind, page }).map_err(|e| i18n.error(&e));
+            if latest.try_with_value(|l| l.is_current(request)).unwrap_or(false) {
+                let _ = page.try_set(Some(found));
+            }
         });
     };
     Effect::new(move |_| {
@@ -103,23 +134,16 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
         source.track();
         search(0);
     });
-    let shown_page = Signal::derive(move || page.get().and_then(Result::ok));
+    let shown_page = Signal::derive(move || page.get().and_then(Result::ok).map(|found| found.page));
     let show_plan = RwSignal::new(false);
     let count = move || wizard.state.with(|s| s.picks.len());
-    let toggle = move |hit: ProjectHit| {
-        let (provider, kind) = (source.get_untracked(), kind_of(tab.get_untracked()));
+    let toggle = move |pick: PlannedPick| {
         wizard.dropped.set(false);
         wizard.state.update(|s| {
-            if s.has_pick(&provider, &hit.project_id) {
-                s.remove_pick(&provider, &hit.project_id);
+            if s.has_pick(&pick.provider, &pick.project_id) {
+                s.remove_pick(&pick.provider, &pick.project_id);
             } else {
-                s.add_pick(PlannedPick {
-                    provider: provider.clone(),
-                    kind,
-                    project_id: hit.project_id.clone(),
-                    slug: hit.slug.clone(),
-                    title: hit.title.clone(),
-                });
+                s.add_pick(pick);
             }
         });
     };
@@ -127,29 +151,30 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
         match page.get() {
         None => view! { <ListSkeleton /> }.into_any(),
         Some(Err(e)) => view! { <div class="wizard__status is-error"><Icon name="error_outline" /><span>{e}</span></div> }.into_any(),
-        Some(Ok(found)) if found.hits.is_empty() => {
+        Some(Ok(found)) if found.page.hits.is_empty() => {
             view! { <EmptyState icon="search_off" title=Signal::derive(move || i18n.t("wizard_nothing_found")) /> }.into_any()
         }
         Some(Ok(found)) => found
+            .page
             .hits
-            .into_iter()
+            .iter()
             .map(|hit| {
-                let (provider, id) = (source.get_untracked(), hit.project_id.clone());
+                let pick = found.pick(hit);
+                let (provider, id) = (pick.provider.clone(), pick.project_id.clone());
                 let picked = Signal::derive(move || wizard.state.with(|s| s.has_pick(&provider, &id)));
-                let for_click = hit.clone();
                 view! {
-                    <ProjectRow hit=hit>
+                    <ProjectRow hit=hit.clone()>
                         {move || {
-                            let hit = for_click.clone();
+                            let pick = pick.clone();
                             if picked.get() {
                                 view! {
-                                    <Button variant=Variant::Ghost icon="check" on_click=move |_| toggle(hit.clone())>
+                                    <Button variant=Variant::Ghost icon="check" on_click=move |_| toggle(pick.clone())>
                                         {move || i18n.t("wizard_added")}
                                     </Button>
                                 }.into_any()
                             } else {
                                 view! {
-                                    <Button variant=Variant::Primary icon="playlist_add" on_click=move |_| toggle(hit.clone())>
+                                    <Button variant=Variant::Primary icon="playlist_add" on_click=move |_| toggle(pick.clone())>
                                         {move || i18n.t("wizard_add")}
                                     </Button>
                                 }.into_any()
@@ -225,5 +250,36 @@ pub fn Content(wizard: Wizard) -> impl IntoView {
             <div class="builds__list">{rows}</div>
             <Pager page=shown_page on_page=Callback::new(move |offset: u32| search(offset)) />
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pick_belongs_to_the_search_it_came_from() {
+        let hit = ProjectHit {
+            project_id: "abc".into(),
+            slug: "faithful".into(),
+            title: "Faithful".into(),
+            author: "x".into(),
+            description: String::new(),
+            downloads: 1,
+            icon_url: None,
+            url: None,
+        };
+        // The answer of a search made on CurseForge's resource packs, though the tabs moved on.
+        let found = Found {
+            provider: "curseforge".into(),
+            kind: ContentKind::ResourcePacks,
+            page: SearchPage::default(),
+        };
+        let pick = found.pick(&hit);
+        assert_eq!((pick.provider.as_str(), pick.kind), ("curseforge", ContentKind::ResourcePacks));
+        assert_eq!(
+            (pick.project_id.as_str(), pick.slug.as_str(), pick.title.as_str()),
+            ("abc", "faithful", "Faithful")
+        );
     }
 }
