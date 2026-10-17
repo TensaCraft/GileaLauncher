@@ -999,5 +999,7 @@
   "window_size_width": "Ширина",
   "window_size_height": "Висота",
   "window_size_apply": "Застосувати",
-  "window_size_invalid": "Розмір має бути від {min} до {max}."
+  "window_size_invalid": "Розмір має бути від {min} до {max}.",
+  "build_description_label": "Опис",
+  "build_description_hint": "Коротко, що це за збірка"
 }

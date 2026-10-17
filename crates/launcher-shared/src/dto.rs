@@ -628,7 +628,13 @@ pub struct BuildSettingsDto {
     /// Its own account (a profile key); `None` follows the launcher's settings.
     #[serde(default)]
     pub profile: Option<String>,
+    /// A short line on what the build is (`DESCRIPTION_MAX` characters at most).
+    #[serde(default)]
+    pub description: String,
 }
+
+/// The longest a build's description may be, in characters.
+pub const DESCRIPTION_MAX: usize = 300;
 
 /// What "Save" on the build settings page sends.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -649,6 +655,9 @@ pub struct BuildSettingsUpdate {
     /// Its own account (a profile key); `None`: none of its own.
     #[serde(default)]
     pub profile: Option<String>,
+    /// Its description, trimmed and cut to `DESCRIPTION_MAX`; `None` keeps it.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// A build runs mods only with a mod loader (the original's `mods_supported`).

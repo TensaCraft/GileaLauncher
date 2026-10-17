@@ -117,6 +117,7 @@ pub fn settings_of(build: &Build, mc_dir: &Path, auto_java: Option<PathBuf>) -> 
         server_host,
         server_port,
         profile: assigned_profile(options).map(str::to_string),
+        description: build.description.clone(),
     }
 }
 

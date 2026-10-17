@@ -119,6 +119,7 @@ impl MockBuilds {
             server_host: String::new(),
             server_port: None,
             profile: build.profile.clone(),
+            description: build.description.clone(),
         })
     }
 
@@ -157,8 +158,13 @@ impl MockBuilds {
         if update.image_path.is_some() {
             settings.image = Some(MOCK_ICON.to_string());
         }
+        if let Some(description) = &update.description {
+            settings.description =
+                description.trim().chars().take(launcher_shared::DESCRIPTION_MAX).collect();
+        }
         if let Some(build) = self.builds.iter_mut().find(|b| b.key == key) {
             build.name = name;
+            build.description = settings.description.clone();
             build.image = settings.image.clone();
             build.profile = settings.profile.clone();
             if let Some(component) = &settings.component {

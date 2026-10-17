@@ -424,6 +424,7 @@ fn build_settings_keep_their_wire_shape() {
         image_path: None,
         remove_image: false,
         profile: Some("Alex".into()),
+        description: Some("Для друзів".into()),
     };
     let v = serde_json::to_value(&update).unwrap();
     assert_eq!(
@@ -444,6 +445,7 @@ fn build_settings_keep_their_wire_shape() {
         server_host: String::new(),
         server_port: None,
         profile: None,
+        description: "Для друзів".into(),
     };
     let v = serde_json::to_value(&settings).unwrap();
     assert_eq!(serde_json::from_value::<BuildSettingsDto>(v).unwrap(), settings);
@@ -451,6 +453,13 @@ fn build_settings_keep_their_wire_shape() {
     let mut old = serde_json::to_value(&update).unwrap();
     old.as_object_mut().unwrap().remove("profile");
     assert_eq!(serde_json::from_value::<BuildSettingsUpdate>(old).unwrap().profile, None);
+    // And one from before descriptions: none given (kept), none read.
+    let mut older = serde_json::to_value(&update).unwrap();
+    older.as_object_mut().unwrap().remove("description");
+    assert_eq!(serde_json::from_value::<BuildSettingsUpdate>(older).unwrap().description, None);
+    let mut plain = serde_json::to_value(&settings).unwrap();
+    plain.as_object_mut().unwrap().remove("description");
+    assert_eq!(serde_json::from_value::<BuildSettingsDto>(plain).unwrap().description, "");
 }
 
 #[test]

@@ -381,6 +381,7 @@ async fn a_forge_build_is_installed_and_registered() {
 
 fn update_from(settings: &launcher_shared::BuildSettingsDto) -> BuildSettingsUpdate {
     BuildSettingsUpdate {
+        description: None,
         name: settings.name.clone(),
         component: settings.component.clone(),
         java_path: settings.java_path.clone(),
@@ -658,4 +659,21 @@ async fn copying_a_build_with_an_open_world_is_refused() {
     drop(game);
     assert_eq!(w.versions.list().len(), 1);
     assert!(!w.games.join("aero_copy").exists() && !w.feedback.is_busy());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_keeps_the_description_it_is_given() {
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    let w = world(&fake);
+    let build = w.service.install_vanilla("Aero", "1.21.1").await.unwrap();
+    let base = update_from(&w.service.settings(&build.key).unwrap());
+    let set = BuildSettingsUpdate { description: Some("  Тест  ".into()), ..base.clone() };
+    assert_eq!(w.service.update_settings(&build.key, set).unwrap().description, "Тест");
+    let kept = w.service.update_settings(&build.key, base.clone()).unwrap();
+    assert_eq!(kept.description, "Тест", "none keeps it");
+    let long = BuildSettingsUpdate { description: Some("а".repeat(400)), ..base };
+    let cut = w.service.update_settings(&build.key, long).unwrap();
+    assert_eq!(cut.description.chars().count(), 300);
+    assert_eq!(w.service.settings(&build.key).unwrap().description.chars().count(), 300);
 }

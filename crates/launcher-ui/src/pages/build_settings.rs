@@ -11,7 +11,7 @@ use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
     Button, Checkbox, CodeEditor, Dialog, DialogFooter, Field, Icon, NavEntry, Section, Select, SelectOption,
-    SettingRow, SettingsNav, Size, TextInput, Variant, card_image, ipc, use_toasts,
+    SettingRow, SettingsNav, Size, TextArea, TextInput, Variant, card_image, ipc, use_toasts,
 };
 
 use crate::builds::catalog::{CreateRow, build_choices, load_rows};
@@ -106,6 +106,7 @@ pub struct SettingsForm {
     pub remove_image: RwSignal<bool>,
     /// The build's own account (a profile key); empty follows the launcher's settings.
     pub profile: RwSignal<String>,
+    pub description: RwSignal<String>,
 }
 
 impl Default for SettingsForm {
@@ -130,6 +131,7 @@ impl SettingsForm {
             image_path: RwSignal::new(None),
             remove_image: RwSignal::new(false),
             profile: RwSignal::new(String::new()),
+            description: RwSignal::new(String::new()),
         }
     }
 
@@ -151,6 +153,7 @@ impl SettingsForm {
         let _ = self.image_path.try_set(None);
         let _ = self.remove_image.try_set(false);
         let _ = self.profile.try_set(s.profile.clone().unwrap_or_default());
+        let _ = self.description.try_set(s.description.clone());
     }
 
     /// After "Install and use": the new component and the Java the install gave it; everything
@@ -175,6 +178,7 @@ impl SettingsForm {
             image_path: self.image_path.get_untracked(),
             remove_image: self.remove_image.get_untracked(),
             profile: Some(self.profile.get_untracked()).filter(|p| !p.is_empty()),
+            description: Some(self.description.get_untracked()),
         }
     }
 }
@@ -483,6 +487,7 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
         image_path,
         remove_image,
         profile,
+        description,
     } = form;
     let name_error = RwSignal::new(None::<String>);
     let port_error = RwSignal::new(None::<String>);
@@ -644,6 +649,9 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
             <Section icon="tune" title=t("version_section_general") desc=t("version_section_general_desc")>
                 <Field label=t("version_name_label") error=Signal::derive(move || name_error.get())>
                     <TextInput value=name invalid=Signal::derive(move || name_error.get().is_some()) />
+                </Field>
+                <Field label=t("build_description_label")>
+                    <TextArea value=description rows=2 placeholder=t("build_description_hint") />
                 </Field>
                 <Field label=t("loaders_label")>
                     <div class="wrap">
@@ -939,6 +947,7 @@ mod tests {
             server_host: String::new(),
             server_port: None,
             profile: None,
+            description: String::new(),
         }
     }
 

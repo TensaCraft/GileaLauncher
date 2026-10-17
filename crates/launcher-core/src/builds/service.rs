@@ -8,8 +8,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use launcher_shared::{
-    AppError, AppResult, BuildDto, BuildSettingsDto, BuildSettingsUpdate, BuildsSnapshot, ErrorCode,
-    LoaderKind, Text,
+    AppError, AppResult, BuildDto, BuildSettingsDto, BuildSettingsUpdate, BuildsSnapshot, DESCRIPTION_MAX,
+    ErrorCode, LoaderKind, Text,
 };
 use serde_json::{Value, json};
 
@@ -409,6 +409,9 @@ impl BuildService {
         }
         if let Some(path) = update.image_path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
             build.image = Some(read_icon(Path::new(path))?);
+        }
+        if let Some(description) = &update.description {
+            build.description = description.trim().chars().take(DESCRIPTION_MAX).collect();
         }
         build.name = name;
         self.versions.save(&mut build)?;

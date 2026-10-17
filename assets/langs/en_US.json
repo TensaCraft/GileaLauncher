@@ -999,5 +999,7 @@
   "window_size_width": "Width",
   "window_size_height": "Height",
   "window_size_apply": "Apply",
-  "window_size_invalid": "The size must be between {min} and {max}."
+  "window_size_invalid": "The size must be between {min} and {max}.",
+  "build_description_label": "Description",
+  "build_description_hint": "A short line on what this build is"
 }
