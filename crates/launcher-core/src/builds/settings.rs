@@ -12,7 +12,9 @@ use serde_json::{Map, Value, json};
 use launcher_shared::args;
 
 use crate::java::memory::parse_memory_gb;
-use crate::launch::options::{PROFILE_OPTION, assigned_profile, jvm_arguments, server_address};
+use crate::launch::options::{
+    FULLSCREEN_OPTION, PROFILE_OPTION, assigned_profile, jvm_arguments, server_address,
+};
 use crate::storage::versions::Build;
 
 /// The largest icon a build takes.
@@ -118,6 +120,7 @@ pub fn settings_of(build: &Build, mc_dir: &Path, auto_java: Option<PathBuf>) -> 
         server_port,
         profile: assigned_profile(options).map(str::to_string),
         description: build.description.clone(),
+        fullscreen: options.get(FULLSCREEN_OPTION).and_then(Value::as_bool),
     }
 }
 
@@ -152,6 +155,10 @@ pub fn apply_options(build: &mut Build, update: &BuildSettingsUpdate) -> AppResu
     match update.profile.as_deref().map(str::trim).filter(|key| !key.is_empty()) {
         Some(key) => options.insert(PROFILE_OPTION.into(), json!(key)),
         None => options.remove(PROFILE_OPTION),
+    };
+    match update.fullscreen {
+        Some(full) => options.insert(FULLSCREEN_OPTION.into(), json!(full)),
+        None => options.remove(FULLSCREEN_OPTION),
     };
     Ok(())
 }
@@ -206,6 +213,17 @@ mod tests {
         apply_options(&mut b, &update()).unwrap();
         assert!(!b.options.contains_key("profileKey"), "no account of its own: Play asks as usual");
         assert_eq!(settings_of(&b, Path::new("mc"), None).profile, None);
+    }
+
+    #[test]
+    fn the_build_s_own_screen_mode_round_trips() {
+        let mut b = build(json!({"fullscreen": true}));
+        assert_eq!(settings_of(&b, Path::new("mc"), None).fullscreen, Some(true));
+        apply_options(&mut b, &BuildSettingsUpdate { fullscreen: Some(false), ..update() }).unwrap();
+        assert_eq!(b.options["fullscreen"], json!(false));
+        apply_options(&mut b, &update()).unwrap();
+        assert!(!b.options.contains_key("fullscreen"), "none of its own: the launcher's choice");
+        assert_eq!(settings_of(&b, Path::new("mc"), None).fullscreen, None);
     }
 
     #[test]

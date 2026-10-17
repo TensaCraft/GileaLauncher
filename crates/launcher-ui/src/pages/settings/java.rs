@@ -7,8 +7,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    ActionTone, Button, Field, IconAction, InFlight, PathField, Section, SettingRow, TextInput, Variant, ipc,
-    use_toasts,
+    ActionTone, Button, Field, IconAction, InFlight, PathField, Section, SettingRow, Switch, TextInput,
+    Variant, ipc, use_toasts,
 };
 
 use crate::builds::gpu::GpuChoice;
@@ -81,6 +81,7 @@ pub fn JavaSection() -> impl IntoView {
     });
     let gpu = RwSignal::new(gpu_choice(&store.settings.get_untracked().gpu_mode_default).to_string());
     let on_gpu = Callback::new(move |mode: String| writer.apply(SettingUpdate::GpuModeDefault(mode)));
+    let fullscreen = super::mirror_bool(|s| s.game_fullscreen);
 
     let name = RwSignal::new(String::new());
     let path = RwSignal::new(String::new());
@@ -188,6 +189,12 @@ pub fn JavaSection() -> impl IntoView {
             />
             <SettingRow title=t("gpu_mode_default_label")>
                 <GpuChoice value=gpu on_change=on_gpu />
+            </SettingRow>
+            <SettingRow title=t("game_fullscreen") desc=t("game_fullscreen_desc")>
+                <Switch
+                    checked=fullscreen
+                    on_change=Callback::new(move |v| writer.apply(SettingUpdate::GameFullscreen(v)))
+                />
             </SettingRow>
         </Section>
         <Section icon="coffee" title=t("custom_java_section") desc=t("custom_java_section_desc")>

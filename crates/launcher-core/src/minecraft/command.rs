@@ -43,6 +43,8 @@ pub struct LaunchOptions {
     pub world: Option<String>,
     pub disable_multiplayer: bool,
     pub disable_chat: bool,
+    /// The game starts full screen (`--fullscreen`).
+    pub fullscreen: bool,
 }
 
 pub fn classpath_separator(os: Os) -> &'static str {
@@ -263,6 +265,9 @@ pub fn build_command(
     {
         command.extend(["--server".into(), host.clone(), "--port".into(), port.to_string()]);
     }
+    if opts.fullscreen {
+        command.push("--fullscreen".into());
+    }
     if opts.disable_multiplayer {
         command.push("--disableMultiplayer".into());
     }
@@ -431,6 +436,19 @@ mod tests {
         assert!(joined.contains("--width 1280 --height 720"), "{joined}");
         assert!(joined.ends_with("--quickPlayMultiplayer mc.example.org:25565"), "{joined}");
         assert!(!joined.contains("--server") && !joined.contains("${quickPlayMultiplayer}"), "{joined}");
+    }
+
+    #[test]
+    fn a_full_screen_game_is_asked_for_by_new_and_old_versions_alike() {
+        let full = LaunchOptions { fullscreen: true, ..opts() };
+        let mc = Path::new("MC");
+        for (json, version) in [(modern(), "1.21.1"), (legacy(), "1.12.2")] {
+            let cmd = build_command(mc, json.as_object().unwrap(), Some(version), &full, &windows()).unwrap();
+            assert_eq!(cmd.iter().filter(|a| *a == "--fullscreen").count(), 1, "{version}: {cmd:?}");
+            let windowed =
+                build_command(mc, json.as_object().unwrap(), Some(version), &opts(), &windows()).unwrap();
+            assert!(!windowed.iter().any(|a| a == "--fullscreen"), "{version}");
+        }
     }
 
     #[test]

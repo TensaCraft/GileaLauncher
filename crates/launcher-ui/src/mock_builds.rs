@@ -131,6 +131,7 @@ impl MockBuilds {
             server_port: None,
             profile: build.profile.clone(),
             description: build.description.clone(),
+            fullscreen: None,
         })
     }
 
@@ -163,6 +164,7 @@ impl MockBuilds {
         settings.server_host = update.server_host.trim().to_string();
         settings.server_port = server_port.filter(|_| !settings.server_host.is_empty());
         settings.profile = update.profile.clone().filter(|p| !p.trim().is_empty());
+        settings.fullscreen = update.fullscreen;
         if update.remove_image {
             settings.image = None;
         }

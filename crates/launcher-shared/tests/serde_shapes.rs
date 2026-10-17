@@ -425,6 +425,7 @@ fn build_settings_keep_their_wire_shape() {
         remove_image: false,
         profile: Some("Alex".into()),
         description: Some("Для друзів".into()),
+        fullscreen: Some(true),
     };
     let v = serde_json::to_value(&update).unwrap();
     assert_eq!(
@@ -446,6 +447,7 @@ fn build_settings_keep_their_wire_shape() {
         server_port: None,
         profile: None,
         description: "Для друзів".into(),
+        fullscreen: None,
     };
     let v = serde_json::to_value(&settings).unwrap();
     assert_eq!(serde_json::from_value::<BuildSettingsDto>(v).unwrap(), settings);

@@ -34,6 +34,7 @@ fn update_from(settings: &BuildSettingsDto) -> BuildSettingsUpdate {
         remove_image: false,
         profile: settings.profile.clone(),
         description: None,
+        fullscreen: settings.fullscreen,
     }
 }
 

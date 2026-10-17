@@ -11,6 +11,7 @@ use crate::builds::service::GPU_MODE_DEFAULT_KEY;
 use crate::java::gpu::GpuMode;
 use crate::java::memory::{MemoryLimits, SanitizedJvm, parse_memory_value, sanitize_jvm_arguments};
 use crate::minecraft::command::LaunchOptions;
+use crate::settings::GAME_FULLSCREEN_KEY;
 use crate::storage::config::ConfigStore;
 use crate::storage::versions::Build;
 
@@ -18,6 +19,8 @@ pub const DEFAULT_MAX_RAM_KEY: &str = "default_max_ram_gb";
 pub const DEFAULT_SERVER_PORT: u16 = 25565;
 /// The build's own account (a profile key): its games start with it, and Play asks no account.
 pub const PROFILE_OPTION: &str = "profileKey";
+/// A build's own choice of a full screen game (`true`) or a window (`false`).
+pub const FULLSCREEN_OPTION: &str = "fullscreen";
 
 /// The account `options` give the build, when it has its own.
 pub fn assigned_profile(options: &Map<String, Value>) -> Option<&str> {
@@ -192,6 +195,10 @@ pub fn launch_options(input: OptionsInput<'_>) -> (LaunchOptions, GpuMode) {
         world: None,
         disable_multiplayer: truthy(options.get("disableMultiplayer")),
         disable_chat: truthy(options.get("disableChat")),
+        fullscreen: options
+            .get(FULLSCREEN_OPTION)
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| config.get_bool(GAME_FULLSCREEN_KEY, false)),
     };
     (opts, gpu)
 }
@@ -354,6 +361,33 @@ mod tests {
             limits,
         };
         assert_eq!(launch_options(input).1, GpuMode::Auto);
+    }
+
+    #[test]
+    fn full_screen_is_the_build_s_own_choice_else_the_launcher_s() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = ConfigStore::open(dir.path().join("config.json"));
+        let limits = MemoryLimits::from_bytes(Some(16 * crate::java::memory::GIB), None);
+        let full = |b: &Build, config: &ConfigStore| {
+            launch_options(OptionsInput {
+                build: b,
+                identity: &identity(),
+                mc_dir: Path::new("MC"),
+                component: "1.21.1",
+                java: PathBuf::from("J"),
+                config,
+                limits,
+            })
+            .0
+            .fullscreen
+        };
+        let (plain, own_full, own_window) =
+            (build(json!({})), build(json!({"fullscreen": true})), build(json!({"fullscreen": false})));
+        assert!(!full(&plain, &config), "a window unless asked");
+        assert!(full(&own_full, &config));
+        config.set(GAME_FULLSCREEN_KEY, json!("yes")).unwrap();
+        assert!(full(&plain, &config), "the launcher's choice");
+        assert!(!full(&own_window, &config), "the build's own wins");
     }
 
     #[test]

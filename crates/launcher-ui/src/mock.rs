@@ -28,6 +28,7 @@ pub fn apply_update(s: &mut SettingsSnapshot, update: &SettingUpdate) {
         SettingUpdate::WindowSize(v) => s.window_size = v,
         SettingUpdate::HomeRecentBuilds(v) => s.home_recent_builds = v,
         SettingUpdate::ItemsPerPage(v) => s.items_per_page = v,
+        SettingUpdate::GameFullscreen(v) => s.game_fullscreen = v,
         SettingUpdate::CardPlay(play) => s.card_play = play,
         SettingUpdate::HomeRecentClear(clear) => {
             s.home_recent_cleared_ms = clear.then(|| js_sys::Date::now() as u64);
@@ -230,6 +231,7 @@ pub fn install() {
             Vec::new()
         },
         items_per_page: launcher_shared::provider::SEARCH_LIMIT,
+        game_fullscreen: false,
         revision: 0,
     }));
     let info = AppInfo {

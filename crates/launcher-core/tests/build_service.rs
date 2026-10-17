@@ -393,6 +393,7 @@ fn update_from(settings: &launcher_shared::BuildSettingsDto) -> BuildSettingsUpd
         image_path: None,
         remove_image: false,
         profile: settings.profile.clone(),
+        fullscreen: settings.fullscreen,
     }
 }
 

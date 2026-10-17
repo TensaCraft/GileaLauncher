@@ -286,6 +286,9 @@ pub struct SettingsSnapshot {
     /// Results per page in the providers' search lists (one of `provider::PAGE_SIZES`).
     #[serde(default = "items_per_page_default")]
     pub items_per_page: u32,
+    /// Games start full screen, unless a build chose otherwise.
+    #[serde(default)]
+    pub game_fullscreen: bool,
     /// How many changes were saved before this snapshot (this run): a later answer has a higher
     /// one.
     #[serde(default)]
@@ -335,6 +338,8 @@ pub enum SettingUpdate {
     HomeRecentBuilds(u8),
     /// Results per page in the providers' search lists (one of `provider::PAGE_SIZES`).
     ItemsPerPage(u32),
+    /// Games start full screen.
+    GameFullscreen(bool),
     /// `true` clears «Продовжити гру» now; `false` gives its history back.
     HomeRecentClear(bool),
     CardPlay(CardPlay),
@@ -675,6 +680,9 @@ pub struct BuildSettingsDto {
     /// A short line on what the build is (`DESCRIPTION_MAX` characters at most).
     #[serde(default)]
     pub description: String,
+    /// Its own choice of a full screen game (`false`: a window); `None` follows the launcher's.
+    #[serde(default)]
+    pub fullscreen: Option<bool>,
 }
 
 /// The longest a build's description may be, in characters.
@@ -702,6 +710,9 @@ pub struct BuildSettingsUpdate {
     /// Its description, trimmed and cut to `DESCRIPTION_MAX`; `None` keeps it.
     #[serde(default)]
     pub description: Option<String>,
+    /// Its own choice of a full screen game; `None`: none of its own.
+    #[serde(default)]
+    pub fullscreen: Option<bool>,
 }
 
 /// A build runs mods only with a mod loader (the original's `mods_supported`).

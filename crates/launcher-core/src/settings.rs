@@ -62,6 +62,7 @@ pub fn entry(update: SettingUpdate) -> AppResult<(&'static str, Option<serde_jso
             return Err(invalid("a page size not offered").with_param("size", size.to_string()));
         }
         SettingUpdate::ItemsPerPage(size) => (ITEMS_PER_PAGE_KEY, Some(json!(size))),
+        SettingUpdate::GameFullscreen(v) => (GAME_FULLSCREEN_KEY, Some(json!(yes_no(v)))),
         SettingUpdate::HomeRecentClear(clear) => (HOME_RECENT_CLEARED_KEY, clear.then(|| json!(now_ms()))),
         SettingUpdate::CardPlay(play) => (CARD_PLAY_KEY, Some(json!(play.as_config_str()))),
         SettingUpdate::Hints(v) => (HINTS_KEY, Some(json!(yes_no(v)))),
@@ -104,6 +105,8 @@ pub const HOME_RECENT_CLEARED_KEY: &str = "home_recent_cleared_ms";
 pub const CARD_PLAY_KEY: &str = "home_card_play";
 /// Results per page in the providers' search lists.
 pub const ITEMS_PER_PAGE_KEY: &str = "items_per_page";
+/// Games start full screen (`yes`), unless a build chose otherwise.
+pub const GAME_FULLSCREEN_KEY: &str = "game_fullscreen";
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
@@ -188,6 +191,7 @@ impl SettingsService {
                 .and_then(|n| u32::try_from(n).ok())
                 .filter(|n| PAGE_SIZES.contains(n))
                 .unwrap_or(SEARCH_LIMIT),
+            game_fullscreen: c.get_bool(GAME_FULLSCREEN_KEY, false),
         }
     }
 
@@ -305,6 +309,16 @@ mod tests {
         assert_eq!(svc.apply(SettingUpdate::HomeRecentBuilds(11)).unwrap_err().code, ErrorCode::InvalidInput);
         svc.config.set("home_recent_builds", json!(400)).unwrap();
         assert_eq!(svc.snapshot().home_recent_builds, 10, "a hand-edited count is held to the most");
+    }
+
+    #[test]
+    fn games_start_in_a_window_until_full_screen_is_chosen() {
+        let home = tempfile::tempdir().unwrap();
+        let svc = service(home.path());
+        assert!(!svc.snapshot().game_fullscreen);
+        assert!(svc.apply(SettingUpdate::GameFullscreen(true)).unwrap().game_fullscreen);
+        assert_eq!(svc.config.get_str(GAME_FULLSCREEN_KEY).as_deref(), Some("yes"));
+        assert!(!svc.apply(SettingUpdate::GameFullscreen(false)).unwrap().game_fullscreen);
     }
 
     #[test]

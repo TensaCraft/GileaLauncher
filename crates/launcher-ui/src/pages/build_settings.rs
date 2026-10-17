@@ -10,8 +10,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    Button, Checkbox, CodeEditor, Dialog, DialogFooter, Field, Icon, NavEntry, Section, Select, SelectOption,
-    SettingRow, SettingsNav, Size, TextInput, Variant, card_image, ipc, use_toasts,
+    Button, Checkbox, CodeEditor, Dialog, DialogFooter, Field, Icon, NavEntry, Section, SegOption, Segmented,
+    Select, SelectOption, SettingRow, SettingsNav, Size, TextInput, Variant, card_image, ipc, use_toasts,
 };
 
 use crate::builds::catalog::{CreateRow, build_choices, load_rows};
@@ -108,7 +108,16 @@ pub struct SettingsForm {
     /// The build's own account (a profile key); empty follows the launcher's settings.
     pub profile: RwSignal<String>,
     pub description: RwSignal<String>,
+    /// `SCREEN_LAUNCHER`, `SCREEN_FULL` or `SCREEN_WINDOW`.
+    pub fullscreen: RwSignal<String>,
 }
+
+/// The game's screen as the launcher's settings say.
+pub const SCREEN_LAUNCHER: &str = "launcher";
+/// The game full screen, whatever the launcher's settings say.
+pub const SCREEN_FULL: &str = "full";
+/// The game in a window, whatever the launcher's settings say.
+pub const SCREEN_WINDOW: &str = "window";
 
 impl Default for SettingsForm {
     fn default() -> SettingsForm {
@@ -133,6 +142,7 @@ impl SettingsForm {
             remove_image: RwSignal::new(false),
             profile: RwSignal::new(String::new()),
             description: RwSignal::new(String::new()),
+            fullscreen: RwSignal::new(SCREEN_LAUNCHER.to_string()),
         }
     }
 
@@ -155,6 +165,12 @@ impl SettingsForm {
         let _ = self.remove_image.try_set(false);
         let _ = self.profile.try_set(s.profile.clone().unwrap_or_default());
         let _ = self.description.try_set(s.description.clone());
+        let screen = match s.fullscreen {
+            None => SCREEN_LAUNCHER,
+            Some(true) => SCREEN_FULL,
+            Some(false) => SCREEN_WINDOW,
+        };
+        let _ = self.fullscreen.try_set(screen.to_string());
     }
 
     /// After "Install and use": the new component and the Java the install gave it; everything
@@ -180,6 +196,11 @@ impl SettingsForm {
             remove_image: self.remove_image.get_untracked(),
             profile: Some(self.profile.get_untracked()).filter(|p| !p.is_empty()),
             description: Some(self.description.get_untracked()),
+            fullscreen: match self.fullscreen.get_untracked().as_str() {
+                SCREEN_FULL => Some(true),
+                SCREEN_WINDOW => Some(false),
+                _ => None,
+            },
         }
     }
 }
@@ -489,7 +510,15 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
         remove_image,
         profile,
         description,
+        fullscreen,
     } = form;
+    let screen_options = Signal::derive(move || {
+        vec![
+            SegOption::new(SCREEN_LAUNCHER, i18n.t("screen_mode_launcher")),
+            SegOption::new(SCREEN_FULL, i18n.t("screen_mode_full")),
+            SegOption::new(SCREEN_WINDOW, i18n.t("screen_mode_window")),
+        ]
+    });
     let name_error = RwSignal::new(None::<String>);
     let port_error = RwSignal::new(None::<String>);
     let icon_error = RwSignal::new(None::<String>);
@@ -715,6 +744,9 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                 </SettingRow>
                 <SettingRow title=t("gpu_mode_label")>
                     <GpuChoice value=gpu />
+                </SettingRow>
+                <SettingRow title=t("screen_mode_label") desc=t("screen_mode_desc")>
+                    <Segmented options=screen_options value=fullscreen />
                 </SettingRow>
                 <RamSetting
                     title=t("max_ram_label")
@@ -952,7 +984,25 @@ mod tests {
             server_port: None,
             profile: None,
             description: String::new(),
+            fullscreen: None,
         }
+    }
+
+    #[test]
+    fn the_screen_mode_follows_the_launcher_unless_the_build_chose() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let form = SettingsForm::new();
+            form.fill(&saved("1.21.1", None));
+            assert_eq!(form.fullscreen.get_untracked(), SCREEN_LAUNCHER);
+            assert_eq!(form.update().fullscreen, None);
+            form.fullscreen.set(SCREEN_FULL.into());
+            assert_eq!(form.update().fullscreen, Some(true));
+            form.fullscreen.set(SCREEN_WINDOW.into());
+            assert_eq!(form.update().fullscreen, Some(false));
+            form.fill(&BuildSettingsDto { fullscreen: Some(true), ..saved("1.21.1", None) });
+            assert_eq!(form.fullscreen.get_untracked(), SCREEN_FULL);
+        });
     }
 
     #[test]

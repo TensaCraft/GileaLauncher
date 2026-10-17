@@ -1071,5 +1071,12 @@
   "wizard_summary_build": "Build",
   "wizard_auto": "Automatic",
   "wizard_no_icon": "No icon",
-  "wizard_no_description": "No description"
+  "wizard_no_description": "No description",
+  "game_fullscreen": "Full screen game",
+  "game_fullscreen_desc": "Minecraft starts full screen. A build can choose otherwise in its own settings.",
+  "screen_mode_label": "Game screen",
+  "screen_mode_desc": "Full screen or a window; “As in the launcher” takes the choice from the Java settings.",
+  "screen_mode_launcher": "As in the launcher",
+  "screen_mode_full": "Full screen",
+  "screen_mode_window": "Window"
 }

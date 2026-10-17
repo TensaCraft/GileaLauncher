@@ -1071,5 +1071,12 @@
   "wizard_summary_build": "Збірка",
   "wizard_auto": "Автоматично",
   "wizard_no_icon": "Без іконки",
-  "wizard_no_description": "Без опису"
+  "wizard_no_description": "Без опису",
+  "game_fullscreen": "Гра на весь екран",
+  "game_fullscreen_desc": "Minecraft запускається одразу на весь екран. Збірка може мати свій вибір у своїх налаштуваннях.",
+  "screen_mode_label": "Екран гри",
+  "screen_mode_desc": "На весь екран чи у вікні; «Як у лаунчері» бере вибір із налаштувань Java.",
+  "screen_mode_launcher": "Як у лаунчері",
+  "screen_mode_full": "На весь екран",
+  "screen_mode_window": "У вікні"
 }
