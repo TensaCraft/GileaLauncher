@@ -277,6 +277,7 @@ pub fn run() -> i32 {
             game_commands::catalog_minecraft,
             game_commands::catalog_loader,
             game_commands::build_create_loader,
+            game_commands::build_create_planned,
             game_commands::build_settings_get,
             game_commands::build_settings_save,
             game_commands::build_change_component,

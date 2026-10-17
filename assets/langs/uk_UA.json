@@ -1001,5 +1001,8 @@
   "window_size_apply": "Застосувати",
   "window_size_invalid": "Розмір має бути від {min} до {max}.",
   "build_description_label": "Опис",
-  "build_description_hint": "Коротко, що це за збірка"
+  "build_description_hint": "Коротко, що це за збірка",
+  "build_planned_done": "Збірку «{name}» створено: встановлено {done} з {total}",
+  "build_planned_failed": "Не вдалося встановити в «{name}»: {titles}",
+  "build_planned_settings_failed": "Налаштування збірки {version} не збереглися — змініть їх у налаштуваннях збірки"
 }

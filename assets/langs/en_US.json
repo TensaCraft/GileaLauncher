@@ -1001,5 +1001,8 @@
   "window_size_apply": "Apply",
   "window_size_invalid": "The size must be between {min} and {max}.",
   "build_description_label": "Description",
-  "build_description_hint": "A short line on what this build is"
+  "build_description_hint": "A short line on what this build is",
+  "build_planned_done": "“{name}” is created: {done} of {total} installed",
+  "build_planned_failed": "Not installed in “{name}”: {titles}",
+  "build_planned_settings_failed": "The settings of {version} were not saved; change them in the build's settings"
 }

@@ -12,7 +12,7 @@ use launcher_core::storage::versions::Build;
 use launcher_shared::recent::{Join, RecentBuild, ServerStatus};
 use launcher_shared::{
     AppError, AppResult, BuildDto, BuildSettingsDto, BuildSettingsUpdate, BuildsSnapshot, CatalogVersion,
-    ErrorCode, JavaList, LoaderCatalog, LoaderKind, MemoryInfo, Text, names,
+    ErrorCode, JavaList, LoaderCatalog, LoaderKind, MemoryInfo, PlannedBuild, Text, names,
 };
 use tauri::{AppHandle, Emitter, State};
 
@@ -85,6 +85,25 @@ pub async fn build_create_loader(
     let build = core.builds.install_loader(&name, loader, &mc, &loader_version).await?;
     announce_builds(&app, &core);
     Ok(dto(&core, &build))
+}
+
+/// The build wizard's build: installed, set up and given the picked content.
+#[tauri::command]
+pub async fn build_create_planned(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    build: PlannedBuild,
+) -> AppResult<BuildDto> {
+    let core = state.core.clone();
+    let announce = {
+        let (app, core) = (app.clone(), core.clone());
+        move |_: &launcher_core::storage::versions::Build| {
+            announce_builds(&app, &core);
+        }
+    };
+    let made = launcher_core::builds::planned::create_planned(&core, build, &announce).await?;
+    announce_builds(&app, &core);
+    Ok(dto(&core, &made))
 }
 
 #[tauri::command]

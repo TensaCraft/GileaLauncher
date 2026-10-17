@@ -2,5 +2,6 @@
 
 pub mod components;
 pub mod ids;
+pub mod planned;
 pub mod service;
 pub mod settings;
