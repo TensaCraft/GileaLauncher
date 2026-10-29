@@ -39,6 +39,7 @@ use crate::platform::shortcuts::ShortcutService;
 use crate::recent::RecentService;
 use crate::settings::{MINECRAFT_DIR_KEY, SettingsService};
 use crate::setup::{self, SetupOutcome};
+use crate::skins::{SkinConfig, SkinService};
 use crate::storage::config::ConfigStore;
 use crate::storage::housekeeping::{StorageDeps, StorageService};
 use crate::storage::versions::VersionStore;
@@ -78,6 +79,8 @@ pub struct CoreApp {
     pub modules: ModuleRegistry,
     pub settings: SettingsService,
     pub auth: Arc<AuthService>,
+    /// Players' skins: the texture, the head, the front; Mojang first.
+    pub skins: Arc<SkinService>,
     /// Build records (`games/<id>/version.json`).
     pub versions: Arc<VersionStore>,
     /// The backups folder, as the settings name it when asked.
@@ -163,7 +166,7 @@ impl CoreApp {
         let _ = modules.init_all(&ctx);
 
         let auth = AuthService::new(
-            AuthConfig::new(MS_CLIENT_ID, &paths.app_state_dir, &paths.cache_dir),
+            AuthConfig::new(MS_CLIENT_ID, &paths.app_state_dir),
             feedback.clone(),
             sink.clone(),
             opts.opener.clone(),
@@ -173,6 +176,7 @@ impl CoreApp {
         }
         // The one downloader every download of the app goes through.
         let downloader = Arc::new(Downloader::new(DownloaderConfig::default())?);
+        let skins = Arc::new(SkinService::new(SkinConfig::new(&paths.cache_dir), downloader.clone())?);
         let updater = UpdateService::new(
             UpdateConfig {
                 api_base: UPDATE_API.to_string(),
@@ -328,6 +332,7 @@ impl CoreApp {
             modules,
             settings,
             auth,
+            skins,
             versions,
             instances,
             shared,

@@ -294,6 +294,7 @@ impl MockSkins {
                 variant: s.entry.variant,
                 data: data_url(&s.png),
                 library_id: Some(s.entry.id.clone()),
+                default: false,
             }),
             capes: self
                 .capes

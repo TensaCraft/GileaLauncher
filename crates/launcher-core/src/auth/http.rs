@@ -81,10 +81,6 @@ impl AuthHttp {
         Ok(Self { client, backoff: timings.retry_backoff })
     }
 
-    pub fn client(&self) -> &Client {
-        &self.client
-    }
-
     pub async fn post_form(
         &self,
         context: &str,

@@ -119,7 +119,7 @@ async fn world_with(
     let feedback = FeedbackService::new(sink.clone());
     let config = Arc::new(ConfigStore::open(state.join("config.json")));
     let auth = AuthService::new(
-        AuthConfig::new(MS_CLIENT_ID, &state, &tmp.path().join("cache")),
+        AuthConfig::new(MS_CLIENT_ID, &state),
         feedback.clone(),
         sink.clone(),
         Arc::new(NoOpener),

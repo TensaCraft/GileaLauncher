@@ -6,11 +6,11 @@ use std::sync::{Arc, Mutex};
 
 use launcher_core::feedback::{EventSink, FeedbackService};
 use launcher_core::net::downloader::{Downloader, DownloaderConfig, Origin};
+use launcher_core::skins::{Player as Wearer, SkinConfig, SkinEndpoints, SkinService, render};
 use launcher_shared::{
     AccountKind, ActivityEntry, Alert, AppError, AppResult, ErrorCode, OpsSnapshot, ProfileDto, Toast,
 };
 use module_skins::backend::mojang::{CallError, Endpoints, MojangClient};
-use module_skins::backend::png::read_skin;
 use module_skins::backend::service::{Deps, SkinsService, TokenFuture};
 use module_skins::dto::{CHANGED_EVENT, MESSAGE, SkinVariant};
 use support::fake_services::{self, Fake, Player, TOKEN};
@@ -34,7 +34,17 @@ fn skin_png(mark: u8, slim: bool) -> Vec<u8> {
     png.into_inner()
 }
 
+/// The skin as the launcher keeps it.
+fn normalised(bytes: &[u8]) -> Vec<u8> {
+    render::normalise(bytes).unwrap()
+}
+
+fn hash_of(bytes: &[u8]) -> String {
+    render::sha256(&normalised(bytes))
+}
+
 const PROFILE_ID: &str = "0123456789abcdef0123456789abcdef";
+const ALEX_ID: &str = "bb22bb22bb22bb22bb22bb22bb22bb22";
 
 #[derive(Default)]
 struct Events(Mutex<Vec<String>>);
@@ -65,16 +75,22 @@ struct Rig {
     fake: Fake,
     dir: tempfile::TempDir,
     svc: SkinsService,
+    /// The core's skins, the heads among them.
+    skins: Arc<SkinService>,
     /// The token source's calls: `(profile, force)`.
     calls: Arc<Mutex<Vec<(String, bool)>>>,
     events: Arc<Events>,
-    forgotten: Arc<Mutex<Vec<String>>>,
 }
 
 impl Rig {
     fn library_names(&self) -> Vec<String> {
         self.svc.library().into_iter().map(|s| s.name).collect()
     }
+}
+
+/// Steve_42, whose head the launcher draws.
+fn steve() -> Wearer {
+    Wearer::new(PROFILE_ID, "Steve_42")
 }
 
 /// The service against a fake: profile `steve` («Steve_42») gives `stale` unless forced, then
@@ -84,7 +100,6 @@ async fn rig() -> Rig {
     let dir = tempfile::tempdir().unwrap();
     let calls = Arc::new(Mutex::new(Vec::new()));
     let events = Arc::new(Events::default());
-    let forgotten = Arc::new(Mutex::new(Vec::new()));
     let seen = calls.clone();
     let tokens = Arc::new(move |key: &str, force: bool| -> TokenFuture {
         seen.lock().unwrap().push((key.to_string(), force));
@@ -100,7 +115,10 @@ async fn rig() -> Rig {
             }
         })
     });
-    let gone = forgotten.clone();
+    let downloader = Arc::new(Downloader::new(DownloaderConfig::default()).unwrap());
+    let mut skins = SkinConfig::new(&dir.path().join("cache"));
+    skins.endpoints = SkinEndpoints::local(&fake.base);
+    let skins = Arc::new(SkinService::new(skins, downloader.clone()).unwrap());
     let deps = Deps {
         endpoints: Endpoints::local(&fake.base),
         tokens,
@@ -111,15 +129,15 @@ async fn rig() -> Rig {
                 profile("alex", AccountKind::Microsoft, true),
             ]
         }),
-        forget_avatar: Arc::new(move |key: &str| gone.lock().unwrap().push(key.to_string())),
-        downloader: Arc::new(Downloader::new(DownloaderConfig::default()).unwrap()),
+        skins: skins.clone(),
+        downloader,
         textures: Origin::new(|url| url.host_str() == Some("127.0.0.1")),
         feedback: FeedbackService::new(events.clone()),
         state_dir: dir.path().join("state"),
         cache_dir: dir.path().join("cache"),
     };
     let svc = SkinsService::new(deps).unwrap();
-    Rig { fake, dir, svc, calls, events, forgotten }
+    Rig { fake, dir, svc, skins, calls, events }
 }
 
 /// `steve` takes any token; he wears skin `mark` and has two capes, the first on.
@@ -134,6 +152,17 @@ fn dressed(rig: &Rig, mark: u8, slim: bool) {
         ("c2".into(), "Vanilla".into(), "cape2".into()),
     ];
     account.active_cape = Some("c1".into());
+}
+
+/// Mojang's session server knows Steve_42 in skin `texture`: his head is drawn from it.
+fn known_head(rig: &Rig, texture: &str, mark: u8) {
+    rig.fake.add_texture(texture, skin_png(mark, false));
+    rig.fake.add_player(Player {
+        id: PROFILE_ID.into(),
+        name: "Steve_42".into(),
+        texture: Some(texture.into()),
+        slim: false,
+    });
 }
 
 fn message<T: std::fmt::Debug>(result: AppResult<T>) -> Option<String> {
@@ -155,8 +184,9 @@ async fn state_adds_the_current_skin_once() {
     dressed(&rig, 7, true);
     let state = rig.svc.state("steve").await.unwrap();
     let skin = state.skin.clone().unwrap();
-    assert_eq!(skin.sha256, read_skin(&skin_png(7, true)).unwrap().sha256);
+    assert_eq!(skin.sha256, hash_of(&skin_png(7, true)));
     assert_eq!(skin.variant, SkinVariant::Slim);
+    assert!(!skin.default);
     assert!(skin.data.starts_with("data:image/png;base64,"));
     let library = rig.svc.library();
     assert_eq!(library.len(), 1);
@@ -184,6 +214,36 @@ async fn state_adds_the_current_skin_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_worn_skin_is_the_head_s_at_once() {
+    let rig = rig().await;
+    dressed(&rig, 7, true);
+    rig.svc.state("steve").await.unwrap();
+    let head = rig.skins.texture(&steve()).await.unwrap();
+    assert_eq!((head.png, head.slim), (normalised(&skin_png(7, true)), true));
+    assert!(rig.fake.all_requests().iter().all(|r| !r.path.starts_with("/session/")), "nothing asked");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn textures_carry_no_token() {
+    let rig = rig().await;
+    dressed(&rig, 7, false);
+    rig.fake.add_texture("alex", skin_png(5, true));
+    rig.fake.add_player(Player {
+        id: ALEX_ID.into(),
+        name: "Alex".into(),
+        texture: Some("alex".into()),
+        slim: true,
+    });
+    rig.svc.state("steve").await.unwrap();
+    rig.svc.import_player("Alex").await.unwrap();
+    let requests = rig.fake.all_requests();
+    let public: Vec<_> = requests.iter().filter(|r| r.path != "/profile").collect();
+    assert_eq!(public.iter().filter(|r| r.path.starts_with("/textures/")).count(), 4, "{public:?}");
+    assert!(public.iter().all(|r| r.bearer.is_none()), "{public:?}");
+    assert!(rig.fake.requests("/profile").iter().all(|r| r.bearer.is_some()), "the account's own does");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_changed_skin_is_read_anew() {
     let rig = rig().await;
     dressed(&rig, 7, false);
@@ -191,7 +251,7 @@ async fn a_changed_skin_is_read_anew() {
     rig.fake.add_texture("changed", skin_png(8, false));
     rig.fake.account().skin = Some(("changed".into(), false));
     let state = rig.svc.state("steve").await.unwrap();
-    assert_eq!(state.skin.unwrap().sha256, read_skin(&skin_png(8, false)).unwrap().sha256);
+    assert_eq!(state.skin.unwrap().sha256, hash_of(&skin_png(8, false)));
     assert_eq!(rig.library_names().len(), 2, "a skin changed elsewhere is kept too");
 }
 
@@ -205,20 +265,25 @@ async fn an_account_without_a_custom_skin_adds_nothing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_default_skin_named_by_the_profile_adds_nothing() {
+async fn a_default_skin_named_by_the_profile_is_shown_but_not_kept() {
     let rig = rig().await;
     dressed(&rig, 9, false);
     rig.fake.account().skin_alias = Some("STEVE".into());
     let state = rig.svc.state("steve").await.unwrap();
-    assert_eq!(state.skin, None, "Minecraft's own skin is no skin of the player's");
-    assert!(rig.svc.library().is_empty());
-    assert!(rig.fake.requests("/textures/current").is_empty());
+    let skin = state.skin.unwrap();
+    assert!(skin.default, "Minecraft's own skin is no skin of the player's");
+    assert_eq!(skin.data, render::data_url(&normalised(&skin_png(9, false))), "its body is shown");
+    assert_eq!((skin.sha256, skin.library_id), (hash_of(&skin_png(9, false)), None));
+    assert!(rig.svc.library().is_empty(), "it is not added to the library");
+    assert_eq!(rig.fake.requests("/textures/current").len(), 1);
     assert_eq!(state.capes.len(), 2, "the capes are still there");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_uploads_the_library_skin_with_its_variant_and_fires_the_event() {
     let rig = rig().await;
+    known_head(&rig, "old", 1);
+    rig.skins.head(&steve(), 64).await.unwrap();
     let file = rig.dir.path().join("Мій скін.png");
     std::fs::write(&file, skin_png(3, false)).unwrap();
     let entry = rig.svc.import_file(&file.to_string_lossy(), None).unwrap();
@@ -228,11 +293,32 @@ async fn apply_uploads_the_library_skin_with_its_variant_and_fires_the_event() {
     let state = rig.svc.apply("steve", &entry.id).await.unwrap();
     let sent = &rig.fake.requests("/skins")[0];
     assert_eq!(sent.fields.get("variant").map(Vec::as_slice), Some(&b"slim"[..]));
-    assert_eq!(sent.fields.get("file"), Some(&read_skin(&skin_png(3, false)).unwrap().png));
+    assert_eq!(sent.fields.get("file"), Some(&normalised(&skin_png(3, false))));
     assert_eq!(state.skin.unwrap().library_id, Some(entry.id.clone()), "the worn skin is the library's");
     assert!(rig.events.0.lock().unwrap().iter().any(|e| e == CHANGED_EVENT));
-    assert_eq!(*rig.forgotten.lock().unwrap(), ["steve"], "the profile's head is drawn again");
+    let head = rig.skins.texture(&steve()).await.unwrap();
+    assert_eq!((head.png, head.slim), (normalised(&skin_png(3, false)), true), "the head is drawn again");
     assert_eq!(rig.library_names(), ["Мій скін"], "the worn skin is not added twice");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn apply_is_refreshed_and_retried_once_after_a_401() {
+    let rig = rig().await;
+    rig.fake.knobs().valid_token = Some(TOKEN.into());
+    let file = rig.dir.path().join("a.png");
+    std::fs::write(&file, skin_png(4, false)).unwrap();
+    let entry = rig.svc.import_file(&file.to_string_lossy(), None).unwrap();
+    let state = rig.svc.apply("steve", &entry.id).await.unwrap();
+    assert_eq!(state.skin.unwrap().library_id, Some(entry.id.clone()));
+    assert_eq!(*rig.calls.lock().unwrap(), [("steve".to_string(), false), ("steve".to_string(), true)]);
+    let bearers: Vec<Option<String>> = rig.fake.requests("/skins").into_iter().map(|r| r.bearer).collect();
+    assert_eq!(bearers, [Some("stale".to_string()), Some(TOKEN.to_string())]);
+
+    rig.fake.knobs().valid_token = Some("nobody's".into());
+    rig.calls.lock().unwrap().clear();
+    assert_eq!(message(rig.svc.apply("steve", &entry.id).await).as_deref(), Some("skins_error_reauth"));
+    assert_eq!(rig.calls.lock().unwrap().len(), 2, "one refresh, one retry, no more");
+    assert_eq!(rig.fake.requests("/skins").len(), 4);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -266,6 +352,15 @@ async fn set_cape_none_takes_it_off() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_refused_cape_says_so() {
+    let rig = rig().await;
+    dressed(&rig, 1, false);
+    let refused = rig.svc.set_cape("steve", Some("c9".into())).await;
+    assert_eq!(message(refused).as_deref(), Some("skins_error_cape_rejected"));
+    assert!(rig.events.0.lock().unwrap().is_empty(), "nothing changed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_401_is_refreshed_and_retried_once() {
     let rig = rig().await;
     rig.fake.knobs().valid_token = Some(TOKEN.into());
@@ -284,6 +379,8 @@ async fn a_401_is_refreshed_and_retried_once() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_429_says_try_again_later() {
     let rig = rig().await;
+    known_head(&rig, "old", 1);
+    let before = rig.skins.texture(&steve()).await.unwrap();
     rig.fake.knobs().profile_status = Some(429);
     assert_eq!(message(rig.svc.state("steve").await).as_deref(), Some("skins_error_rate"));
     rig.fake.knobs().profile_status = None;
@@ -292,7 +389,8 @@ async fn a_429_says_try_again_later() {
     let entry = rig.svc.import_file(&file.to_string_lossy(), None).unwrap();
     rig.fake.knobs().upload_status = Some(400);
     assert_eq!(message(rig.svc.apply("steve", &entry.id).await).as_deref(), Some("skins_error_rejected"));
-    assert!(rig.forgotten.lock().unwrap().is_empty(), "nothing changed, nothing forgotten");
+    assert_eq!(rig.skins.texture(&steve()).await, Some(before), "nothing changed, nothing forgotten");
+    assert_eq!(rig.fake.requests(&format!("/session/{PROFILE_ID}")).len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -307,7 +405,7 @@ async fn import_player_adds_the_player_s_skin() {
     let rig = rig().await;
     rig.fake.add_texture("alex", skin_png(5, true));
     rig.fake.add_player(Player {
-        id: "bb22".into(),
+        id: ALEX_ID.into(),
         name: "Alex".into(),
         texture: Some("alex".into()),
         slim: true,
@@ -317,12 +415,34 @@ async fn import_player_adds_the_player_s_skin() {
         (entry.name.as_str(), entry.source.as_str(), entry.variant),
         ("Alex", "player:Alex", SkinVariant::Slim)
     );
+    assert_eq!(rig.fake.requests("/name/Alex").len(), 1, "the name is trimmed");
+    assert_eq!(rig.fake.requests(&format!("/session/{ALEX_ID}")).len(), 1);
     assert_eq!(rig.svc.import_player("Alex").await.unwrap().id, entry.id, "the same skin is one entry");
+    assert_eq!(rig.svc.skin(&entry.id).unwrap(), render::data_url(&normalised(&skin_png(5, true))));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_player_is_not_found() {
+    let rig = rig().await;
+    rig.fake.add_player(Player { id: ALEX_ID.into(), name: "Plain".into(), texture: None, slim: false });
     assert_eq!(message(rig.svc.import_player("Nobody").await).as_deref(), Some("skins_error_no_player"));
-    assert_eq!(
-        rig.svc.skin(&entry.id).unwrap(),
-        module_skins::backend::png::data_url(&read_skin(&skin_png(5, true)).unwrap().png)
-    );
+    rig.fake.knobs().unknown_is_204 = true;
+    let unknown = rig.svc.import_player("Nobody").await.unwrap_err();
+    assert_eq!(unknown.params.get(MESSAGE).map(String::as_str), Some("skins_error_no_player"));
+    assert_eq!(unknown.params.get("name").map(String::as_str), Some("Nobody"));
+    assert_eq!(message(rig.svc.import_player("two words").await).as_deref(), Some("skins_error_no_player"));
+    assert!(rig.fake.all_requests().iter().all(|r| !r.path.contains("two")), "a bad name asks nothing");
+    let plain = rig.svc.import_player("Plain").await.unwrap_err();
+    assert_eq!(plain.params.get(MESSAGE).map(String::as_str), Some("skins_error_no_skin"));
+    assert_eq!(plain.params.get("name").map(String::as_str), Some("Plain"));
+    assert!(rig.svc.library().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_429_on_the_lookup_says_so() {
+    let rig = rig().await;
+    rig.fake.knobs().lookup_status = Some(429);
+    assert_eq!(message(rig.svc.import_player("Alex").await).as_deref(), Some("skins_error_rate_lookup"));
 }
 
 fn wear(fake: &Fake, texture: &str, slim: bool) {
@@ -390,43 +510,6 @@ async fn a_cape_is_put_on_and_taken_off() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_player_s_skin_is_found_by_name() {
-    let fake = fake_services::start().await;
-    fake.add_player(Player {
-        id: "aa11".into(),
-        name: "Steve_42".into(),
-        texture: Some("s42".into()),
-        slim: false,
-    });
-    fake.add_player(Player {
-        id: "bb22".into(),
-        name: "Alex".into(),
-        texture: Some("alex".into()),
-        slim: true,
-    });
-    let client = client(&fake);
-    assert_eq!(
-        client.player_skin("  Steve_42 ").await.unwrap(),
-        (fake.texture_url("s42"), SkinVariant::Classic)
-    );
-    assert_eq!(client.player_skin("Alex").await.unwrap(), (fake.texture_url("alex"), SkinVariant::Slim));
-    assert_eq!(fake.requests("/name/Steve_42").len(), 1, "the name is trimmed");
-    assert_eq!(fake.requests("/session/aa11").len(), 1);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_unknown_player_is_not_found() {
-    let fake = fake_services::start().await;
-    let client = client(&fake);
-    assert_eq!(client.player_skin("Nobody").await, Err(CallError::NotFound));
-    fake.knobs().unknown_is_204 = true;
-    assert_eq!(client.player_skin("Nobody").await, Err(CallError::NotFound));
-    let refused = client.player_skin("two words").await;
-    assert!(matches!(refused, Err(CallError::Other(_))), "{refused:?}");
-    assert!(fake.all_requests().iter().all(|r| !r.path.contains("two")), "a bad name asks nothing");
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn statuses_map_to_errors() {
     let fake = fake_services::start().await;
     let client = client(&fake);
@@ -437,6 +520,8 @@ async fn statuses_map_to_errors() {
     assert_eq!(client.profile(TOKEN).await, Err(CallError::Rate));
     fake.knobs().upload_status = Some(400);
     assert_eq!(client.upload_skin(TOKEN, vec![1], SkinVariant::Classic).await, Err(CallError::Rejected));
+    fake.knobs().cape_status = Some(400);
+    assert_eq!(client.set_cape(TOKEN, None).await, Err(CallError::RejectedCape));
     fake.knobs().cape_status = Some(500);
     assert!(matches!(client.set_cape(TOKEN, None).await, Err(CallError::Other(_))));
 }

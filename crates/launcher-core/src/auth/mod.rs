@@ -1,6 +1,5 @@
 //! Accounts: offline and Microsoft profiles, token storage, sign-in.
 
-pub mod avatars;
 pub mod crypto;
 pub mod http;
 pub mod msa;
@@ -77,7 +76,6 @@ pub struct AuthTimings {
     pub browser_timeout: Duration,
     pub device_min_interval: Duration,
     pub slow_down_step: Duration,
-    pub avatar_timeout: Duration,
 }
 
 impl Default for AuthTimings {
@@ -88,7 +86,6 @@ impl Default for AuthTimings {
             browser_timeout: Duration::from_secs(180),
             device_min_interval: Duration::from_secs(1),
             slow_down_step: Duration::from_secs(2),
-            avatar_timeout: Duration::from_secs(4),
         }
     }
 }
@@ -102,7 +99,6 @@ impl AuthTimings {
             browser_timeout: Duration::from_secs(5),
             device_min_interval: Duration::from_millis(10),
             slow_down_step: Duration::from_millis(20),
-            avatar_timeout: Duration::from_secs(2),
         }
     }
 }
@@ -125,13 +121,6 @@ impl UrlOpener for NoOpener {
     }
 }
 
-/// Avatar hosts in the original launcher's order; `{id}` and `{size}` are filled in.
-pub const DEFAULT_AVATAR_SOURCES: [&str; 3] = [
-    "https://mc-heads.net/avatar/{id}/{size}",
-    "https://minotar.net/helm/{id}/{size}.png",
-    "https://mineskin.eu/avatar/{id}/{size}",
-];
-
 #[derive(Debug, Clone)]
 pub struct AuthConfig {
     pub client_id: String,
@@ -139,19 +128,15 @@ pub struct AuthConfig {
     pub timings: AuthTimings,
     /// Holds `profiles.json` and `profile-token.key`.
     pub state_dir: PathBuf,
-    pub avatar_dir: PathBuf,
-    pub avatar_sources: Vec<String>,
 }
 
 impl AuthConfig {
-    pub fn new(client_id: &str, state_dir: &Path, cache_dir: &Path) -> Self {
+    pub fn new(client_id: &str, state_dir: &Path) -> Self {
         AuthConfig {
             client_id: client_id.to_string(),
             endpoints: AuthEndpoints::default(),
             timings: AuthTimings::default(),
             state_dir: state_dir.to_path_buf(),
-            avatar_dir: cache_dir.join("avatars"),
-            avatar_sources: DEFAULT_AVATAR_SOURCES.iter().map(|s| s.to_string()).collect(),
         }
     }
 }

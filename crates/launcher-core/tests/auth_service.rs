@@ -39,10 +39,9 @@ impl EventSink for Rec {
 
 fn service(fake: &Fake, dir: &Path, opener: Arc<dyn UrlOpener>) -> (Arc<AuthService>, Arc<Rec>) {
     let rec = Arc::new(Rec::default());
-    let mut cfg = AuthConfig::new("test-client", dir, &dir.join("cache"));
+    let mut cfg = AuthConfig::new("test-client", dir);
     cfg.endpoints = fake.endpoints();
     cfg.timings = AuthTimings::fast();
-    cfg.avatar_sources = fake.avatar_sources();
     let svc = AuthService::new(cfg, FeedbackService::new(rec.clone()), rec.clone(), opener).unwrap();
     (svc, rec)
 }

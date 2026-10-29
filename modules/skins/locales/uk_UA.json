@@ -37,6 +37,8 @@
     "skins_no_3d": "3D-перегляд недоступний",
     "skins_error_rate": "Mojang тимчасово обмежує зміни скіна — спробуйте за хвилину",
     "skins_error_rejected": "Mojang не прийняв цей скін",
+    "skins_error_cape_rejected": "Mojang не прийняв цей плащ",
+    "skins_error_rate_lookup": "Mojang тимчасово обмежує пошук гравців — спробуйте за хвилину",
     "skins_error_no_player": "Гравця «{name}» не знайдено",
     "skins_error_no_skin": "У гравця «{name}» стандартний скін",
     "skins_error_bad_png": "Це не скін Minecraft: потрібен PNG 64×64 або 64×32 до 64 КБ",

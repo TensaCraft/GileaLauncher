@@ -2,7 +2,6 @@
 
 pub mod library;
 pub mod mojang;
-pub mod png;
 pub mod service;
 
 use std::sync::{Arc, OnceLock};
@@ -10,6 +9,7 @@ use std::sync::{Arc, OnceLock};
 use launcher_core::core_app::CoreApp;
 use launcher_core::modules::{Module, ModuleFuture};
 use launcher_core::net::downloader::Origin;
+use launcher_core::skins::service::TEXTURES_HOST;
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -20,9 +20,6 @@ use crate::dto::{
 };
 use mojang::Endpoints;
 use service::{Deps, SkinsService, TokenFuture, session_of};
-
-/// Where Mojang keeps skin and cape files.
-const TEXTURES_HOST: &str = "textures.minecraft.net";
 
 pub struct SkinsModule {
     /// The service, made once the core is up (`attach`).
@@ -53,7 +50,7 @@ impl Module for SkinsModule {
     }
 
     fn attach(&self, core: &Arc<CoreApp>) {
-        let (auth, profiles, avatars) = (core.auth.clone(), core.auth.clone(), core.auth.clone());
+        let (auth, profiles) = (core.auth.clone(), core.auth.clone());
         let deps = Deps {
             endpoints: Endpoints::default(),
             tokens: Arc::new(move |key: &str, force: bool| -> TokenFuture {
@@ -61,7 +58,7 @@ impl Module for SkinsModule {
                 Box::pin(async move { session_of(auth.refresh(&key, force).await?) })
             }),
             profiles: Arc::new(move || profiles.snapshot().profiles),
-            forget_avatar: Arc::new(move |key: &str| avatars.forget_avatar(key)),
+            skins: core.skins.clone(),
             downloader: core.downloader.clone(),
             textures: Origin::new(|url| url.scheme() == "https" && url.host_str() == Some(TEXTURES_HOST)),
             feedback: core.feedback.clone(),

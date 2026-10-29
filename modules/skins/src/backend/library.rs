@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use launcher_core::skins::SkinTexture;
 use launcher_core::storage::atomic::{atomic_write, rename_retrying};
 use launcher_core::storage::json::write_json_file;
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde::{Deserialize, Serialize};
 
-use super::png::SkinImage;
 use crate::dto::{MESSAGE, SkinVariant};
 
 const RECORD: &str = "library.json";
@@ -144,21 +144,21 @@ impl Library {
     /// Adds `image`; a skin already there (by its hash) is returned as it is, with `false`.
     pub fn add(
         &self,
-        image: &SkinImage,
+        image: &SkinTexture,
         name: &str,
         variant: SkinVariant,
         source: &str,
     ) -> AppResult<(Entry, bool)> {
         let name = checked_name(name)?;
         let mut held = self.lock();
-        if let Some(entry) = held.skins.iter().find(|e| e.sha256 == image.sha256 && self.has_png(e)) {
+        if let Some(entry) = held.skins.iter().find(|e| e.sha256 == image.hash && self.has_png(e)) {
             return Ok((entry.clone(), false));
         }
         let entry = Entry {
             id: uuid::Uuid::new_v4().simple().to_string(),
             name,
             variant,
-            sha256: image.sha256.clone(),
+            sha256: image.hash.clone(),
             added_ms: now_ms(),
             source: source.to_string(),
         };
@@ -166,7 +166,7 @@ impl Library {
         atomic_write(&path, &image.png).map_err(|e| io_error(&path, e))?;
         let mut record = held.clone();
         // An entry whose file is gone gives way to the new one.
-        record.skins.retain(|e| e.sha256 != image.sha256);
+        record.skins.retain(|e| e.sha256 != image.hash);
         record.skins.push(entry.clone());
         if let Err(e) = self.save(&mut held, record) {
             let _ = fs::remove_file(&path);
@@ -223,16 +223,15 @@ mod tests {
     use image::{Rgba, RgbaImage};
 
     use super::*;
-    use crate::backend::png::read_skin;
     use crate::dto::MESSAGE;
 
     /// A skin told apart from others by `mark`.
-    fn skin(mark: u8) -> SkinImage {
+    fn skin(mark: u8) -> SkinTexture {
         let mut image = RgbaImage::from_pixel(64, 64, Rgba([90, 60, 40, 255]));
         image.put_pixel(9, 9, Rgba([mark, 0, 0, 255]));
         let mut png = std::io::Cursor::new(Vec::new());
         image.write_to(&mut png, image::ImageFormat::Png).unwrap();
-        read_skin(&png.into_inner()).unwrap()
+        SkinTexture::read(&png.into_inner()).unwrap()
     }
 
     fn message(result: AppResult<impl std::fmt::Debug>) -> Option<String> {
@@ -251,8 +250,8 @@ mod tests {
         assert_eq!(again, first, "the second import returns the first");
         assert_eq!(library.list(), std::slice::from_ref(&first));
         assert_eq!(library.png(&first.id).unwrap(), skin(1).png);
-        assert_eq!(library.find_sha(&skin(1).sha256), Some(first));
-        assert_eq!(library.find_sha(&skin(2).sha256), None);
+        assert_eq!(library.find_sha(&skin(1).hash), Some(first));
+        assert_eq!(library.find_sha(&skin(2).hash), None);
     }
 
     #[test]

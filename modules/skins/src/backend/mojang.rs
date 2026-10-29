@@ -1,11 +1,10 @@
-//! Minecraft Services (an account's skins and capes) and Mojang's public profiles (a player's skin
-//! by nickname).
+//! Minecraft Services: an account's skins and capes, read and changed with its token. A player's
+//! skin by nickname is the core's (`launcher_core::skins`).
 
 use std::time::Duration;
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use launcher_core::net::{api_client, send_patiently};
+use launcher_core::skins::service::is_nickname;
 use launcher_shared::branding::{APP_NAME, VERSION};
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -17,31 +16,23 @@ use crate::dto::{MESSAGE, SkinVariant};
 
 const CONNECT: Duration = Duration::from_secs(5);
 const READ: Duration = Duration::from_secs(20);
-/// The longest nickname Minecraft takes.
-const NICKNAME_MAX: usize = 16;
 
-/// Where the services are; each base is replaced in the tests by a fake server's.
+/// Where Minecraft Services is; replaced in the tests by a fake server's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoints {
     pub services: String,
-    pub mojang_api: String,
-    pub session: String,
 }
 
 impl Default for Endpoints {
     fn default() -> Self {
-        Endpoints {
-            services: "https://api.minecraftservices.com".into(),
-            mojang_api: "https://api.mojang.com".into(),
-            session: "https://sessionserver.mojang.com".into(),
-        }
+        Endpoints { services: "https://api.minecraftservices.com".into() }
     }
 }
 
 impl Endpoints {
-    /// Every service at `base` (a fake server).
+    /// The service at `base` (a fake server).
     pub fn local(base: &str) -> Self {
-        Endpoints { services: base.into(), mojang_api: base.into(), session: base.into() }
+        Endpoints { services: base.into() }
     }
 }
 
@@ -81,8 +72,8 @@ pub enum CallError {
     Rate,
     /// 400: the skin was refused.
     Rejected,
-    /// No such player.
-    NotFound,
+    /// 400 to a cape: the cape was refused.
+    RejectedCape,
     Other(AppError),
 }
 
@@ -99,8 +90,10 @@ impl From<CallError> for AppError {
                 .with_param(MESSAGE, "skins_error_rate"),
             CallError::Rejected => AppError::new(ErrorCode::InvalidInput, "Minecraft Services: HTTP 400")
                 .with_param(MESSAGE, "skins_error_rejected"),
-            CallError::NotFound => AppError::new(ErrorCode::NotFound, "Mojang: no such player")
-                .with_param(MESSAGE, "skins_error_no_player"),
+            CallError::RejectedCape => {
+                AppError::new(ErrorCode::InvalidInput, "Minecraft Services: HTTP 400 to a cape")
+                    .with_param(MESSAGE, "skins_error_cape_rejected")
+            }
             CallError::Other(e) => e,
         }
     }
@@ -206,24 +199,19 @@ impl MojangClient {
         Self::url(&self.ep.services, &[&["minecraft", "profile"], segments].concat())
     }
 
-    /// Sends `request` with `token`: the status and body of a success, else what it means.
-    async fn send(request: RequestBuilder, token: Option<&str>) -> Result<(u16, Vec<u8>), CallError> {
-        let request = match token {
-            Some(token) => request.header(AUTHORIZATION, format!("Bearer {token}")),
-            None => request,
-        };
+    /// Sends `request` with `token`: the body of a success, else what it means.
+    async fn send(request: RequestBuilder, token: &str) -> Result<Vec<u8>, CallError> {
+        let request = request.header(AUTHORIZATION, format!("Bearer {token}"));
         let response = send_patiently(request).await.map_err(network)?;
-        let status = response.status().as_u16();
         if !response.status().is_success() {
-            return Err(failed(status));
+            return Err(failed(response.status().as_u16()));
         }
-        let body = response.bytes().await.map_err(network)?;
-        Ok((status, body.to_vec()))
+        Ok(response.bytes().await.map_err(network)?.to_vec())
     }
 
     /// `GET /minecraft/profile`: the account's skins and capes.
     pub async fn profile(&self, token: &str) -> Result<ServicesProfile, CallError> {
-        let (_, body) = Self::send(self.client.get(self.services(&[])?), Some(token)).await?;
+        let body = Self::send(self.client.get(self.services(&[])?), token).await?;
         as_profile(&body).ok_or_else(|| network("the profile is unreadable"))
     }
 
@@ -248,7 +236,7 @@ impl MojangClient {
             .map_err(network)?;
         let form = reqwest::multipart::Form::new().text("variant", variant.as_str()).part("file", file);
         let request = self.client.post(self.services(&["skins"])?).multipart(form);
-        let (_, body) = Self::send(request, Some(token)).await?;
+        let body = Self::send(request, token).await?;
         self.after_change(token, &body).await
     }
 
@@ -263,43 +251,9 @@ impl MojangClient {
                 .body(serde_json::json!({ "capeId": id }).to_string()),
             None => self.client.delete(url),
         };
-        let (_, body) = Self::send(request, Some(token)).await?;
+        let sent = Self::send(request, token).await;
+        let body = sent.map_err(|e| if e == CallError::Rejected { CallError::RejectedCape } else { e })?;
         self.after_change(token, &body).await
-    }
-
-    /// Player `name`'s skin: its address and model. `NotFound` for no such player.
-    pub async fn player_skin(&self, name: &str) -> Result<(String, SkinVariant), CallError> {
-        let name = check_nickname(name).map_err(CallError::Other)?;
-        let url = Self::url(&self.ep.mojang_api, &["users", "profiles", "minecraft", &name])?;
-        let (status, body) = match Self::send(self.client.get(url), None).await {
-            Err(CallError::Other(e)) if e.params.get("status").is_some_and(|s| s == "404") => {
-                return Err(CallError::NotFound);
-            }
-            other => other?,
-        };
-        let id = serde_json::from_slice::<Value>(&body)
-            .ok()
-            .and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_string))
-            .filter(|id| status != 204 && !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()));
-        let Some(id) = id else { return Err(CallError::NotFound) };
-        let url = Self::url(&self.ep.session, &["session", "minecraft", "profile", &id])?;
-        let (_, body) = Self::send(self.client.get(url), None).await?;
-        let session: Value = serde_json::from_slice(&body).map_err(|_| CallError::NotFound)?;
-        let textures = session
-            .get("properties")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .find(|p| p.get("name").and_then(Value::as_str) == Some("textures"))
-            .and_then(|p| p.get("value").and_then(Value::as_str))
-            .and_then(decode_textures);
-        textures.ok_or_else(|| {
-            CallError::Other(
-                AppError::new(ErrorCode::NotFound, "the player wears the default skin")
-                    .with_param("name", &name)
-                    .with_param(MESSAGE, "skins_error_no_skin"),
-            )
-        })
     }
 }
 
@@ -307,9 +261,7 @@ impl MojangClient {
 /// `skins_error_no_player`, before anything is asked.
 pub fn check_nickname(name: &str) -> AppResult<String> {
     let name = name.trim();
-    let fits = (1..=NICKNAME_MAX).contains(&name.len())
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    if !fits {
+    if !is_nickname(name) {
         return Err(AppError::new(ErrorCode::InvalidInput, format!("no nickname {name:?}"))
             .with_param("name", name)
             .with_param(MESSAGE, "skins_error_no_player"));
@@ -317,21 +269,8 @@ pub fn check_nickname(name: &str) -> AppResult<String> {
     Ok(name.to_string())
 }
 
-/// The skin's address and model in a session profile's base64 `textures` property.
-pub fn decode_textures(property_value: &str) -> Option<(String, SkinVariant)> {
-    let bytes = STANDARD.decode(property_value.trim()).ok()?;
-    let value: Value = serde_json::from_slice(&bytes).ok()?;
-    let skin = value.get("textures")?.get("SKIN")?;
-    let url = skin.get("url")?.as_str()?.to_string();
-    let slim = skin.pointer("/metadata/model").and_then(Value::as_str) == Some("slim");
-    Some((url, if slim { SkinVariant::Slim } else { SkinVariant::Classic }))
-}
-
 #[cfg(test)]
 mod tests {
-    use base64::Engine;
-    use base64::engine::general_purpose::STANDARD;
-
     use super::*;
     use crate::dto::MESSAGE;
 
@@ -347,21 +286,5 @@ mod tests {
                 "{bad:?}"
             );
         }
-    }
-
-    #[test]
-    fn textures_are_decoded() {
-        let encode = |json: &str| STANDARD.encode(json);
-        let classic = encode(r#"{"textures":{"SKIN":{"url":"http://textures.minecraft.net/texture/ab"}}}"#);
-        assert_eq!(
-            decode_textures(&classic),
-            Some(("http://textures.minecraft.net/texture/ab".into(), SkinVariant::Classic))
-        );
-        let slim = encode(
-            r#"{"profileName":"Alex","textures":{"SKIN":{"url":"https://t/x","metadata":{"model":"slim"}},"CAPE":{"url":"https://t/c"}}}"#,
-        );
-        assert_eq!(decode_textures(&slim), Some(("https://t/x".into(), SkinVariant::Slim)));
-        assert_eq!(decode_textures(&encode(r#"{"textures":{}}"#)), None, "a default skin has no SKIN");
-        assert_eq!(decode_textures("not base64!"), None);
     }
 }

@@ -32,6 +32,7 @@ pub struct Recorded {
 
 #[derive(Debug, Clone)]
 pub struct Player {
+    /// 32 hex digits, as Mojang's.
     pub id: String,
     pub name: String,
     pub texture: Option<String>,
@@ -50,6 +51,8 @@ pub struct Knobs {
     pub bare_answers: bool,
     /// Unknown names answer 204 instead of 404.
     pub unknown_is_204: bool,
+    /// A status forced on every name lookup.
+    pub lookup_status: Option<u16>,
 }
 
 /// What the account wears and has.
@@ -282,6 +285,10 @@ async fn name_lookup(
     Path(name): Path<String>,
 ) -> Response {
     push(&s, record(&method, format!("/name/{name}"), &headers));
+    if let Some(status) = s.knobs.lock().unwrap().lookup_status {
+        return (StatusCode::from_u16(status).unwrap(), Json(json!({"errorMessage": "forced"})))
+            .into_response();
+    }
     let found = s.players.lock().unwrap().iter().find(|p| p.name.eq_ignore_ascii_case(&name)).cloned();
     match found {
         Some(player) => Json(json!({"id": player.id, "name": player.name})).into_response(),

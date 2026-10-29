@@ -1,10 +1,10 @@
-//! A local imitation of Microsoft identity, Xbox Live, Minecraft services and avatar hosts.
+//! A local imitation of Microsoft identity, Xbox Live and Minecraft services.
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use axum::extract::{Form, Path, State};
+use axum::extract::{Form, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -47,8 +47,6 @@ pub struct Knobs {
     /// `expires_in` of the Minecraft login; `None` omits it (the JWT `exp` is used).
     pub mc_expires_in: Option<i64>,
     pub jwt_exp: i64,
-    /// `(status, content type)` for mc-heads, minotar, mineskin.
-    pub avatars: [(u16, &'static str); 3],
 }
 
 #[derive(Clone)]
@@ -81,17 +79,9 @@ impl Fake {
     }
 
     /// Requests seen at a logical path: `/token`, `/devicecode`, `/xbl`, `/xsts`, `/mc-login`,
-    /// `/mc-profile`, `/avatar/<host>`.
+    /// `/mc-profile`.
     pub fn requests(&self, path: &str) -> Vec<Recorded> {
         self.shared.log.lock().unwrap().iter().filter(|r| r.path == path).cloned().collect()
-    }
-
-    pub fn avatar_sources(&self) -> Vec<String> {
-        vec![
-            format!("{}/mc-heads/avatar/{{id}}/{{size}}", self.base),
-            format!("{}/minotar/helm/{{id}}/{{size}}.png", self.base),
-            format!("{}/mineskin/avatar/{{id}}/{{size}}", self.base),
-        ]
     }
 }
 
@@ -100,7 +90,6 @@ pub async fn start() -> Fake {
         knobs: Arc::new(Mutex::new(Knobs {
             mc_expires_in: Some(86_400),
             jwt_exp: 4_000_000_000,
-            avatars: [(200, "image/png"); 3],
             ..Knobs::default()
         })),
         log: Arc::new(Mutex::new(Vec::new())),
@@ -114,7 +103,6 @@ pub async fn start() -> Fake {
         .route("/xsts/authorize", post(xsts))
         .route("/authentication/login_with_xbox", post(mc_login))
         .route("/minecraft/profile", get(mc_profile))
-        .route("/{host}/{kind}/{id}/{size}", get(avatar))
         .with_state(shared.clone());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -237,30 +225,6 @@ async fn mc_profile(State(s): State<Shared>, headers: HeaderMap) -> Response {
         }
         None => Json(json!({ "id": MC_ID, "name": MC_NAME })).into_response(),
     }
-}
-
-async fn avatar(
-    State(s): State<Shared>,
-    Path((host, _kind, id, _size)): Path<(String, String, String, String)>,
-) -> Response {
-    record(
-        &s,
-        Recorded {
-            path: format!("/avatar/{host}"),
-            form: BTreeMap::from([("id".into(), id)]),
-            ..Recorded::default()
-        },
-    );
-    let index = match host.as_str() {
-        "mc-heads" => 0,
-        "minotar" => 1,
-        _ => 2,
-    };
-    let (status, content_type) = s.knobs.lock().unwrap().avatars[index];
-    if status != 200 {
-        return StatusCode::from_u16(status).unwrap().into_response();
-    }
-    ([(header::CONTENT_TYPE, content_type)], format!("PNG-{host}").into_bytes()).into_response()
 }
 
 /// Sends a bare `GET` like a browser would and returns the raw HTTP response.

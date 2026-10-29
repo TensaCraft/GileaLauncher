@@ -37,6 +37,8 @@
     "skins_no_3d": "The 3D preview is unavailable",
     "skins_error_rate": "Mojang limits skin changes for now — try again in a minute",
     "skins_error_rejected": "Mojang did not accept this skin",
+    "skins_error_cape_rejected": "Mojang did not accept this cape",
+    "skins_error_rate_lookup": "Mojang limits player lookups for now — try again in a minute",
     "skins_error_no_player": "Player «{name}» not found",
     "skins_error_no_skin": "Player «{name}» wears the default skin",
     "skins_error_bad_png": "This is not a Minecraft skin: a PNG of 64×64 or 64×32, up to 64 KB, is needed",

@@ -61,6 +61,7 @@ mod tests {
                 variant: SkinVariant::Classic,
                 data: String::new(),
                 library_id: library_id.map(str::to_string),
+                default: false,
             }),
             capes: vec![Cape { id: "c1".into(), alias: "Pan".into(), active: true, data: String::new() }],
         }

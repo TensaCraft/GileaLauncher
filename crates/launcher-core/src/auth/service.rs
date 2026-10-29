@@ -8,13 +8,13 @@ use launcher_shared::{
 };
 use tokio_util::sync::CancellationToken;
 
-use super::avatars::{Avatar, AvatarCache};
 use super::http::{AuthHttp, FlowError};
 use super::msa::{self, MsTokens};
 use super::offline::validate_offline_name;
 use super::store::{NewProfile, ProfileStore, REASON_REFRESH_INVALID, StoredProfile, TokenUpdate};
 use super::{AuthConfig, LAUNCH_SESSION_MARGIN, TOKEN_REFRESH_LEEWAY, UrlOpener, now_secs, xbox};
 use crate::feedback::{EventSink, FeedbackService};
+use crate::skins::Player;
 
 /// Who plays: what the launch passes to Minecraft. Stays inside `launcher-core`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,7 +40,6 @@ pub struct AuthService {
     refresh: tokio::sync::Mutex<()>,
     cancel: Mutex<Option<CancellationToken>>,
     state: Mutex<AuthState>,
-    avatars: AvatarCache,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -73,12 +72,6 @@ impl AuthService {
     ) -> AppResult<Arc<Self>> {
         let http = AuthHttp::new(&cfg.timings)?;
         let store = ProfileStore::open(&cfg.state_dir);
-        let avatars = AvatarCache::new(
-            cfg.avatar_dir.clone(),
-            cfg.avatar_sources.clone(),
-            http.client().clone(),
-            cfg.timings.avatar_timeout,
-        );
         Ok(Arc::new(AuthService {
             cfg,
             store,
@@ -90,7 +83,6 @@ impl AuthService {
             refresh: tokio::sync::Mutex::new(()),
             cancel: Mutex::new(None),
             state: Mutex::new(AuthState::Idle),
-            avatars,
         }))
     }
 
@@ -330,21 +322,10 @@ impl AuthService {
         }
     }
 
-    /// The head of `key`'s player (by UUID, like the original launcher; by name if there is none).
-    pub async fn avatar(&self, key: &str) -> Option<Avatar> {
+    /// Whose skin profile `key` wears: its UUID and name (`skins::SkinService` finds the skin).
+    pub fn player(&self, key: &str) -> Option<Player> {
         let profile = self.store.get(key)?;
-        let identifier = if profile.id.trim().is_empty() { profile.name } else { profile.id };
-        self.avatars.get(&identifier).await
-    }
-
-    /// Forgets `key`'s cached head (its skin changed), by UUID and by name.
-    pub fn forget_avatar(&self, key: &str) {
-        let Some(profile) = self.store.get(key) else { return };
-        for identifier in [profile.id.as_str(), profile.name.as_str()] {
-            if !identifier.trim().is_empty() {
-                self.avatars.forget(identifier);
-            }
-        }
+        Some(Player::new(&profile.id, &profile.name))
     }
 
     /// The account a launch uses: `key`, or the default profile.

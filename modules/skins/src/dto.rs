@@ -69,6 +69,9 @@ pub struct CurrentSkin {
     pub data: String,
     /// The library's copy of it, if there is one.
     pub library_id: Option<String>,
+    /// One of Minecraft's own skins (Steve, Alex…): shown, never added to the library.
+    #[serde(default)]
+    pub default: bool,
 }
 
 /// A cape an account has.
@@ -157,6 +160,7 @@ mod tests {
                 variant: SkinVariant::Slim,
                 data: "data:image/png;base64,AA==".into(),
                 library_id: None,
+                default: true,
             }),
             capes: vec![Cape {
                 id: "c1".into(),
@@ -170,6 +174,8 @@ mod tests {
         let cape: CapeArgs =
             serde_json::from_value(serde_json::json!({"profile": "p", "cape": null})).unwrap();
         assert_eq!(cape.cape, None);
+        let older = serde_json::json!({"sha256": "ab", "variant": "classic", "data": "", "library_id": null});
+        assert!(!serde_json::from_value::<CurrentSkin>(older).unwrap().default, "a custom skin by default");
     }
 
     #[test]

@@ -425,10 +425,13 @@ pub fn auth_cancel(state: State<'_, AppState>) {
     state.core.auth.cancel_sign_in();
 }
 
-/// `data:` URL of the cached head, the remote address as a last resort, or nothing.
+/// `data:` URL of the profile's head drawn from its skin, the remote address of a ready-drawn
+/// head as a last resort, or nothing.
 #[tauri::command]
 pub async fn profile_avatar(state: State<'_, AppState>, key: String) -> AppResult<Option<String>> {
-    Ok(state.core.auth.avatar(&key).await.map(|avatar| avatar.to_src()))
+    let Some(player) = state.core.auth.player(&key) else { return Ok(None) };
+    let head = state.core.skins.head(&player, launcher_core::skins::AVATAR_SIZE).await;
+    Ok(head.map(|avatar| avatar.to_src()))
 }
 
 #[cfg(test)]

@@ -1,4 +1,6 @@
 //! What the module's commands do: the library, an account's skin and capes, and the changes.
+//! Skin files, their pictures and players' skins by nickname are the core's
+//! (`launcher_core::skins`); the account's own skins and capes are Minecraft Services'.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -10,6 +12,8 @@ use std::sync::{Arc, Mutex};
 use launcher_core::auth::store::StoredProfile;
 use launcher_core::feedback::FeedbackService;
 use launcher_core::net::downloader::{DownloadTask, Downloader, Origin};
+use launcher_core::skins::service::{NO_SKIN, REASON, secure};
+use launcher_core::skins::{Player, SkinService, SkinTexture, render};
 use launcher_core::storage::json::write_json_file;
 use launcher_shared::{AccountKind, AppError, AppResult, ErrorCode, ProfileDto};
 use serde_json::Value;
@@ -17,7 +21,6 @@ use sha2::{Digest, Sha256};
 
 use super::library::{Entry, Library, NAME_MAX};
 use super::mojang::{CallError, Endpoints, MojangClient, ServicesProfile, check_nickname};
-use super::png::{self, MAX_BYTES, SkinImage};
 use crate::dto::{
     Account, AccountState, CHANGED_EVENT, Cape, CurrentSkin, LibrarySkin, MESSAGE, SkinVariant,
 };
@@ -34,15 +37,15 @@ pub struct Deps {
     pub tokens: TokenFn,
     /// The launcher's profiles, default first.
     pub profiles: Arc<dyn Fn() -> Vec<ProfileDto> + Send + Sync>,
-    /// Forgets a profile's cached head (its skin changed).
-    pub forget_avatar: Arc<dyn Fn(&str) + Send + Sync>,
+    /// Players' skins: skin files, players by nickname and the heads the launcher draws.
+    pub skins: Arc<SkinService>,
     pub downloader: Arc<Downloader>,
-    /// Where skin and cape files may come from.
+    /// Where cape files may come from.
     pub textures: Origin,
     pub feedback: Arc<FeedbackService>,
     /// `<app state>`: the library lives in `skins/`.
     pub state_dir: PathBuf,
-    /// The launcher's cache: textures go to `skins/`.
+    /// The launcher's cache: capes go to `skins/capes/`.
     pub cache_dir: PathBuf,
 }
 
@@ -64,14 +67,6 @@ pub fn session_of(profile: StoredProfile) -> AppResult<Session> {
     }
 }
 
-/// `textures.minecraft.net` hands out `http` addresses; it serves the same over `https`.
-pub fn secure(url: &str) -> String {
-    match url.strip_prefix("http://textures.minecraft.net/") {
-        Some(rest) => format!("https://textures.minecraft.net/{rest}"),
-        None => url.to_string(),
-    }
-}
-
 /// A name for a file made of `raw`: itself when it is short letters, digits and dashes, else a
 /// digest of it.
 fn file_key(raw: &str) -> String {
@@ -86,8 +81,30 @@ fn io_error(path: &Path, e: std::io::Error) -> AppError {
         .with_param("path", path.to_string_lossy())
 }
 
-fn bad_png(detail: impl Into<String>) -> AppError {
-    AppError::new(ErrorCode::InvalidInput, detail.into()).with_param(MESSAGE, "skins_error_bad_png")
+fn bad_png(e: AppError) -> AppError {
+    e.with_param(MESSAGE, "skins_error_bad_png")
+}
+
+/// `bytes` as a skin of the library (`render::normalise`), its model guessed; else
+/// `skins_error_bad_png`.
+fn read_skin(bytes: &[u8]) -> AppResult<SkinTexture> {
+    SkinTexture::read(bytes).map_err(|e| if e.code == ErrorCode::InvalidInput { bad_png(e) } else { e })
+}
+
+fn variant_of(slim: bool) -> SkinVariant {
+    if slim { SkinVariant::Slim } else { SkinVariant::Classic }
+}
+
+/// What the player reads when player `name`'s skin could not be had.
+fn lookup_error(e: AppError, name: &str) -> AppError {
+    let message = match (e.code, e.params.get(REASON).map(String::as_str)) {
+        (ErrorCode::NotFound, Some(NO_SKIN)) => "skins_error_no_skin",
+        (ErrorCode::NotFound, _) => "skins_error_no_player",
+        (ErrorCode::RateLimited, _) => "skins_error_rate_lookup",
+        (ErrorCode::InvalidInput, Some(render::BAD_PNG)) => "skins_error_bad_png",
+        _ => return e,
+    };
+    e.with_param(MESSAGE, message).with_param("name", name)
 }
 
 /// The default name of a skin added from `path`: its file name without the extension.
@@ -159,28 +176,6 @@ impl SkinsService {
         }
     }
 
-    /// Fetches `url` to `dest` (a file already there is kept).
-    async fn fetch(&self, url: &str, dest: &Path) -> AppResult<Vec<u8>> {
-        let task = DownloadTask::new(secure(url), dest).origin(self.deps.textures.clone());
-        self.deps.downloader.download_one(task, &|_| {}).await?;
-        fs::read(dest).map_err(|e| io_error(dest, e))
-    }
-
-    /// The skin an account wears, from the cache or its host: `<cache>/skins/current/<profile>/
-    /// <texture>.png`, the profile's other files dropped.
-    async fn current_skin(&self, profile_id: &str, url: &str) -> AppResult<SkinImage> {
-        let dir = self.cache().join("current").join(file_key(profile_id));
-        let texture = file_key(url.trim_end_matches('/').rsplit('/').next().unwrap_or_default());
-        let dest = dir.join(format!("{texture}.png"));
-        let bytes = self.fetch(url, &dest).await?;
-        for old in fs::read_dir(&dir).into_iter().flatten().flatten() {
-            if old.path() != dest {
-                let _ = fs::remove_file(old.path());
-            }
-        }
-        png::read_skin(&bytes)
-    }
-
     /// Whether the account `profile_id` was last seen in another skin than `sha256`; records it.
     fn first_sight(&self, profile_id: &str, sha256: &str) -> bool {
         let _held = self.seen.lock().unwrap_or_else(|e| e.into_inner());
@@ -200,8 +195,9 @@ impl SkinsService {
         true
     }
 
-    /// What `profile` says, with the textures fetched; the worn skin goes to the library the first
-    /// time the account is seen in it.
+    /// What `profile` says, with the textures fetched. The worn skin is the player's head from
+    /// now on, and goes to the library the first time the account is seen in it — unless it is
+    /// one of Minecraft's own (named by an alias), which is only shown.
     async fn state_of(
         &self,
         key: &str,
@@ -209,25 +205,27 @@ impl SkinsService {
         profile: ServicesProfile,
     ) -> AppResult<AccountState> {
         let (_, name, id) = session;
-        // Minecraft's own skin (named by an alias) is none of the player's: shown as no skin.
-        let skin = match profile.skins.iter().find(|s| s.state == "ACTIVE").filter(|s| s.alias.is_none()) {
+        let skin = match profile.skins.iter().find(|s| s.state == "ACTIVE") {
             None => None,
             Some(remote) => {
-                let image = self.current_skin(id, &remote.url).await?;
-                let mut entry = self.library.find_sha(&image.sha256);
-                if self.first_sight(id, &image.sha256) && entry.is_none() {
+                let slim = remote.variant == SkinVariant::Slim;
+                let texture = self.deps.skins.wear(&Player::new(id, name), &remote.url, slim).await?;
+                let default = remote.alias.is_some();
+                let mut entry = self.library.find_sha(&texture.hash);
+                if !default && self.first_sight(id, &texture.hash) && entry.is_none() {
                     let name: String = name.chars().take(NAME_MAX).collect();
-                    let added = self.library.add(&image, &name, remote.variant, &format!("account:{name}"));
+                    let added = self.library.add(&texture, &name, remote.variant, &format!("account:{name}"));
                     match added {
                         Ok((added, _)) => entry = Some(added),
                         Err(e) => tracing::warn!("Unable to keep {name}'s skin in the library: {}", e.detail),
                     }
                 }
                 Some(CurrentSkin {
-                    sha256: image.sha256.clone(),
+                    sha256: texture.hash.clone(),
                     variant: remote.variant,
-                    data: png::data_url(&image.png),
+                    data: render::data_url(&texture.png),
                     library_id: entry.map(|e| e.id),
+                    default,
                 })
             }
         };
@@ -251,7 +249,7 @@ impl SkinsService {
             .into_iter()
             .map(|c| {
                 let data = fs::read(dir.join(format!("{}.png", file_key(&c.id))))
-                    .map(|bytes| png::data_url(&bytes))
+                    .map(|bytes| render::data_url(&bytes))
                     .unwrap_or_default();
                 Cape { active: c.state == "ACTIVE", id: c.id, alias: c.alias, data }
             })
@@ -267,6 +265,21 @@ impl SkinsService {
         self.state_of(key, &session, profile).await
     }
 
+    /// After a change of account `key`: its skin is looked up anew (the head with it), the
+    /// change announced and the new state read.
+    async fn after_change(
+        &self,
+        key: &str,
+        session: &Session,
+        profile: ServicesProfile,
+    ) -> AppResult<AccountState> {
+        let (_, name, id) = session;
+        self.deps.skins.forget(&Player::new(id, name));
+        let state = self.state_of(key, session, profile).await;
+        self.changed();
+        state
+    }
+
     fn thumb(&self, entry: &Entry) -> String {
         let cache_key = format!("{}:{}", entry.sha256, entry.variant.as_str());
         let mut thumbs = self.thumbs.lock().unwrap_or_else(|e| e.into_inner());
@@ -274,7 +287,7 @@ impl SkinsService {
             return thumb.clone();
         }
         let thumb = match self.library.png(&entry.id) {
-            Ok(skin) => png::data_url(&png::thumbnail(&skin, entry.variant)),
+            Ok(skin) => render::data_url(&render::front(&skin, entry.variant == SkinVariant::Slim)),
             Err(_) => return String::new(),
         };
         thumbs.insert(cache_key, thumb.clone());
@@ -301,38 +314,31 @@ impl SkinsService {
 
     /// Skin `id` for the 3D viewer.
     pub fn skin(&self, id: &str) -> AppResult<String> {
-        Ok(png::data_url(&self.library.png(id)?))
+        Ok(render::data_url(&self.library.png(id)?))
     }
 
     /// Adds the skin in file `path`, named `name` or after the file, its model guessed.
     pub fn import_file(&self, path: &str, name: Option<&str>) -> AppResult<LibrarySkin> {
         let path = Path::new(path);
         let size = fs::metadata(path).map_err(|e| io_error(path, e))?.len();
-        if size > MAX_BYTES as u64 {
-            return Err(bad_png(format!("the file is {size} bytes")));
+        if size > render::MAX_BYTES as u64 {
+            return Err(bad_png(AppError::new(ErrorCode::InvalidInput, format!("the file is {size} bytes"))));
         }
         let bytes = fs::read(path).map_err(|e| io_error(path, e))?;
-        let image = png::read_skin(&bytes)?;
+        let image = read_skin(&bytes)?;
         let name = name.map(str::to_string).unwrap_or_else(|| name_of(path));
-        let (entry, _) = self.library.add(&image, &name, png::guess_variant(&image.png), "file")?;
+        let (entry, _) = self.library.add(&image, &name, variant_of(image.slim), "file")?;
         self.changed();
         Ok(self.shown(entry))
     }
 
-    /// Adds player `name`'s skin.
+    /// Adds player `name`'s skin, as Mojang has it now.
     pub async fn import_player(&self, name: &str) -> AppResult<LibrarySkin> {
         let name = check_nickname(name)?;
-        let (url, variant) = self.client.player_skin(&name).await.map_err(|e| match e {
-            CallError::NotFound => AppError::from(e).with_param("name", &name),
-            other => AppError::from(other),
-        })?;
-        let dest = self.cache().join("players").join(format!("{}.png", uuid::Uuid::new_v4().simple()));
-        let task = DownloadTask::new(secure(&url), &dest).origin(self.deps.textures.clone()).transient();
-        let fetched = self.deps.downloader.download_one(task, &|_| {}).await;
-        let bytes = fetched.and_then(|()| fs::read(&dest).map_err(|e| io_error(&dest, e)));
-        let _ = fs::remove_file(&dest);
-        let image = png::read_skin(&bytes?)?;
-        let (entry, _) = self.library.add(&image, &name, variant, &format!("player:{name}"))?;
+        let texture =
+            self.deps.skins.official(&Player::named(&name)).await.map_err(|e| lookup_error(e, &name))?;
+        let source = format!("player:{name}");
+        let (entry, _) = self.library.add(&texture, &name, variant_of(texture.slim), &source)?;
         self.changed();
         Ok(self.shown(entry))
     }
@@ -366,9 +372,7 @@ impl SkinsService {
                 async move { client.upload_skin(&token, skin, variant).await }
             })
             .await?;
-        (self.deps.forget_avatar)(key);
-        self.changed();
-        self.state_of(key, &session, profile).await
+        self.after_change(key, &session, profile).await
     }
 
     /// Puts cape `cape` on account `key`; `None` takes the cape off.
@@ -377,14 +381,14 @@ impl SkinsService {
         let cape = cape.as_deref();
         let (profile, session) =
             self.with_token(key, |token| async move { client.set_cape(&token, cape).await }).await?;
-        self.changed();
-        self.state_of(key, &session, profile).await
+        self.after_change(key, &session, profile).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use launcher_core::auth::store::{NewProfile, ProfileStore};
+    use launcher_core::skins::service::NO_PLAYER;
 
     use super::*;
 
@@ -420,21 +424,26 @@ mod tests {
     }
 
     #[test]
-    fn texture_addresses_go_over_https() {
-        assert_eq!(
-            secure("http://textures.minecraft.net/texture/abc"),
-            "https://textures.minecraft.net/texture/abc"
-        );
-        assert_eq!(secure("http://127.0.0.1:5/textures/a"), "http://127.0.0.1:5/textures/a");
-        assert_eq!(secure("http://textures.minecraft.net.evil/x"), "http://textures.minecraft.net.evil/x");
-    }
-
-    #[test]
     fn file_keys_stay_in_their_folder() {
         assert_eq!(file_key("c1-b2"), "c1-b2");
         assert_eq!(file_key("../x").len(), 32);
         assert_eq!(file_key("").len(), 32);
         assert_eq!(name_of(Path::new("C:/skins/  Мій скін .png")), "Мій скін");
         assert_eq!(name_of(Path::new(".png")), ".png");
+    }
+
+    #[test]
+    fn a_failed_lookup_reads_as_the_module_s_message() {
+        let said = |e: AppError| {
+            let e = lookup_error(e, "Alex");
+            (e.params.get(MESSAGE).cloned(), e.params.get("name").cloned())
+        };
+        let nothing = |reason: &str| AppError::new(ErrorCode::NotFound, "none").with_param(REASON, reason);
+        let alex = Some("Alex".to_string());
+        assert_eq!(said(nothing(NO_PLAYER)), (Some("skins_error_no_player".into()), alex.clone()));
+        assert_eq!(said(nothing(NO_SKIN)), (Some("skins_error_no_skin".into()), alex.clone()));
+        let rate = AppError::new(ErrorCode::RateLimited, "429");
+        assert_eq!(said(rate), (Some("skins_error_rate_lookup".into()), alex));
+        assert_eq!(said(AppError::new(ErrorCode::Network, "down")), (None, None), "the launcher's own");
     }
 }

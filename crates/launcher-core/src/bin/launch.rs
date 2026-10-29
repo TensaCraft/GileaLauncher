@@ -72,7 +72,7 @@ async fn main() {
     let feedback = FeedbackService::new(sink.clone());
     let config = Arc::new(ConfigStore::open(state.join("config.json")));
     let auth = AuthService::new(
-        AuthConfig::new(MS_CLIENT_ID, &state, &state.join("cache")),
+        AuthConfig::new(MS_CLIENT_ID, &state),
         feedback.clone(),
         sink.clone(),
         Arc::new(NoOpener),
