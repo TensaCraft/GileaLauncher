@@ -49,6 +49,8 @@ launcher-core = { path = ".", features = ["mock-updates"] }
 tempfile.workspace = true
 mock-github.workspace = true
 axum.workspace = true
+# Writes an indexed PNG for a skin test (image's own PNG writer is the same crate).
+png = "0.18"
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

@@ -24,5 +24,6 @@ pub mod recent;
 pub mod safe_path;
 pub mod settings;
 pub mod setup;
+pub mod skins;
 pub mod storage;
 pub mod updater;
