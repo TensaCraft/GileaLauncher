@@ -137,6 +137,30 @@ pub async fn pick_java_file(app: AppHandle, start: Option<String>) -> Option<Str
     rx.await.ok().flatten().and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned())
 }
 
+/// A file picked in the system dialog: those named `filter` with one of `extensions` (any file
+/// when there are none).
+#[tauri::command]
+pub async fn pick_file(
+    app: AppHandle,
+    start: Option<String>,
+    filter: String,
+    extensions: Vec<String>,
+) -> Option<String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut dialog = app.dialog().file();
+    if let Some(dir) = start.filter(|s| !s.trim().is_empty()) {
+        dialog = dialog.set_directory(dir);
+    }
+    let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+    if !extensions.is_empty() {
+        dialog = dialog.add_filter(filter, &extensions);
+    }
+    dialog.pick_file(move |picked| {
+        let _ = tx.send(picked);
+    });
+    rx.await.ok().flatten().and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned())
+}
+
 /// An icon picked in the system dialog, checked to be one a build takes (`invalid_input` if not).
 #[tauri::command]
 pub async fn pick_image_file(app: AppHandle) -> AppResult<Option<String>> {

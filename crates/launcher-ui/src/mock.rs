@@ -189,6 +189,14 @@ pub fn mock_delete(list: &mut Vec<ProfileDto>, key: &str) {
     }
 }
 
+/// The file the preview «picks» for `pick_file`: one of the first kind asked for.
+fn mock_pick_file(args: &Value) -> Value {
+    match args["extensions"].get(0).and_then(Value::as_str) {
+        Some(ext) => json!(format!("C:/mock/skin.{ext}")),
+        None => json!("C:/mock/skin"),
+    }
+}
+
 /// The providers the preview has (the modules compiled in).
 // `vec![]` cannot hold `#[cfg]`-gated elements, hence push-after-new.
 #[allow(clippy::vec_init_then_push)]
@@ -436,6 +444,7 @@ pub fn install() {
             },
         ]),
         "pick_directory" => Ok(json!("D:\\Games\\Launcher")),
+        "pick_file" => Ok(mock_pick_file(&args)),
         #[cfg(feature = "mod-tensa")]
         cmd if cmd.starts_with("provider_") && args["provider"] == module_tensa::ID => {
             tensa.borrow_mut().handle_provider(cmd, &args)
@@ -667,6 +676,13 @@ mod tests {
             assert!(view.entries.iter().any(|e| e.level == Some(level)), "{level:?}");
         }
         assert!(view.entries.iter().any(|e| e.level == Some(LogLevel::Error) && e.message.contains('\n')));
+    }
+
+    #[test]
+    fn the_mock_picks_a_file_of_the_asked_kind() {
+        let args = json!({"start": null, "filter": "PNG", "extensions": ["png"]});
+        assert_eq!(mock_pick_file(&args), json!("C:/mock/skin.png"));
+        assert_eq!(mock_pick_file(&json!({"filter": "All", "extensions": []})), json!("C:/mock/skin"));
     }
 
     #[test]

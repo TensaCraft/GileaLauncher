@@ -88,6 +88,23 @@ pub async fn module_invoke<A: Serialize, R: DeserializeOwned>(
     invoke("module_invoke", &ModuleCall { module, command, args }).await
 }
 
+#[derive(Serialize)]
+struct PickFileArgs<'a> {
+    start: Option<&'a str>,
+    filter: &'a str,
+    extensions: &'a [&'a str],
+}
+
+/// A file picked in the system dialog, starting in `start`, showing the files named `filter` with
+/// one of `extensions` (all files when empty); `None` when the dialog was closed.
+pub async fn pick_file(
+    start: Option<&str>,
+    filter: &str,
+    extensions: &[&str],
+) -> Result<Option<String>, AppError> {
+    invoke("pick_file", &PickFileArgs { start, filter, extensions }).await
+}
+
 /// Subscribes for the lifetime of the app.
 pub fn listen<T: DeserializeOwned + 'static>(event: &'static str, handler: impl Fn(T) + 'static) {
     if !is_tauri() {
@@ -128,6 +145,15 @@ mod tests {
         assert_eq!(
             serde_json::to_value(call).unwrap(),
             serde_json::json!({"module": "modrinth", "command": "installed", "args": {"key": "aero"}})
+        );
+    }
+
+    #[test]
+    fn a_file_pick_names_the_start_the_filter_and_the_extensions() {
+        let args = PickFileArgs { start: None, filter: "PNG", extensions: &["png"] };
+        assert_eq!(
+            serde_json::to_value(args).unwrap(),
+            serde_json::json!({"start": null, "filter": "PNG", "extensions": ["png"]})
         );
     }
 }

@@ -230,6 +230,7 @@ pub fn run() -> i32 {
             commands::activity_recent,
             commands::pick_directory,
             commands::pick_java_file,
+            commands::pick_file,
             commands::pick_image_file,
             commands::open_path,
             commands::log_view,
