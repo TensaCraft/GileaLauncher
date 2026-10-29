@@ -85,7 +85,7 @@ fernet = { version = "0.2", default-features = false, features = ["rustcrypto"] 
 md-5 = "0.10"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-rodio = { version = "0.22", default-features = false, features = ["playback"] }
+rodio = { version = "0.23", default-features = false, features = ["playback"] }
 hound = "3.5"
 getrandom = "0.3"
 tokio-util = "0.7"
