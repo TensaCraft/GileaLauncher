@@ -66,8 +66,9 @@ The first launch on each system has a step of its own: see [Installation](#insta
 - **Accounts:** Microsoft accounts and offline profiles; a build can have an account of its own.
 - **Java** for the game is picked and downloaded automatically.
 - **World backups** and a **desktop shortcut** for a build.
-- **Build sync:** chosen files and folders (settings, a minimap, resource packs) kept the same across builds, with history to restore from.
-- **Your own look:** Home, the Play button and the sidebar each come in a few [variants](#design-variants).
+- **Build sync:** chosen files and folders (settings, a minimap, resource packs) kept the same across builds.
+- **Skins and capes:** a skin library with a 3D preview, added from a file, a player's nickname or a link; put a skin or a cape on your Microsoft account in one click.
+- **Your own look:** a font (a Minecraft-style one among them) and an accent colour for the whole launcher; Home, the Play button and the sidebar each come in a few [variants](#design-variants).
 - English and Ukrainian interface.
 
 ## Screenshots
@@ -202,7 +203,7 @@ For developers: [docs/](docs/en/README.md).
 
 ## License
 
-[MIT](LICENSE) © GIGABAIT. The Inter, Exo 2 and JetBrains Mono fonts are under SIL OFL 1.1, Material Icons under Apache 2.0 ([assets/fonts/licenses](assets/fonts/licenses)).
+[MIT](LICENSE) © GIGABAIT. The Inter, Exo 2, JetBrains Mono and Monocraft fonts are under SIL OFL 1.1, Material Icons under Apache 2.0 ([assets/fonts/licenses](assets/fonts/licenses)); skinview3d is under MIT ([assets/vendor/skinview3d](assets/vendor/skinview3d/LICENSE)).
 
 GileaLauncher is an unofficial launcher, not affiliated with Mojang or Microsoft. Minecraft is a trademark of Mojang AB.
 
