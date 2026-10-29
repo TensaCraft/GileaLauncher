@@ -12,7 +12,13 @@ updates:
     commit-message:
       prefix: build
       include: scope
+    # Leptos and its router move together, in their own pull request: one of their releases can
+    # break the UI's build (0.8.22's macros did) and must not hold the other crates back.
+    # A dependency joins the first group it matches.
     groups:
+      leptos:
+        patterns:
+          - "leptos*"
       crates:
         update-types:
           - minor
