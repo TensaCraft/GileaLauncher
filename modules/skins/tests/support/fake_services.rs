@@ -55,8 +55,10 @@ pub struct Knobs {
 /// What the account wears and has.
 #[derive(Debug, Clone, Default)]
 pub struct Account {
-    /// `(texture name, slim)`; `None`: the default skin.
+    /// `(texture name, slim)`; `None`: no skin listed.
     pub skin: Option<(String, bool)>,
+    /// The skin is one of Minecraft's own (`STEVE`, `ALEX`…), as the real profile names them.
+    pub skin_alias: Option<String>,
     /// `(id, alias, texture name)`.
     pub capes: Vec<(String, String, String)>,
     pub active_cape: Option<String>,
@@ -176,13 +178,17 @@ fn profile_json(s: &Shared) -> Value {
         .skin
         .iter()
         .map(|(texture, slim)| {
-            json!({
+            let mut skin = json!({
                 "id": format!("skin-{texture}"),
                 "state": "ACTIVE",
                 "url": format!("{}/textures/{texture}", s.base),
                 "textureKey": texture,
                 "variant": if *slim { "SLIM" } else { "CLASSIC" },
-            })
+            });
+            if let Some(alias) = &account.skin_alias {
+                skin["alias"] = json!(alias);
+            }
+            skin
         })
         .collect();
     let capes: Vec<Value> = account

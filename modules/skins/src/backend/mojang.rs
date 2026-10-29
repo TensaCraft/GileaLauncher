@@ -55,6 +55,8 @@ pub struct ServicesProfile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteSkin {
     pub id: String,
+    /// One of Minecraft's own skins (`STEVE`, `ALEX`…), when the profile names it so.
+    pub alias: Option<String>,
     /// `ACTIVE` for the one worn.
     pub state: String,
     pub url: String,
@@ -151,6 +153,7 @@ impl RawProfile {
                 .into_iter()
                 .map(|s| RemoteSkin {
                     id: s.id,
+                    alias: Some(s.alias).filter(|a| !a.trim().is_empty()),
                     state: s.state.to_ascii_uppercase(),
                     url: s.url,
                     variant: if s.variant.eq_ignore_ascii_case("slim") {

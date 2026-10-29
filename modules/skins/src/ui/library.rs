@@ -10,6 +10,8 @@ use ui_kit::{
 };
 
 use super::api;
+use super::land::land_variant;
+use super::model::is_worn;
 use crate::dto::{AccountState, LibrarySkin, SkinVariant, error_text};
 
 fn model_name(variant: SkinVariant) -> &'static str {
@@ -23,7 +25,9 @@ fn model_name(variant: SkinVariant) -> &'static str {
 pub fn LibraryTab(
     library: RwSignal<Option<Vec<LibrarySkin>>>,
     account: RwSignal<String>,
-    #[prop(into)] worn: Signal<Option<String>>,
+    /// The card worn, and the model it is worn on.
+    #[prop(into)]
+    worn: Signal<Option<(String, SkinVariant)>>,
     chosen: RwSignal<Option<String>>,
     hovered: RwSignal<Option<String>>,
     #[prop(into)] can_wear: Signal<bool>,
@@ -50,9 +54,12 @@ pub fn LibraryTab(
     let added = move |skin: LibrarySkin, known: bool| {
         let key = if known { "skins_already" } else { "skins_added" };
         toasts.show(Level::Success, i18n.tp(key, &[("name", skin.name.clone())]), None);
-        chosen.set(Some(skin.id));
+        let _ = chosen.try_set(Some(skin.id));
     };
-    let known = move |id: &str| library.with_untracked(|l| l.iter().flatten().any(|s| s.id == id));
+    // Answers land after a wait: the page may be gone by then, so nothing here may insist.
+    let known = move |id: &str| {
+        library.try_with_untracked(|l| l.iter().flatten().any(|s| s.id == id)).unwrap_or(false)
+    };
     let add_by_nick = move || {
         let name = nick.get_untracked();
         if name.trim().is_empty() || !by_nick.start() {
@@ -62,7 +69,7 @@ pub fn LibraryTab(
             match api::import_player(name).await {
                 Ok(skin) => {
                     let was = known(&skin.id);
-                    nick.set(String::new());
+                    let _ = nick.try_set(String::new());
                     added(skin, was);
                 }
                 Err(e) => fail(e),
@@ -99,7 +106,7 @@ pub fn LibraryTab(
         spawn_local(async move {
             match api::apply(profile.clone(), skin.id.clone()).await {
                 Ok(answer) => {
-                    on_state.run(answer);
+                    let _ = on_state.try_run(answer);
                     toasts.show(Level::Success, i18n.tp("skins_applied", &[("name", skin.name)]), None);
                     if let Some(host) = host {
                         host.avatar_changed.run(profile);
@@ -113,11 +120,7 @@ pub fn LibraryTab(
     let set_model = move |skin: LibrarySkin, variant: SkinVariant| {
         spawn_local(async move {
             match api::set_variant(skin.id, variant).await {
-                Ok(changed) => library.update(|l| {
-                    for skin in l.iter_mut().flatten().filter(|s| s.id == changed.id) {
-                        *skin = changed.clone();
-                    }
-                }),
+                Ok(changed) => land_variant(library, changed),
                 Err(e) => fail(e),
             }
         });
@@ -127,8 +130,12 @@ pub fn LibraryTab(
         let name = new_name.get_untracked();
         spawn_local(async move {
             match api::rename(skin.id, name).await {
-                Ok(_) => rename_open.set(false),
-                Err(e) => rename_error.set(Some(i18n.text(&error_text(&e)))),
+                Ok(_) => {
+                    let _ = rename_open.try_set(false);
+                }
+                Err(e) => {
+                    let _ = rename_error.try_set(Some(i18n.text(&error_text(&e))));
+                }
             }
         });
     };
@@ -137,8 +144,8 @@ pub fn LibraryTab(
         spawn_local(async move {
             match api::delete(skin.id.clone()).await {
                 Ok(_) => {
-                    if chosen.get_untracked().as_deref() == Some(skin.id.as_str()) {
-                        chosen.set(None);
+                    if chosen.try_get_untracked().flatten().as_deref() == Some(skin.id.as_str()) {
+                        let _ = chosen.try_set(None);
                     }
                 }
                 Err(e) => fail(e),
@@ -175,11 +182,11 @@ pub fn LibraryTab(
 
     let card = move |skin: LibrarySkin| {
         let id = skin.id.clone();
-        let (for_click, for_hover, for_worn, for_chosen, for_busy) =
-            (id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
+        let (for_click, for_hover, for_chosen, for_busy) = (id.clone(), id.clone(), id.clone(), id.clone());
+        let for_worn = skin.clone();
         let (for_menu, for_more, for_wear) = (skin.clone(), skin.clone(), skin.clone());
         let more = NodeRef::<leptos::html::Span>::new();
-        let is_worn = move || worn.get().as_deref() == Some(for_worn.as_str());
+        let is_worn = move || worn.with(|w| is_worn(w.as_ref(), &for_worn));
         let is_worn_tag = is_worn.clone();
         let is_worn_button = is_worn.clone();
         view! {

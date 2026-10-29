@@ -29,7 +29,8 @@ The launcher connects to these services only to do what you ask of it. Each one 
 | Fabric, Quilt, Forge, NeoForge | Loader versions and their files | Which files to download |
 | Modrinth, CurseForge | Searching and installing mods, resource packs, shaders and modpacks, checking for updates | Your searches, and fingerprints (hashes) of the files in a build when the launcher looks for their updates |
 | GitHub | Checking for and downloading launcher updates | Nothing beyond the request |
-| Minecraft services (`api.minecraftservices.com`), `textures.minecraft.net` | The Skins page: your Microsoft account's skin and capes; changing the skin or the cape when you click «Put on» | That profile's sign-in token; when you put a skin on, the skin's file and its model (Classic or Slim) |
+| Minecraft services (`api.minecraftservices.com`) | The Skins page: your Microsoft account's skin and capes; changing the skin or the cape when you click «Put on» | That profile's sign-in token; when you put a skin on, the skin's file and its model (Classic or Slim) |
+| `textures.minecraft.net` | The skin and cape files the Skins page shows | Nothing but the request itself |
 | Mojang (`api.mojang.com`, `sessionserver.mojang.com`) | «Add by nickname»: a player's skin by their nickname, from Mojang's public profiles | The nickname you typed |
 | mc-heads.net, minotar.net, mineskin.eu | The skin heads shown next to your accounts | The player's UUID or name |
 | `gigabait.uk` (TensaCraft edition only) | The TensaCraft servers' builds on Home, and their pictures, from the addresses the server gives (the launcher asks whether a picture changed); for a server build, the list of mods the server allows. A server build's files and its optional mods may come from the addresses the server gives, `cdn.modrinth.com` and `edge.forgecdn.net` among them | Nothing beyond the request |

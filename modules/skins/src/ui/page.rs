@@ -14,8 +14,9 @@ use ui_kit::{
 };
 
 use super::capes::CapesTab;
+use super::land::{land_accounts, land_state, land_variant};
 use super::library::LibraryTab;
-use super::model::{active_cape, kept_account, previewed, worn_id};
+use super::model::{active_cape, previewed, worn_as, worn_id};
 use super::viewer::SkinStage;
 use crate::dto::{Account, AccountState, LibrarySkin, MESSAGE, SkinVariant, error_text};
 
@@ -82,12 +83,7 @@ pub fn SkinsPage() -> impl IntoView {
                     Vec::new()
                 }
             };
-            if let Some(key) = kept_account(&list, &account.get_untracked())
-                && account.get_untracked() != key
-            {
-                let _ = account.try_set(key);
-            }
-            let _ = accounts.try_set(Some(list));
+            land_accounts(accounts, account, list);
         });
     });
     // Their heads.
@@ -152,6 +148,7 @@ pub fn SkinsPage() -> impl IntoView {
 
     let current = Signal::derive(move || state.with(|s| s.as_ref().and_then(|r| r.as_ref().ok()).cloned()));
     let worn = Signal::derive(move || current.with(|s| s.as_ref().and_then(worn_id)));
+    let worn_card = Signal::derive(move || current.with(|s| s.as_ref().and_then(worn_as)));
     let entry = move |id: &str| library.with(|l| l.iter().flatten().find(|s| s.id == id).cloned());
     // A card deleted under the pointer leaves no preview behind.
     let preview = Memo::new(move |_| {
@@ -212,18 +209,14 @@ pub fn SkinsPage() -> impl IntoView {
         let variant = if on { SkinVariant::Slim } else { SkinVariant::Classic };
         spawn_local(async move {
             match super::api::set_variant(id, variant).await {
-                Ok(changed) => library.update(|l| {
-                    for skin in l.iter_mut().flatten().filter(|s| s.id == changed.id) {
-                        *skin = changed.clone();
-                    }
-                }),
+                Ok(changed) => land_variant(library, changed),
                 Err(e) => toasts.show(Level::Error, i18n.text(&error_text(&e)), None),
             }
         });
     });
     let on_state = Callback::new(move |answer: AccountState| {
-        state.set(Some(Ok(answer)));
-        cape_pick.set(None);
+        land_state(state, account, latest, answer);
+        let _ = cape_pick.try_set(None);
     });
 
     let chips = vec![
@@ -305,7 +298,7 @@ pub fn SkinsPage() -> impl IntoView {
                             <LibraryTab
                                 library=library
                                 account=account
-                                worn=worn
+                                worn=worn_card
                                 chosen=chosen
                                 hovered=hovered
                                 can_wear=can_wear

@@ -1,7 +1,7 @@
 //! What the page decides without the window: which account it starts on, which skin is worn,
 //! which one the viewer shows.
 
-use crate::dto::{Account, AccountState};
+use crate::dto::{Account, AccountState, LibrarySkin, SkinVariant};
 
 /// The account the page opens on: the launcher's default profile when it is official, else the
 /// first official one.
@@ -20,6 +20,17 @@ pub fn kept_account(accounts: &[Account], current: &str) -> Option<String> {
 /// The library card of the skin the account wears.
 pub fn worn_id(state: &AccountState) -> Option<String> {
     state.skin.as_ref().and_then(|s| s.library_id.clone())
+}
+
+/// The library card of the skin the account wears, and the model it is worn on.
+pub fn worn_as(state: &AccountState) -> Option<(String, SkinVariant)> {
+    state.skin.as_ref().and_then(|s| s.library_id.clone().map(|id| (id, s.variant)))
+}
+
+/// Library skin `skin` is the one worn, on its model (worn on the other one, it can be put on
+/// again).
+pub fn is_worn(worn: Option<&(String, SkinVariant)>, skin: &LibrarySkin) -> bool {
+    worn.is_some_and(|(id, variant)| *id == skin.id && *variant == skin.variant)
 }
 
 /// The cape the account wears.
@@ -71,6 +82,27 @@ mod tests {
         assert_eq!(worn_id(&state(None)), None, "a skin outside the library marks no card");
         assert_eq!(worn_id(&AccountState { skin: None, ..state(None) }), None);
         assert_eq!(active_cape(&state(None)).as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn a_worn_skin_on_another_model_can_be_put_on_again() {
+        let card = |variant| LibrarySkin {
+            id: "s1".into(),
+            name: "Мій".into(),
+            variant,
+            source: "file".into(),
+            sha256: "ab".into(),
+            added_ms: 0,
+            thumb: String::new(),
+        };
+        let worn = worn_as(&state(Some("s1")));
+        assert_eq!(worn, Some(("s1".to_string(), SkinVariant::Classic)));
+        assert!(is_worn(worn.as_ref(), &card(SkinVariant::Classic)));
+        assert!(
+            !is_worn(worn.as_ref(), &card(SkinVariant::Slim)),
+            "worn on the other model: put it on again"
+        );
+        assert!(!is_worn(None, &card(SkinVariant::Classic)));
     }
 
     #[test]

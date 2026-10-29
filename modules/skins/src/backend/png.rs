@@ -55,6 +55,11 @@ pub fn read_skin(bytes: &[u8]) -> AppResult<SkinImage> {
         (64, 32) => widen_legacy(&image),
         (w, h) => return Err(bad_png(format!("the skin is {w}x{h}"))),
     };
+    let mut image = image;
+    // What nobody sees has no colour: a host that re-encodes the skin keeps its hash.
+    for pixel in image.pixels_mut().filter(|p| p[3] == 0) {
+        *pixel = Rgba([0, 0, 0, 0]);
+    }
     let png = encode(&image)?;
     let sha256 = hex::encode(Sha256::digest(&png));
     Ok(SkinImage { png, sha256 })
@@ -298,6 +303,16 @@ mod tests {
         assert_eq!(image.to_rgba8().get_pixel(40, 0)[3], 0);
         assert_eq!(read_skin(&bytes).unwrap().sha256, first.sha256, "the hash is stable");
         assert_eq!(read_skin(&first.png).unwrap().sha256, first.sha256, "and the same once normalised");
+    }
+
+    #[test]
+    fn clear_pixels_hash_alike_whatever_their_colour() {
+        // A host that re-encodes a skin may drop the colour of the pixels nobody sees.
+        let mut coloured = skin(64, 64, false);
+        coloured.put_pixel(40, 0, Rgba([200, 30, 30, 0]));
+        let read = read_skin(&encode(&coloured)).unwrap();
+        assert_eq!(read.sha256, read_skin(&encode(&skin(64, 64, false))).unwrap().sha256);
+        assert_eq!(image::load_from_memory(&read.png).unwrap().to_rgba8().get_pixel(40, 0), &CLEAR);
     }
 
     #[test]

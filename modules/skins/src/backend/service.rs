@@ -209,7 +209,8 @@ impl SkinsService {
         profile: ServicesProfile,
     ) -> AppResult<AccountState> {
         let (_, name, id) = session;
-        let skin = match profile.skins.iter().find(|s| s.state == "ACTIVE") {
+        // Minecraft's own skin (named by an alias) is none of the player's: shown as no skin.
+        let skin = match profile.skins.iter().find(|s| s.state == "ACTIVE").filter(|s| s.alias.is_none()) {
             None => None,
             Some(remote) => {
                 let image = self.current_skin(id, &remote.url).await?;

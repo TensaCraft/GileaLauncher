@@ -205,6 +205,18 @@ async fn an_account_without_a_custom_skin_adds_nothing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_default_skin_named_by_the_profile_adds_nothing() {
+    let rig = rig().await;
+    dressed(&rig, 9, false);
+    rig.fake.account().skin_alias = Some("STEVE".into());
+    let state = rig.svc.state("steve").await.unwrap();
+    assert_eq!(state.skin, None, "Minecraft's own skin is no skin of the player's");
+    assert!(rig.svc.library().is_empty());
+    assert!(rig.fake.requests("/textures/current").is_empty());
+    assert_eq!(state.capes.len(), 2, "the capes are still there");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn apply_uploads_the_library_skin_with_its_variant_and_fires_the_event() {
     let rig = rig().await;
     let file = rig.dir.path().join("Мій скін.png");

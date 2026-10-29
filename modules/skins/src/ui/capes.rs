@@ -30,7 +30,7 @@ pub fn CapesTab(
         spawn_local(async move {
             match api::set_cape(profile, cape.clone()).await {
                 Ok(answer) => {
-                    on_state.run(answer);
+                    let _ = on_state.try_run(answer);
                     let said = match cape {
                         Some(_) => i18n.tp("skins_cape_applied", &[("name", alias)]),
                         None => i18n.t("skins_cape_removed"),
