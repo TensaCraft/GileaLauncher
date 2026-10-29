@@ -133,6 +133,12 @@ pub struct ModuleHost {
     pub open_content: Callback<(String, String)>,
     /// Starts build `key` the way its Play button does.
     pub launch: Callback<String>,
+    /// Opens the app's page at a path (`/profiles`).
+    pub go: Callback<String>,
+    /// Starts a Microsoft sign-in, as the Profiles page's «Увійти повторно» does.
+    pub sign_in: Callback<()>,
+    /// Profile `key`'s head changed (its skin did): the app draws it again.
+    pub avatar_changed: Callback<String>,
 }
 
 /// How many cards each module shows on Home right now: Home says it has no builds only when no

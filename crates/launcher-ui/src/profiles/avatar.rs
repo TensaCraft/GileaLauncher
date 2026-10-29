@@ -29,6 +29,19 @@ fn request_avatar(store: AppStore, key: &str) {
     });
 }
 
+/// Asks for `key`'s head again (its skin changed); the one shown stays until the new one comes.
+pub fn reload_avatar(store: AppStore, key: &str) {
+    let key = key.to_string();
+    spawn_local(async move {
+        let args = KeyArgs { key: key.clone() };
+        if let Ok(Some(src)) = ipc::invoke::<_, Option<String>>("profile_avatar", &args).await {
+            store.avatars.update(|map| {
+                map.insert(key, Some(src));
+            });
+        }
+    });
+}
+
 #[component]
 pub fn ProfileAvatar(
     #[prop(into)] profile_key: Signal<Option<String>>,

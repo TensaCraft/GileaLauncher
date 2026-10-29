@@ -1,5 +1,12 @@
 //! The skins module's UI: the «Скіни» page.
 
+mod api;
+mod capes;
+mod library;
+mod model;
+mod page;
+mod viewer;
+
 use leptos::prelude::*;
 use ui_kit::module::{ModulePage, UiModule};
 
@@ -24,7 +31,7 @@ impl UiModule for SkinsUi {
             path: "/skins",
             icon: "checkroom",
             label: "skins_nav",
-            view: || view! { <div class="page skins-page"></div> }.into_any(),
+            view: || view! { <page::SkinsPage /> }.into_any(),
         }]
     }
 }

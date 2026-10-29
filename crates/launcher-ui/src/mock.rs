@@ -310,6 +310,10 @@ pub fn install() {
     let backups = Rc::new(RefCell::new(crate::mock_backups::MockBackups::default()));
     #[cfg(feature = "mod-sync")]
     let sync = Rc::new(RefCell::new(crate::mock_sync::MockSync::new()));
+    #[cfg(feature = "mod-skins")]
+    let skins = Rc::new(RefCell::new(crate::mock_skins::MockSkins::new(
+        query_value("skins").as_deref() == Some("none"),
+    )));
     #[cfg(feature = "mod-diagnostics")]
     let diagnostics =
         Rc::new(RefCell::new(crate::mock_diagnostics::MockDiagnostics::new(query_flag("crash"))));
@@ -451,6 +455,16 @@ pub fn install() {
         }
         #[cfg(feature = "mod-modrinth")]
         cmd if cmd.starts_with("provider_") => modrinth.borrow_mut().handle(cmd, &args),
+        #[cfg(feature = "mod-skins")]
+        "module_invoke" if args["module"] == module_skins::ID => {
+            let command = args["command"].as_str().unwrap_or_default();
+            let answer = skins.borrow_mut().handle(command, &args["args"]);
+            // What the backend says after a change, so the page and the avatars follow.
+            if answer.is_ok() && !["accounts", "state", "library", "skin"].contains(&command) {
+                ipc::emit_mock(module_skins::dto::CHANGED_EVENT, Value::Null);
+            }
+            answer
+        }
         #[cfg(feature = "mod-sync")]
         "module_invoke" if args["module"] == "sync" => {
             sync.borrow_mut().handle(args["command"].as_str().unwrap_or_default(), &args["args"])

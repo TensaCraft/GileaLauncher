@@ -87,7 +87,11 @@ pub fn App() -> impl IntoView {
     provide_build_dialogs();
     // What modules may ask of the app: a build's content tab, a build started as Play starts it.
     let flow = crate::builds::launch::use_launch_flow();
+    let profile_actions = crate::profiles::actions::use_profile_actions();
     ui_kit::module::provide_module_host(ui_kit::module::ModuleHost {
+        go: Callback::new(move |path: String| store.go(&path)),
+        sign_in: Callback::new(move |()| profile_actions.sign_in()),
+        avatar_changed: Callback::new(move |key: String| crate::profiles::avatar::reload_avatar(store, &key)),
         open_content: Callback::new(move |(key, tab): (String, String)| {
             store.go(&crate::pages::content::content_path(&key, &tab))
         }),

@@ -12,6 +12,7 @@ GileaLauncher is a Minecraft launcher that runs on your computer. It has no acco
 - **Backups.** World backups, the mods an update replaced and the modpack files a pack update replaced are kept in one backups folder, a folder per build. By default it is `backups` in the games folder; the setup wizard and the backups settings let you choose another.
 - **The launcher's own files in a build** (change journals, the launch log, notes about the build) are in the build's service folder `.launcher`.
 - **Build sync.** A sync group copies the files and folders you chose from one of its builds to the others: before a game starts, after it closes and when you ask. What a sync overwrites or removes in a build is kept first in that build's folder of the backups folder (`sync/`) and can be restored from the group's history; it is kept 14 days and at most 2 GB per build. The groups are kept in the launcher's state folder. Worlds, logs, caches and the launcher's own files are never synced.
+- **Skins.** The skin library is shared by every profile and kept in the launcher's state folder (`skins/`). The skins and capes of your accounts that the Skins page shows are kept in the launcher's cache.
 - **Cleaning.** Once a day, in the background, the launcher removes by rules: mods' copies older than 30 days; modpack copies but the newest, and that one after 30 days; Java's dumps after 7 days; crash reports and log archives after 30 days; its own work files of finished changes, set-aside journals after 30 days and leftover downloads; thumbnails of screenshots that are gone, and the oldest ones over 500 MB. Each rule is a switch in Settings → Storage, where every line can also be cleared by hand. These rules never remove world backups: their count is set in the backups settings. A build whose game runs is never touched.
 - **The launcher's own crashes.** If the launcher crashes, it keeps a short note (the error's text and its place in the launcher's code, without your home folder) in its cache folder, to ask you at the next start whether to report it. The note goes once it is reported or you choose not to; at most the five newest are kept, for 30 days.
 
@@ -28,6 +29,8 @@ The launcher connects to these services only to do what you ask of it. Each one 
 | Fabric, Quilt, Forge, NeoForge | Loader versions and their files | Which files to download |
 | Modrinth, CurseForge | Searching and installing mods, resource packs, shaders and modpacks, checking for updates | Your searches, and fingerprints (hashes) of the files in a build when the launcher looks for their updates |
 | GitHub | Checking for and downloading launcher updates | Nothing beyond the request |
+| Minecraft services (`api.minecraftservices.com`), `textures.minecraft.net` | The Skins page: your Microsoft account's skin and capes; changing the skin or the cape when you click «Put on» | That profile's sign-in token; when you put a skin on, the skin's file and its model (Classic or Slim) |
+| Mojang (`api.mojang.com`, `sessionserver.mojang.com`) | «Add by nickname»: a player's skin by their nickname, from Mojang's public profiles | The nickname you typed |
 | mc-heads.net, minotar.net, mineskin.eu | The skin heads shown next to your accounts | The player's UUID or name |
 | `gigabait.uk` (TensaCraft edition only) | The TensaCraft servers' builds on Home, and their pictures, from the addresses the server gives (the launcher asks whether a picture changed); for a server build, the list of mods the server allows. A server build's files and its optional mods may come from the addresses the server gives, `cdn.modrinth.com` and `edge.forgecdn.net` among them | Nothing beyond the request |
 
@@ -84,4 +87,4 @@ To have a report you sent deleted, ask on [Discord](https://discord.com/invite/m
 
 Questions about this page: [Discord](https://discord.com/invite/mftAjQA4Pp) or [GitHub Issues](https://github.com/TensaCraft/GileaLauncher/issues).
 
-Last updated: 5 October 2026.
+Last updated: 29 October 2026.

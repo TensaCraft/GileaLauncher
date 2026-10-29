@@ -17,6 +17,8 @@ mod mock_modrinth;
 mod mock_ops;
 #[cfg(feature = "mod-reports")]
 mod mock_reports;
+#[cfg(feature = "mod-skins")]
+mod mock_skins;
 mod mock_storage;
 #[cfg(feature = "mod-sync")]
 mod mock_sync;
