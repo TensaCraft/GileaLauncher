@@ -95,7 +95,7 @@ zip = { version = "8.6", default-features = false, features = ["deflate-flate2-z
 lzma-rs = "0.3"
 fastnbt = "2"
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
-hickory-resolver = { version = "0.25", default-features = false, features = ["system-config", "tokio"] }
+hickory-resolver = { version = "0.26", default-features = false, features = ["system-config", "tokio"] }
 
 # Dependencies optimised in dev builds too: hashing and unzipping a build's mods (sha2, zip) are
 # tens of times slower unoptimised, while the workspace's own crates stay quick to rebuild.
