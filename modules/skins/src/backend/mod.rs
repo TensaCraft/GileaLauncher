@@ -15,9 +15,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::dto::{
-    ApplyArgs, CapeArgs, IdArgs, ImportFileArgs, ImportPlayerArgs, ProfileArgs, RenameArgs, VariantArgs,
-};
+use crate::dto::{ApplyArgs, CapeArgs, IdArgs, ImportArgs, ProfileArgs, RenameArgs, VariantArgs};
 use mojang::Endpoints;
 use service::{Deps, SkinsService, TokenFuture, session_of};
 
@@ -26,13 +24,12 @@ pub struct SkinsModule {
     shared: Arc<OnceLock<Arc<SkinsService>>>,
 }
 
-const COMMANDS: [&str; 11] = [
+const COMMANDS: [&str; 10] = [
     "accounts",
     "state",
     "library",
     "skin",
-    "import_file",
-    "import_player",
+    "import",
     "rename",
     "set_variant",
     "delete",
@@ -100,11 +97,7 @@ async fn dispatch(service: &SkinsService, command: &str, args: Value) -> AppResu
         "state" => answer(service.state(&parse::<ProfileArgs>(args)?.profile).await?),
         "library" => answer(service.library()),
         "skin" => answer(service.skin(&parse::<IdArgs>(args)?.id)?),
-        "import_file" => {
-            let a: ImportFileArgs = parse(args)?;
-            answer(service.import_file(&a.path, a.name.as_deref())?)
-        }
-        "import_player" => answer(service.import_player(&parse::<ImportPlayerArgs>(args)?.name).await?),
+        "import" => answer(service.import(&parse::<ImportArgs>(args)?).await?),
         "rename" => {
             let a: RenameArgs = parse(args)?;
             answer(service.rename(&a.id, &a.name)?)

@@ -52,7 +52,7 @@ pub struct LibrarySkin {
     pub id: String,
     pub name: String,
     pub variant: SkinVariant,
-    /// `file`, `player:<name>` or `account:<name>`.
+    /// `file`, `player:<name>`, `link:<address>` or `account:<name>`.
     pub source: String,
     pub sha256: String,
     pub added_ms: u64,
@@ -103,16 +103,35 @@ pub struct IdArgs {
     pub id: String,
 }
 
+/// Where a skin added to the library comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImportFileArgs {
-    pub path: String,
-    #[serde(default)]
-    pub name: Option<String>,
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum SkinSource {
+    /// A PNG file on this computer.
+    File { path: String },
+    /// A player's skin as Mojang has it now, by nickname.
+    Player { name: String },
+    /// A PNG at a web address.
+    Link { url: String },
 }
 
+/// A skin to add to the library.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImportPlayerArgs {
-    pub name: String,
+pub struct ImportArgs {
+    pub source: SkinSource,
+    /// Its name in the library; when blank, the file's, the player's or the link's.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Its model; when none, the one its arms suggest.
+    #[serde(default)]
+    pub variant: Option<SkinVariant>,
+}
+
+impl ImportArgs {
+    /// From `source`, named after it, on the model its arms suggest.
+    pub fn new(source: SkinSource) -> ImportArgs {
+        ImportArgs { source, name: None, variant: None }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +195,17 @@ mod tests {
         assert_eq!(cape.cape, None);
         let older = serde_json::json!({"sha256": "ab", "variant": "classic", "data": "", "library_id": null});
         assert!(!serde_json::from_value::<CurrentSkin>(older).unwrap().default, "a custom skin by default");
+    }
+
+    #[test]
+    fn a_source_says_its_kind() {
+        let link = ImportArgs::new(SkinSource::Link { url: "https://x.ua/a.png".into() });
+        let value = serde_json::to_value(&link).unwrap();
+        assert_eq!(value["source"], serde_json::json!({"kind": "link", "url": "https://x.ua/a.png"}));
+        assert_eq!(serde_json::from_value::<ImportArgs>(value).unwrap(), link);
+        let bare = serde_json::json!({"source": {"kind": "player", "name": "Alex"}});
+        let args: ImportArgs = serde_json::from_value(bare).unwrap();
+        assert_eq!((args.name, args.variant), (None, None), "named and modelled by the skin itself");
     }
 
     #[test]

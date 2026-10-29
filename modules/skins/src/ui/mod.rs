@@ -1,5 +1,6 @@
 //! The skins module's UI: the «Скіни» page.
 
+mod add;
 mod api;
 mod capes;
 mod land;

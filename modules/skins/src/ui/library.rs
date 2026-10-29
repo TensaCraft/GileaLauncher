@@ -1,17 +1,18 @@
-//! The «Скіни» tab: adding skins (by nickname, from a file) and the library's cards.
+//! The «Скіни» tab: the library's cards, its search and «Додати скін».
 
 use launcher_shared::{AppError, Level};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    ActionGroup, Button, ConfirmDialog, Dialog, DialogFooter, EmptyState, IconAction, InFlight, MenuEntry,
-    Rect, Skeleton, Tag, TagTone, TextInput, Variant, ipc, use_context_menu, use_toasts,
+    ActionGroup, Button, ConfirmDialog, Dialog, DialogFooter, EmptyState, IconAction, MenuEntry, Rect,
+    Skeleton, TextInput, Variant, use_context_menu, use_toasts,
 };
 
+use super::add::AddSkinDialog;
 use super::api;
 use super::land::land_variant;
-use super::model::is_worn;
+use super::model::{is_worn, matching};
 use crate::dto::{AccountState, LibrarySkin, SkinVariant, error_text};
 
 fn model_name(variant: SkinVariant) -> &'static str {
@@ -39,8 +40,10 @@ pub fn LibraryTab(
     let menu = use_context_menu();
     let host = ui_kit::module::use_module_host();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
-    let nick = RwSignal::new(String::new());
-    let (by_nick, by_file) = (InFlight::new(), InFlight::new());
+    let query = RwSignal::new(String::new());
+    let add_open = RwSignal::new(false);
+    // The library as it was when «Додати скін» opened: a skin already in it is not new.
+    let before = StoredValue::new(Vec::<String>::new());
     let applying = RwSignal::new(None::<String>);
     let renaming = RwSignal::new(None::<LibrarySkin>);
     let (rename_open, new_name) = (RwSignal::new(false), RwSignal::new(String::new()));
@@ -49,54 +52,18 @@ pub fn LibraryTab(
     let delete_open = RwSignal::new(false);
 
     let fail = move |e: AppError| toasts.show(Level::Error, i18n.text(&error_text(&e)), None);
+    let open_add = move || {
+        before.set_value(library.with_untracked(|l| l.iter().flatten().map(|s| s.id.clone()).collect()));
+        add_open.set(true);
+    };
     // A skin added: told whether it was new, shown in the viewer (the library reloads on the
     // module's change event).
-    let added = move |skin: LibrarySkin, known: bool| {
+    let on_added = Callback::new(move |skin: LibrarySkin| {
+        let known = before.try_with_value(|ids| ids.contains(&skin.id)).unwrap_or(false);
         let key = if known { "skins_already" } else { "skins_added" };
         toasts.show(Level::Success, i18n.tp(key, &[("name", skin.name.clone())]), None);
         let _ = chosen.try_set(Some(skin.id));
-    };
-    // Answers land after a wait: the page may be gone by then, so nothing here may insist.
-    let known = move |id: &str| {
-        library.try_with_untracked(|l| l.iter().flatten().any(|s| s.id == id)).unwrap_or(false)
-    };
-    let add_by_nick = move || {
-        let name = nick.get_untracked();
-        if name.trim().is_empty() || !by_nick.start() {
-            return;
-        }
-        spawn_local(async move {
-            match api::import_player(name).await {
-                Ok(skin) => {
-                    let was = known(&skin.id);
-                    let _ = nick.try_set(String::new());
-                    added(skin, was);
-                }
-                Err(e) => fail(e),
-            }
-            by_nick.done();
-        });
-    };
-    let add_file = move || {
-        if !by_file.start() {
-            return;
-        }
-        spawn_local(async move {
-            let filter = i18n.t("skins_file_filter");
-            match ipc::pick_file(None, &filter, &["png"]).await {
-                Ok(Some(path)) => match api::import_file(path).await {
-                    Ok(skin) => {
-                        let was = known(&skin.id);
-                        added(skin, was);
-                    }
-                    Err(e) => fail(e),
-                },
-                Ok(None) => {}
-                Err(e) => fail(e),
-            }
-            by_file.done();
-        });
-    };
+    });
     let wear = move |skin: LibrarySkin| {
         if applying.get_untracked().is_some() {
             return;
@@ -205,9 +172,9 @@ pub fn LibraryTab(
                 <div class="skins-card__picture">
                     <img class="skins-card__thumb" src=skin.thumb.clone() alt="" />
                 </div>
-                <div class="skins-card__name" data-tip=skin.name.clone() data-tip-side="top">{skin.name.clone()}</div>
-                <div class="skins-card__tags">
-                    <Tag tone=TagTone::Neutral>{model_name(skin.variant)}</Tag>
+                <div class="skins-card__title">
+                    <span class="skins-card__name" data-tip=skin.name.clone() data-tip-side="top">{skin.name.clone()}</span>
+                    <span class="skins-card__model">{model_name(skin.variant)}</span>
                 </div>
                 <div class="skins-card__actions">
                     <Button
@@ -242,36 +209,37 @@ pub fn LibraryTab(
         match library.get() {
         None => view! { <div class="skins-grid"><Skeleton /></div> }.into_any(),
         Some(list) if list.is_empty() => view! {
-            <EmptyState icon="brand:skin" title=t("skins_library_empty_title") desc=t("skins_library_empty_desc") />
+            <EmptyState icon="brand:skin" title=t("skins_library_empty_title") desc=t("skins_library_empty_desc")>
+                <Button variant=Variant::Primary icon="add" on_click=move |_| open_add()>
+                    {move || i18n.t("skins_add")}
+                </Button>
+            </EmptyState>
         }
         .into_any(),
-        Some(list) => view! { <div class="skins-grid">{list.into_iter().map(card).collect_view()}</div> }.into_any(),
+        Some(list) => match matching(&list, &query.get()) {
+            found if found.is_empty() => {
+                view! { <EmptyState icon="search_off" title=t("skins_nothing_found") /> }.into_any()
+            }
+            found => view! { <div class="skins-grid">{found.into_iter().map(card).collect_view()}</div> }.into_any(),
+        },
     }
     };
     view! {
-        <div class="skins-tools">
-            <div class="skins-tools__nick">
-                <TextInput
-                    value=nick
-                    icon="person_search"
-                    placeholder=t("skins_nick")
-                    on_enter=Callback::new(move |()| add_by_nick())
-                />
+        <div class="create__bar">
+            <div class="create__tools">
+                <div class="create__search">
+                    <TextInput value=query icon="search" placeholder=t("skins_search") />
+                </div>
+                <ActionGroup>
+                    <IconAction icon="refresh" title=t("refresh") on_click=reload />
+                </ActionGroup>
+                <Button variant=Variant::Primary icon="add" on_click=move |_| open_add()>
+                    {move || i18n.t("skins_add")}
+                </Button>
             </div>
-            <Button icon="person_add" loading=by_nick.running() on_click=move |_| add_by_nick()>
-                {move || i18n.t("skins_add_nick")}
-            </Button>
-            <ActionGroup>
-                <IconAction
-                    icon="upload_file"
-                    title=t("skins_add_file")
-                    loading=by_file.running()
-                    on_click=Callback::new(move |()| add_file())
-                />
-                <IconAction icon="refresh" title=t("refresh") on_click=reload />
-            </ActionGroup>
         </div>
         {grid}
+        <AddSkinDialog open=add_open on_added=on_added />
         <Dialog open=rename_open title=t("skins_rename_title") icon="edit">
             <DialogFooter slot>
                 <Button variant=Variant::Ghost on_click=move |_| rename_open.set(false)>{move || i18n.t("cancel")}</Button>

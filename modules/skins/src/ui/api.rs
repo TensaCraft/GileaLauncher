@@ -10,8 +10,8 @@ use serde_json::Value;
 use ui_kit::ipc;
 
 use crate::dto::{
-    Account, AccountState, ApplyArgs, CHANGED_EVENT, CapeArgs, IdArgs, ImportFileArgs, ImportPlayerArgs,
-    LibrarySkin, ProfileArgs, RenameArgs, SkinVariant, VariantArgs,
+    Account, AccountState, ApplyArgs, CHANGED_EVENT, CapeArgs, IdArgs, ImportArgs, LibrarySkin, ProfileArgs,
+    RenameArgs, SkinVariant, VariantArgs,
 };
 
 pub async fn accounts() -> Result<Vec<Account>, AppError> {
@@ -30,12 +30,8 @@ pub async fn skin(id: &str) -> Result<String, AppError> {
     ipc::module_invoke(crate::ID, "skin", &IdArgs { id: id.into() }).await
 }
 
-pub async fn import_file(path: String) -> Result<LibrarySkin, AppError> {
-    ipc::module_invoke(crate::ID, "import_file", &ImportFileArgs { path, name: None }).await
-}
-
-pub async fn import_player(name: String) -> Result<LibrarySkin, AppError> {
-    ipc::module_invoke(crate::ID, "import_player", &ImportPlayerArgs { name }).await
+pub async fn import(args: ImportArgs) -> Result<LibrarySkin, AppError> {
+    ipc::module_invoke(crate::ID, "import", &args).await
 }
 
 pub async fn rename(id: String, name: String) -> Result<LibrarySkin, AppError> {

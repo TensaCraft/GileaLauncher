@@ -29,6 +29,7 @@ repository = ""
 # Linux: folders open through the desktop's file manager over D-Bus (as the opener plugin does).
 zbus = "5.9"
 url = "2"
+percent-encoding = "2"
 # Linux: the system opener's commands, started without the AppImage's environment.
 open = "5"
 launcher-shared = { path = "crates/launcher-shared" }

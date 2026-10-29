@@ -1,7 +1,7 @@
 //! What the page decides without the window: which account it starts on, which skin is worn,
 //! which one the viewer shows.
 
-use crate::dto::{Account, AccountState, LibrarySkin, SkinVariant};
+use crate::dto::{Account, AccountState, ImportArgs, LibrarySkin, SkinSource, SkinVariant};
 
 /// The account the page opens on: the launcher's default profile when it is official, else the
 /// first official one.
@@ -48,6 +48,33 @@ pub fn previewed(hovered: Option<&str>, chosen: Option<&str>) -> Option<String> 
 /// figure shows it then).
 pub fn model_target(preview: Option<String>, worn: Option<String>) -> Option<String> {
     preview.or(worn)
+}
+
+/// What the «Додати скін» fields say, as the module's arguments: `value` is the source's own
+/// field (the file, the nickname, the link); `None` while it is blank.
+pub fn import_args(source: &str, value: &str, name: &str, model: &str) -> Option<ImportArgs> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let source = match source {
+        "player" => SkinSource::Player { name: value.into() },
+        "link" => SkinSource::Link { url: value.into() },
+        _ => SkinSource::File { path: value.into() },
+    };
+    let variant = match model {
+        "classic" => Some(SkinVariant::Classic),
+        "slim" => Some(SkinVariant::Slim),
+        _ => None,
+    };
+    let name = Some(name.trim()).filter(|n| !n.is_empty()).map(str::to_string);
+    Some(ImportArgs { source, name, variant })
+}
+
+/// The library skins whose name has `query` in it, in any case; all of them for a blank one.
+pub fn matching(skins: &[LibrarySkin], query: &str) -> Vec<LibrarySkin> {
+    let query = query.trim().to_lowercase();
+    skins.iter().filter(|s| s.name.to_lowercase().contains(&query)).cloned().collect()
 }
 
 #[cfg(test)]
@@ -128,5 +155,35 @@ mod tests {
             "nothing picked: the worn one"
         );
         assert_eq!(model_target(None, None), None);
+    }
+
+    #[test]
+    fn the_add_dialog_asks_for_its_source_s_field() {
+        assert_eq!(import_args("player", "   ", "", "auto"), None, "nothing to add yet");
+        let nick = import_args("player", " Notch ", "", "auto").unwrap();
+        assert_eq!(nick, ImportArgs::new(SkinSource::Player { name: "Notch".into() }));
+        let link = import_args("link", "https://x.ua/a.png", " Лицар ", "slim").unwrap();
+        assert_eq!(link.source, SkinSource::Link { url: "https://x.ua/a.png".into() });
+        assert_eq!((link.name.as_deref(), link.variant), (Some("Лицар"), Some(SkinVariant::Slim)));
+        let file = import_args("file", "C:/a.png", "  ", "classic").unwrap();
+        assert_eq!((file.name, file.variant), (None, Some(SkinVariant::Classic)), "a blank name is none");
+    }
+
+    #[test]
+    fn the_search_finds_names_in_any_case() {
+        let card = |name: &str| LibrarySkin {
+            id: name.into(),
+            name: name.into(),
+            variant: SkinVariant::Classic,
+            source: "file".into(),
+            sha256: name.into(),
+            added_ms: 0,
+            thumb: String::new(),
+        };
+        let skins = [card("Лицар"), card("Notch"), card("лицарка")];
+        let names = |query: &str| matching(&skins, query).into_iter().map(|s| s.name).collect::<Vec<_>>();
+        assert_eq!(names("ЛИЦ"), ["Лицар", "лицарка"]);
+        assert_eq!(names("  "), ["Лицар", "Notch", "лицарка"], "a blank search shows all");
+        assert!(names("zzz").is_empty());
     }
 }

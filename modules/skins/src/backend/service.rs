@@ -16,13 +16,16 @@ use launcher_core::skins::service::{NO_SKIN, REASON, secure};
 use launcher_core::skins::{Player, SkinService, SkinTexture, render};
 use launcher_core::storage::json::write_json_file;
 use launcher_shared::{AccountKind, AppError, AppResult, ErrorCode, ProfileDto};
+use percent_encoding::percent_decode_str;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use url::{ParseError, Url};
 
 use super::library::{Entry, Library, NAME_MAX};
 use super::mojang::{CallError, Endpoints, MojangClient, ServicesProfile, check_nickname};
 use crate::dto::{
-    Account, AccountState, CHANGED_EVENT, Cape, CurrentSkin, LibrarySkin, MESSAGE, SkinVariant,
+    Account, AccountState, CHANGED_EVENT, Cape, CurrentSkin, ImportArgs, LibrarySkin, MESSAGE, SkinSource,
+    SkinVariant,
 };
 
 /// A profile's session: its access token, its player name and its UUID.
@@ -105,6 +108,42 @@ fn lookup_error(e: AppError, name: &str) -> AppError {
         _ => return e,
     };
     e.with_param(MESSAGE, message).with_param("name", name)
+}
+
+/// The skin in file `path`, named after the file.
+fn file_skin(path: &Path) -> AppResult<(SkinTexture, String, String)> {
+    let size = fs::metadata(path).map_err(|e| io_error(path, e))?.len();
+    if size > render::MAX_BYTES as u64 {
+        return Err(bad_png(AppError::new(ErrorCode::InvalidInput, format!("the file is {size} bytes"))));
+    }
+    let bytes = fs::read(path).map_err(|e| io_error(path, e))?;
+    Ok((read_skin(&bytes)?, name_of(path), "file".to_string()))
+}
+
+/// The web address the player typed: `https://` is assumed when they left it out; else
+/// `skins_error_bad_link`.
+fn check_link(raw: &str) -> AppResult<Url> {
+    let raw = raw.trim();
+    let parsed = match Url::parse(raw) {
+        Err(ParseError::RelativeUrlWithoutBase) => Url::parse(&format!("https://{raw}")),
+        other => other,
+    };
+    match parsed {
+        Ok(url) if matches!(url.scheme(), "http" | "https") && url.host_str().is_some() => Ok(url),
+        _ => Err(AppError::new(ErrorCode::InvalidInput, format!("{raw:?} is no web address"))
+            .with_param(MESSAGE, "skins_error_bad_link")),
+    }
+}
+
+/// The default name of a skin added from `url`: its file's name, else the site's.
+fn link_name(url: &Url) -> String {
+    let last = url.path_segments().and_then(|mut s| s.rfind(|s| !s.is_empty())).unwrap_or_default();
+    let file = percent_decode_str(last).decode_utf8_lossy();
+    let file = Path::new(file.as_ref());
+    if file.file_stem().is_some_and(|stem| !stem.to_string_lossy().trim().is_empty()) {
+        return name_of(file);
+    }
+    url.host_str().map_or_else(|| "skin".to_string(), |host| host.chars().take(NAME_MAX).collect())
 }
 
 /// The default name of a skin added from `path`: its file name without the extension.
@@ -317,30 +356,39 @@ impl SkinsService {
         Ok(render::data_url(&self.library.png(id)?))
     }
 
-    /// Adds the skin in file `path`, named `name` or after the file, its model guessed.
-    pub fn import_file(&self, path: &str, name: Option<&str>) -> AppResult<LibrarySkin> {
-        let path = Path::new(path);
-        let size = fs::metadata(path).map_err(|e| io_error(path, e))?.len();
-        if size > render::MAX_BYTES as u64 {
-            return Err(bad_png(AppError::new(ErrorCode::InvalidInput, format!("the file is {size} bytes"))));
-        }
-        let bytes = fs::read(path).map_err(|e| io_error(path, e))?;
-        let image = read_skin(&bytes)?;
-        let name = name.map(str::to_string).unwrap_or_else(|| name_of(path));
-        let (entry, _) = self.library.add(&image, &name, variant_of(image.slim), "file")?;
+    /// Adds a skin from `args.source`, named as asked (else after its file, player or link), on
+    /// the model asked (else the one its arms suggest).
+    pub async fn import(&self, args: &ImportArgs) -> AppResult<LibrarySkin> {
+        let (texture, name, source) = match &args.source {
+            SkinSource::File { path } => file_skin(Path::new(path))?,
+            SkinSource::Player { name } => self.player_skin(name).await?,
+            SkinSource::Link { url } => self.linked_skin(url).await?,
+        };
+        let name = args.name.as_deref().filter(|n| !n.trim().is_empty()).map_or(name, str::to_string);
+        let variant = args.variant.unwrap_or(variant_of(texture.slim));
+        let (entry, _) = self.library.add(&texture, &name, variant, &source)?;
         self.changed();
         Ok(self.shown(entry))
     }
 
-    /// Adds player `name`'s skin, as Mojang has it now.
-    pub async fn import_player(&self, name: &str) -> AppResult<LibrarySkin> {
+    /// Player `name`'s skin as Mojang has it now.
+    async fn player_skin(&self, name: &str) -> AppResult<(SkinTexture, String, String)> {
         let name = check_nickname(name)?;
         let texture =
             self.deps.skins.official(&Player::named(&name)).await.map_err(|e| lookup_error(e, &name))?;
         let source = format!("player:{name}");
-        let (entry, _) = self.library.add(&texture, &name, variant_of(texture.slim), &source)?;
-        self.changed();
-        Ok(self.shown(entry))
+        Ok((texture, name, source))
+    }
+
+    /// The skin at the address `raw`.
+    async fn linked_skin(&self, raw: &str) -> AppResult<(SkinTexture, String, String)> {
+        let url = check_link(raw)?;
+        let texture =
+            self.deps.skins.at_link(url.as_str()).await.map_err(|e| match e.params.get(REASON) {
+                Some(reason) if reason == render::BAD_PNG => bad_png(e),
+                _ => e.with_param(MESSAGE, "skins_error_link"),
+            })?;
+        Ok((texture, link_name(&url), format!("link:{url}")))
     }
 
     pub fn rename(&self, id: &str, name: &str) -> AppResult<LibrarySkin> {
@@ -430,6 +478,21 @@ mod tests {
         assert_eq!(file_key("").len(), 32);
         assert_eq!(name_of(Path::new("C:/skins/  Мій скін .png")), "Мій скін");
         assert_eq!(name_of(Path::new(".png")), ".png");
+    }
+
+    #[test]
+    fn links_are_web_addresses() {
+        let said =
+            |raw: &str| check_link(raw).map(|u| u.to_string()).map_err(|e| e.params.get(MESSAGE).cloned());
+        assert_eq!(said(" s.namemc.com/i/abc.png "), Ok("https://s.namemc.com/i/abc.png".into()));
+        assert_eq!(said("http://x.ua/a.png"), Ok("http://x.ua/a.png".into()));
+        for bad in ["", "ftp://x.ua/a.png", "file:///C:/a.png", "two words", "data:image/png;base64,AA=="] {
+            assert_eq!(said(bad), Err(Some("skins_error_bad_link".into())), "{bad:?}");
+        }
+        let name = |raw: &str| link_name(&Url::parse(raw).unwrap());
+        assert_eq!(name("https://x.ua/skins/%D0%9B%D0%B8%D1%86%D0%B0%D1%80.png?v=2"), "Лицар");
+        assert_eq!(name("https://mc-heads.net/skin/Notch/"), "Notch");
+        assert_eq!(name("https://x.ua/"), "x.ua", "the site's name when the address names no file");
     }
 
     #[test]

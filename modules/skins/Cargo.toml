@@ -14,6 +14,8 @@ backend = [
     "dep:tracing",
     "dep:reqwest",
     "dep:uuid",
+    "dep:percent-encoding",
+    "dep:url",
 ]
 ui = ["dep:ui-kit", "dep:leptos", "dep:js-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys"]
 
@@ -29,6 +31,8 @@ tokio = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true, features = ["multipart"] }
 uuid = { workspace = true, optional = true }
+percent-encoding = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
 ui-kit = { workspace = true, optional = true }
 leptos = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }

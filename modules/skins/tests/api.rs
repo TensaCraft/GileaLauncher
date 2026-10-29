@@ -12,7 +12,7 @@ use launcher_shared::{
 };
 use module_skins::backend::mojang::{CallError, Endpoints, MojangClient};
 use module_skins::backend::service::{Deps, SkinsService, TokenFuture};
-use module_skins::dto::{CHANGED_EVENT, MESSAGE, SkinVariant};
+use module_skins::dto::{CHANGED_EVENT, ImportArgs, MESSAGE, SkinSource, SkinVariant};
 use support::fake_services::{self, Fake, Player, TOKEN};
 
 fn client(fake: &Fake) -> MojangClient {
@@ -165,6 +165,19 @@ fn known_head(rig: &Rig, texture: &str, mark: u8) {
     });
 }
 
+/// Adds the skin in file `path`, named after it, on the model its arms suggest.
+fn file(path: &std::path::Path) -> ImportArgs {
+    ImportArgs::new(SkinSource::File { path: path.to_string_lossy().into_owned() })
+}
+
+fn player(name: &str) -> ImportArgs {
+    ImportArgs::new(SkinSource::Player { name: name.into() })
+}
+
+fn link(url: &str) -> ImportArgs {
+    ImportArgs::new(SkinSource::Link { url: url.into() })
+}
+
 fn message<T: std::fmt::Debug>(result: AppResult<T>) -> Option<String> {
     result.unwrap_err().params.get(MESSAGE).cloned()
 }
@@ -235,7 +248,7 @@ async fn textures_carry_no_token() {
         slim: true,
     });
     rig.svc.state("steve").await.unwrap();
-    rig.svc.import_player("Alex").await.unwrap();
+    rig.svc.import(&player("Alex")).await.unwrap();
     let requests = rig.fake.all_requests();
     let public: Vec<_> = requests.iter().filter(|r| r.path != "/profile").collect();
     assert_eq!(public.iter().filter(|r| r.path.starts_with("/textures/")).count(), 4, "{public:?}");
@@ -284,9 +297,9 @@ async fn apply_uploads_the_library_skin_with_its_variant_and_fires_the_event() {
     let rig = rig().await;
     known_head(&rig, "old", 1);
     rig.skins.head(&steve(), 64).await.unwrap();
-    let file = rig.dir.path().join("Мій скін.png");
-    std::fs::write(&file, skin_png(3, false)).unwrap();
-    let entry = rig.svc.import_file(&file.to_string_lossy(), None).unwrap();
+    let path = rig.dir.path().join("Мій скін.png");
+    std::fs::write(&path, skin_png(3, false)).unwrap();
+    let entry = rig.svc.import(&file(&path)).await.unwrap();
     assert_eq!((entry.name.as_str(), entry.source.as_str()), ("Мій скін", "file"));
     assert_eq!(entry.variant, SkinVariant::Classic, "guessed from the arm");
     rig.svc.set_variant(&entry.id, SkinVariant::Slim).unwrap();
@@ -305,9 +318,9 @@ async fn apply_uploads_the_library_skin_with_its_variant_and_fires_the_event() {
 async fn apply_is_refreshed_and_retried_once_after_a_401() {
     let rig = rig().await;
     rig.fake.knobs().valid_token = Some(TOKEN.into());
-    let file = rig.dir.path().join("a.png");
-    std::fs::write(&file, skin_png(4, false)).unwrap();
-    let entry = rig.svc.import_file(&file.to_string_lossy(), None).unwrap();
+    let path = rig.dir.path().join("a.png");
+    std::fs::write(&path, skin_png(4, false)).unwrap();
+    let entry = rig.svc.import(&file(&path)).await.unwrap();
     let state = rig.svc.apply("steve", &entry.id).await.unwrap();
     assert_eq!(state.skin.unwrap().library_id, Some(entry.id.clone()));
     assert_eq!(*rig.calls.lock().unwrap(), [("steve".to_string(), false), ("steve".to_string(), true)]);
@@ -324,18 +337,12 @@ async fn apply_is_refreshed_and_retried_once_after_a_401() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_bad_file_is_refused() {
     let rig = rig().await;
-    let file = rig.dir.path().join("photo.png");
-    std::fs::write(&file, b"\xFF\xD8\xFF not a png").unwrap();
-    assert_eq!(
-        message(rig.svc.import_file(&file.to_string_lossy(), None)).as_deref(),
-        Some("skins_error_bad_png")
-    );
+    let path = rig.dir.path().join("photo.png");
+    std::fs::write(&path, b"\xFF\xD8\xFF not a png").unwrap();
+    assert_eq!(message(rig.svc.import(&file(&path)).await).as_deref(), Some("skins_error_bad_png"));
     let big = rig.dir.path().join("big.png");
     std::fs::write(&big, vec![0u8; 200 * 1024]).unwrap();
-    assert_eq!(
-        message(rig.svc.import_file(&big.to_string_lossy(), None)).as_deref(),
-        Some("skins_error_bad_png")
-    );
+    assert_eq!(message(rig.svc.import(&file(&big)).await).as_deref(), Some("skins_error_bad_png"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -384,9 +391,9 @@ async fn a_429_says_try_again_later() {
     rig.fake.knobs().profile_status = Some(429);
     assert_eq!(message(rig.svc.state("steve").await).as_deref(), Some("skins_error_rate"));
     rig.fake.knobs().profile_status = None;
-    let file = rig.dir.path().join("a.png");
-    std::fs::write(&file, skin_png(2, false)).unwrap();
-    let entry = rig.svc.import_file(&file.to_string_lossy(), None).unwrap();
+    let path = rig.dir.path().join("a.png");
+    std::fs::write(&path, skin_png(2, false)).unwrap();
+    let entry = rig.svc.import(&file(&path)).await.unwrap();
     rig.fake.knobs().upload_status = Some(400);
     assert_eq!(message(rig.svc.apply("steve", &entry.id).await).as_deref(), Some("skins_error_rejected"));
     assert_eq!(rig.skins.texture(&steve()).await, Some(before), "nothing changed, nothing forgotten");
@@ -410,14 +417,14 @@ async fn import_player_adds_the_player_s_skin() {
         texture: Some("alex".into()),
         slim: true,
     });
-    let entry = rig.svc.import_player(" Alex ").await.unwrap();
+    let entry = rig.svc.import(&player(" Alex ")).await.unwrap();
     assert_eq!(
         (entry.name.as_str(), entry.source.as_str(), entry.variant),
         ("Alex", "player:Alex", SkinVariant::Slim)
     );
     assert_eq!(rig.fake.requests("/name/Alex").len(), 1, "the name is trimmed");
     assert_eq!(rig.fake.requests(&format!("/session/{ALEX_ID}")).len(), 1);
-    assert_eq!(rig.svc.import_player("Alex").await.unwrap().id, entry.id, "the same skin is one entry");
+    assert_eq!(rig.svc.import(&player("Alex")).await.unwrap().id, entry.id, "the same skin is one entry");
     assert_eq!(rig.svc.skin(&entry.id).unwrap(), render::data_url(&normalised(&skin_png(5, true))));
 }
 
@@ -425,14 +432,14 @@ async fn import_player_adds_the_player_s_skin() {
 async fn an_unknown_player_is_not_found() {
     let rig = rig().await;
     rig.fake.add_player(Player { id: ALEX_ID.into(), name: "Plain".into(), texture: None, slim: false });
-    assert_eq!(message(rig.svc.import_player("Nobody").await).as_deref(), Some("skins_error_no_player"));
+    assert_eq!(message(rig.svc.import(&player("Nobody")).await).as_deref(), Some("skins_error_no_player"));
     rig.fake.knobs().unknown_is_204 = true;
-    let unknown = rig.svc.import_player("Nobody").await.unwrap_err();
+    let unknown = rig.svc.import(&player("Nobody")).await.unwrap_err();
     assert_eq!(unknown.params.get(MESSAGE).map(String::as_str), Some("skins_error_no_player"));
     assert_eq!(unknown.params.get("name").map(String::as_str), Some("Nobody"));
-    assert_eq!(message(rig.svc.import_player("two words").await).as_deref(), Some("skins_error_no_player"));
+    assert_eq!(message(rig.svc.import(&player("two words")).await).as_deref(), Some("skins_error_no_player"));
     assert!(rig.fake.all_requests().iter().all(|r| !r.path.contains("two")), "a bad name asks nothing");
-    let plain = rig.svc.import_player("Plain").await.unwrap_err();
+    let plain = rig.svc.import(&player("Plain")).await.unwrap_err();
     assert_eq!(plain.params.get(MESSAGE).map(String::as_str), Some("skins_error_no_skin"));
     assert_eq!(plain.params.get("name").map(String::as_str), Some("Plain"));
     assert!(rig.svc.library().is_empty());
@@ -442,7 +449,7 @@ async fn an_unknown_player_is_not_found() {
 async fn a_429_on_the_lookup_says_so() {
     let rig = rig().await;
     rig.fake.knobs().lookup_status = Some(429);
-    assert_eq!(message(rig.svc.import_player("Alex").await).as_deref(), Some("skins_error_rate_lookup"));
+    assert_eq!(message(rig.svc.import(&player("Alex")).await).as_deref(), Some("skins_error_rate_lookup"));
 }
 
 fn wear(fake: &Fake, texture: &str, slim: bool) {
@@ -524,4 +531,46 @@ async fn statuses_map_to_errors() {
     assert_eq!(client.set_cape(TOKEN, None).await, Err(CallError::RejectedCape));
     fake.knobs().cape_status = Some(500);
     assert!(matches!(client.set_cape(TOKEN, None).await, Err(CallError::Other(_))));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_added_skin_takes_the_name_and_model_asked() {
+    let rig = rig().await;
+    let path = rig.dir.path().join("a.png");
+    std::fs::write(&path, skin_png(6, false)).unwrap();
+    let asked =
+        ImportArgs { name: Some("  Лицар ".into()), variant: Some(SkinVariant::Slim), ..file(&path) };
+    let entry = rig.svc.import(&asked).await.unwrap();
+    assert_eq!((entry.name.as_str(), entry.variant), ("Лицар", SkinVariant::Slim));
+    let other = rig.dir.path().join("Інший.png");
+    std::fs::write(&other, skin_png(7, true)).unwrap();
+    let blank = ImportArgs { name: Some("   ".into()), ..file(&other) };
+    let entry = rig.svc.import(&blank).await.unwrap();
+    assert_eq!((entry.name.as_str(), entry.variant), ("Інший", SkinVariant::Slim), "a blank name is none");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_skin_is_added_from_a_link() {
+    let rig = rig().await;
+    rig.fake.add_texture("alex", skin_png(5, true));
+    let url = format!("{}/textures/alex", rig.fake.base);
+    let entry = rig.svc.import(&link(&format!("  {url} "))).await.unwrap();
+    assert_eq!((entry.name.as_str(), entry.variant), ("alex", SkinVariant::Slim));
+    assert_eq!(entry.source, format!("link:{url}"));
+    assert_eq!(rig.svc.skin(&entry.id).unwrap(), render::data_url(&normalised(&skin_png(5, true))));
+    assert!(rig.events.0.lock().unwrap().iter().any(|e| e == CHANGED_EVENT));
+
+    rig.fake.add_texture("page", b"<html>a page</html>".to_vec());
+    let page = rig.svc.import(&link(&format!("{}/textures/page", rig.fake.base))).await;
+    assert_eq!(message(page).as_deref(), Some("skins_error_bad_png"));
+    let gone = rig.svc.import(&link(&format!("{}/textures/gone", rig.fake.base))).await;
+    assert_eq!(message(gone).as_deref(), Some("skins_error_link"));
+    for bad in ["", "   ", "ftp://example.com/a.png", "two words"] {
+        assert_eq!(
+            message(rig.svc.import(&link(bad)).await).as_deref(),
+            Some("skins_error_bad_link"),
+            "{bad:?}"
+        );
+    }
+    assert_eq!(rig.library_names(), ["alex"]);
 }

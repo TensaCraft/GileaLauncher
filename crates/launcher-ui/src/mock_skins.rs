@@ -3,7 +3,8 @@
 
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use module_skins::dto::{
-    Account, AccountState, Cape, CurrentSkin, LibrarySkin, MESSAGE, SkinVariant, VariantArgs,
+    Account, AccountState, Cape, CurrentSkin, ImportArgs, LibrarySkin, MESSAGE, SkinSource, SkinVariant,
+    VariantArgs,
 };
 use serde_json::Value;
 
@@ -317,14 +318,14 @@ impl MockSkins {
             .ok_or_else(|| failed(ErrorCode::NotFound, "skins_error_gone"))
     }
 
-    fn add(&mut self, name: &str, source: String) -> LibrarySkin {
+    fn add(&mut self, name: &str, source: String, variant: SkinVariant) -> LibrarySkin {
         self.made += 1;
         let added = skin(
             &format!("new{}", self.made),
             name,
             &source,
             OUTFITS[(2 + self.made) % OUTFITS.len()],
-            SkinVariant::Classic,
+            variant,
         );
         let entry = added.entry.clone();
         self.skins.insert(0, added);
@@ -340,22 +341,44 @@ impl MockSkins {
                 let png = self.find(args)?.png.clone();
                 to_value(data_url(&png))
             }
-            "import_file" => {
-                let path = args["path"].as_str().unwrap_or_default();
-                let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
-                let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem).to_string();
-                let name = args["name"].as_str().map(str::to_string).unwrap_or(stem);
-                to_value(self.add(&name, "file".into()))
-            }
-            "import_player" => {
-                let name = args["name"].as_str().unwrap_or_default().trim().to_string();
-                let fits = (1..=16).contains(&name.len())
-                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-                if !fits || name.eq_ignore_ascii_case("Nobody") {
-                    return Err(failed(ErrorCode::NotFound, "skins_error_no_player").with_param("name", name));
-                }
-                let source = format!("player:{name}");
-                to_value(self.add(&name, source))
+            "import" => {
+                let args: ImportArgs = serde_json::from_value(args.clone())
+                    .map_err(|e| AppError::new(ErrorCode::InvalidInput, e.to_string()))?;
+                let (name, source) = match &args.source {
+                    SkinSource::File { path } => {
+                        let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
+                        (file.rsplit_once('.').map_or(file, |(stem, _)| stem).to_string(), "file".into())
+                    }
+                    SkinSource::Player { name } => {
+                        let name = name.trim().to_string();
+                        let fits = (1..=16).contains(&name.len())
+                            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                        if !fits || name.eq_ignore_ascii_case("Nobody") {
+                            return Err(
+                                failed(ErrorCode::NotFound, "skins_error_no_player").with_param("name", name)
+                            );
+                        }
+                        let source = format!("player:{name}");
+                        (name, source)
+                    }
+                    // `…/page…` is a web page, not a skin; anything without a dot is no address.
+                    SkinSource::Link { url } => {
+                        let url = url.trim();
+                        if !url.contains('.') || url.contains(' ') {
+                            return Err(failed(ErrorCode::InvalidInput, "skins_error_bad_link"));
+                        }
+                        if url.contains("page") {
+                            return Err(failed(ErrorCode::InvalidInput, "skins_error_bad_png"));
+                        }
+                        let file = url.trim_end_matches('/').rsplit('/').next().unwrap_or(url);
+                        (
+                            file.rsplit_once('.').map_or(file, |(stem, _)| stem).to_string(),
+                            format!("link:{url}"),
+                        )
+                    }
+                };
+                let name = args.name.filter(|n| !n.trim().is_empty()).unwrap_or(name);
+                to_value(self.add(name.trim(), source, args.variant.unwrap_or_default()))
             }
             "rename" => {
                 let name = args["name"].as_str().unwrap_or_default().trim().to_string();
@@ -442,12 +465,16 @@ mod tests {
         let state: AccountState =
             parse(mock.handle("set_cape", &json!({"profile": "Notch_UA", "cape": null})));
         assert!(state.capes.iter().all(|c| !c.active));
-        let added: LibrarySkin = parse(mock.handle("import_file", &json!({"path": "C:/mock/skin.png"})));
+        let file = json!({"source": {"kind": "file", "path": "C:/mock/skin.png"}});
+        let added: LibrarySkin = parse(mock.handle("import", &file));
         assert_eq!(added.name, "skin");
+        let link = json!({"source": {"kind": "link", "url": "https://x.ua/a.png"}, "name": "Лицар", "variant": "slim"});
+        let linked: LibrarySkin = parse(mock.handle("import", &link));
+        assert_eq!((linked.name.as_str(), linked.variant), ("Лицар", SkinVariant::Slim));
         let renamed: LibrarySkin = parse(mock.handle("rename", &json!({"id": added.id, "name": "Новий"})));
         assert_eq!(renamed.name, "Новий");
         mock.handle("delete", &json!({"id": renamed.id})).unwrap();
-        assert!(mock.handle("import_player", &json!({"name": "Nobody"})).is_err());
+        assert!(mock.handle("import", &json!({"source": {"kind": "player", "name": "Nobody"}})).is_err());
         assert!(
             mock.handle("apply", &json!({"profile": "Builder_Olya", "id": other})).is_err(),
             "sign in first"

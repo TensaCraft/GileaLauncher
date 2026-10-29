@@ -28,7 +28,7 @@ pub struct Entry {
     pub variant: SkinVariant,
     pub sha256: String,
     pub added_ms: u64,
-    /// `file`, `player:<name>` or `account:<name>`.
+    /// `file`, `player:<name>`, `link:<address>` or `account:<name>`.
     pub source: String,
 }
 
