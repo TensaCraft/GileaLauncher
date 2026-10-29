@@ -7,7 +7,7 @@ use super::paths::key;
 use super::scan::Found;
 use super::scan::is_managed;
 use super::store::{Snapshot, Version};
-use crate::dto::{Reason, SyncMode};
+use crate::dto::SyncMode;
 
 /// What a pass decides from.
 pub struct Decision<'a> {
@@ -43,17 +43,14 @@ pub struct Remove {
     pub path: String,
 }
 
-/// A member's version a pass overwrites or removes, held until the pass ends to put it back.
+/// A member's file a pass overwrites or removes: held only until the pass ends, to put the member
+/// back when a later one fails. No copy is kept after.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Saved {
+pub struct Held {
     pub build: String,
     pub key: String,
+    /// As the member spells it.
     pub path: String,
-    pub from: Option<String>,
-    pub reason: Reason,
-    /// The member's own: changed there since its last pass, or never synced there. Only such a
-    /// version stays in history; any other is the group's earlier one.
-    pub own: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -62,7 +59,7 @@ pub struct Outcome {
     pub wait: bool,
     pub writes: Vec<Write>,
     pub removes: Vec<Remove>,
-    pub history: Vec<Saved>,
+    pub held: Vec<Held>,
     /// The agreed version of every file decided (`None`: removed everywhere).
     pub agreed: BTreeMap<String, Option<Version>>,
     /// The paths changed in two members since the last pass.
@@ -110,7 +107,6 @@ pub fn decide(input: &Decision<'_>) -> Outcome {
         let record = snapshot.files.get(&k);
         let file_of = |m: &str| input.found.get(m).and_then(|files| files.get(&k));
         let held = |m: &str| record.and_then(|r| r.held.get(m));
-        let own = |m: &str, f: &Found| held(m).is_none_or(|h| h.hash != f.hash);
         let spelling = input
             .members
             .iter()
@@ -169,12 +165,6 @@ pub fn decide(input: &Decision<'_>) -> Outcome {
         if !losers.is_empty() {
             out.conflicts.push(spelling.clone());
         }
-        let reason_for = |m: &String, removing: bool| match input.mode {
-            SyncMode::Base => Reason::Base,
-            SyncMode::Latest if losers.contains(&m) => Reason::Conflict,
-            SyncMode::Latest if removing => Reason::Removed,
-            SyncMode::Latest => Reason::Changed,
-        };
         match winner {
             Some((source, file)) => {
                 for m in active.iter().copied().filter(|m| *m != source) {
@@ -182,13 +172,10 @@ pub fn decide(input: &Decision<'_>) -> Outcome {
                         Some(own) if own.hash == file.hash => {}
                         present => {
                             if let Some(present) = present {
-                                out.history.push(Saved {
+                                out.held.push(Held {
                                     build: m.clone(),
                                     key: k.clone(),
                                     path: present.path.clone(),
-                                    from: Some(source.clone()),
-                                    reason: reason_for(m, false),
-                                    own: own(m, present),
                                 });
                             }
                             out.writes.push(Write {
@@ -214,14 +201,7 @@ pub fn decide(input: &Decision<'_>) -> Outcome {
                 let wanted_gone = input.mode == SyncMode::Base || record.is_some();
                 if wanted_gone {
                     for (m, file) in holders().filter(|(m, _)| input.mode == SyncMode::Base || !joining(m)) {
-                        out.history.push(Saved {
-                            build: m.clone(),
-                            key: k.clone(),
-                            path: file.path.clone(),
-                            from: None,
-                            reason: reason_for(m, true),
-                            own: own(m, file),
-                        });
+                        out.held.push(Held { build: m.clone(), key: k.clone(), path: file.path.clone() });
                         out.removes.push(Remove {
                             build: m.clone(),
                             key: k.clone(),
@@ -244,7 +224,7 @@ mod tests {
 
     use super::*;
     use crate::backend::store::{FileRecord, Seen, Snapshot, Version};
-    use crate::dto::{Reason, SyncMode};
+    use crate::dto::SyncMode;
 
     const KEY: &str = "options.txt";
 
@@ -329,12 +309,8 @@ mod tests {
         o.removes.iter().map(|r| r.build.clone()).collect()
     }
 
-    fn saved(o: &Outcome) -> Vec<(String, Reason)> {
-        o.history.iter().map(|h| (h.build.clone(), h.reason)).collect()
-    }
-
-    fn own(o: &Outcome) -> Vec<(String, bool)> {
-        o.history.iter().map(|h| (h.build.clone(), h.own)).collect()
+    fn held(o: &Outcome) -> Vec<&str> {
+        o.held.iter().map(|h| h.build.as_str()).collect()
     }
 
     fn agreed(o: &Outcome) -> Option<String> {
@@ -343,10 +319,6 @@ mod tests {
 
     fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
         list.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
-    }
-
-    fn reasons(list: &[(&str, Reason)]) -> Vec<(String, Reason)> {
-        list.iter().map(|(a, r)| (a.to_string(), *r)).collect()
     }
 
     const ABC: &[&str] = &["a", "b", "c"];
@@ -363,7 +335,7 @@ mod tests {
         }
         .run();
         assert_eq!(writes(&o), pairs(&[("a", "b"), ("c", "b")]));
-        assert_eq!(saved(&o), reasons(&[("a", Reason::Changed), ("c", Reason::Changed)]));
+        assert_eq!(held(&o), ["a", "c"]);
         assert_eq!(agreed(&o).as_deref(), Some("h1"));
         assert!(o.conflicts.is_empty() && !o.wait);
     }
@@ -378,7 +350,7 @@ mod tests {
         }
         .run();
         assert_eq!(writes(&o), pairs(&[("a", "b")]));
-        assert!(o.history.is_empty(), "nothing was there to keep");
+        assert!(o.held.is_empty(), "nothing was there to hold");
         assert_eq!(agreed(&o).as_deref(), Some("h1"));
     }
 
@@ -393,7 +365,7 @@ mod tests {
         }
         .run();
         assert_eq!(writes(&o), pairs(&[("a", "b"), ("c", "b")]));
-        assert_eq!(saved(&o), reasons(&[("a", Reason::Conflict), ("c", Reason::Changed)]));
+        assert_eq!(held(&o), ["a", "c"]);
         assert_eq!(o.conflicts, vec![KEY.to_string()]);
         assert_eq!(agreed(&o).as_deref(), Some("h2"));
     }
@@ -410,7 +382,7 @@ mod tests {
         .run();
         assert!(o.writes.is_empty());
         assert_eq!(removes(&o), vec!["b", "c"]);
-        assert_eq!(saved(&o), reasons(&[("b", Reason::Removed), ("c", Reason::Removed)]));
+        assert_eq!(held(&o), ["b", "c"]);
         assert_eq!(o.agreed.get(KEY), Some(&None), "agreed: gone");
     }
 
@@ -426,7 +398,7 @@ mod tests {
         .run();
         assert_eq!(writes(&o), pairs(&[("a", "b"), ("c", "b")]));
         assert!(o.removes.is_empty());
-        assert_eq!(saved(&o), reasons(&[("c", Reason::Changed)]));
+        assert_eq!(held(&o), ["c"]);
         assert_eq!(agreed(&o).as_deref(), Some("h1"));
     }
 
@@ -439,7 +411,7 @@ mod tests {
         }
         .run();
         assert_eq!(writes(&o), pairs(&[("b", "a"), ("c", "a")]), "even over a newer file");
-        assert_eq!(saved(&o), reasons(&[("b", Reason::Changed)]));
+        assert_eq!(held(&o), ["b"]);
         assert_eq!(agreed(&o).as_deref(), Some("h1"));
         let only_others =
             Case { members: ABC, now: &[("a", None), ("b", Some(("h2", 9))), ("c", None)], ..Case::latest() }
@@ -462,7 +434,7 @@ mod tests {
         }
         .run();
         assert_eq!(writes(&o), pairs(&[("d", "a")]));
-        assert_eq!(saved(&o), reasons(&[("d", Reason::Changed)]));
+        assert_eq!(held(&o), ["d"]);
         let its_own = Case {
             members: &["a", "b", "d"],
             before: &["a", "b"],
@@ -484,7 +456,7 @@ mod tests {
         }
         .run();
         assert_eq!(writes(&o), pairs(&[("b", "a")]));
-        assert_eq!(saved(&o), reasons(&[("b", Reason::Changed)]));
+        assert_eq!(held(&o), ["b"]);
     }
 
     #[test]
@@ -505,7 +477,7 @@ mod tests {
             ..Case::latest()
         }
         .run();
-        assert!(o.writes.is_empty() && o.removes.is_empty() && o.history.is_empty(), "{o:?}");
+        assert!(o.writes.is_empty() && o.removes.is_empty() && o.held.is_empty(), "{o:?}");
         assert!(!o.agreed.contains_key(KEY), "the agreed version stays as it was");
     }
 
@@ -547,7 +519,7 @@ mod tests {
         }
         .run();
         assert_eq!(writes(&o), pairs(&[("b", "a")]), "though newer");
-        assert_eq!(saved(&o), reasons(&[("b", Reason::Base)]));
+        assert_eq!(held(&o), ["b"]);
         assert_eq!(agreed(&o).as_deref(), Some("h0"));
     }
 
@@ -563,7 +535,7 @@ mod tests {
         }
         .run();
         assert_eq!(writes(&o), pairs(&[("b", "a")]));
-        assert_eq!(saved(&o), reasons(&[("b", Reason::Base)]));
+        assert_eq!(held(&o), ["b"]);
     }
 
     #[test]
@@ -577,55 +549,7 @@ mod tests {
         }
         .run();
         assert_eq!(removes(&o), vec!["b"]);
-        assert_eq!(saved(&o), reasons(&[("b", Reason::Base)]));
-    }
-
-    #[test]
-    fn a_version_is_its_member_s_own_when_changed_there_or_never_synced() {
-        let spread = Case {
-            members: ABC,
-            before: ABC,
-            record: Some((Some("h0"), HELD)),
-            now: &[("a", Some(("h0", 1))), ("b", Some(("h1", 5))), ("c", Some(("h0", 1)))],
-            ..Case::latest()
-        }
-        .run();
-        assert_eq!(own(&spread), [("a".to_string(), false), ("c".to_string(), false)], "the group's");
-        let conflict = Case {
-            members: ABC,
-            before: ABC,
-            record: Some((Some("h0"), HELD)),
-            now: &[("a", Some(("h1", 5))), ("b", Some(("h2", 9))), ("c", Some(("h0", 1)))],
-            ..Case::latest()
-        }
-        .run();
-        assert_eq!(own(&conflict), [("a".to_string(), true), ("c".to_string(), false)], "the losing edit");
-        let removed = Case {
-            members: ABC,
-            before: ABC,
-            record: Some((Some("h0"), HELD)),
-            now: &[("a", None), ("b", Some(("h0", 1))), ("c", Some(("h0", 1)))],
-            ..Case::latest()
-        }
-        .run();
-        assert!(own(&removed).iter().all(|(_, own)| !own), "{removed:?}");
-        let first = Case {
-            members: ABC,
-            now: &[("a", Some(("h1", 1))), ("b", Some(("h2", 9))), ("c", None)],
-            ..Case::latest()
-        }
-        .run();
-        assert_eq!(own(&first), [("b".to_string(), true)], "never synced there");
-        let undone = Case {
-            mode: SyncMode::Base,
-            members: &["a", "b"],
-            before: &["a", "b"],
-            record: Some((Some("h0"), &[("a", "h0"), ("b", "h0")])),
-            now: &[("a", Some(("h0", 1))), ("b", Some(("h1", 99)))],
-            ..Case::latest()
-        }
-        .run();
-        assert_eq!(own(&undone), [("b".to_string(), true)], "an edit the base undoes");
+        assert_eq!(held(&o), ["b"]);
     }
 
     #[test]

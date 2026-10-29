@@ -3,7 +3,6 @@
 pub mod apply;
 pub mod blacklist;
 pub mod decide;
-pub mod history;
 pub mod hook;
 pub mod paths;
 pub mod scan;
@@ -23,7 +22,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::dto::{BuildArgs, GroupArgs, RestoreArgs, SaveArgs, TreeArgs};
+use crate::dto::{BuildArgs, GroupArgs, SaveArgs, TreeArgs};
 use service::{Deps, SyncService};
 
 pub struct SyncModule {
@@ -31,7 +30,7 @@ pub struct SyncModule {
     shared: Arc<OnceLock<SyncService>>,
 }
 
-const COMMANDS: [&str; 8] = ["groups", "save", "delete", "sync", "sync_build", "tree", "history", "restore"];
+const COMMANDS: [&str; 6] = ["groups", "save", "delete", "sync", "sync_build", "tree"];
 
 impl Module for SyncModule {
     fn id(&self) -> &'static str {
@@ -50,8 +49,6 @@ impl Module for SyncModule {
             versions: core.versions.clone(),
             instances: core.instances.clone(),
             feedback: core.feedback.clone(),
-            config: core.config.clone(),
-            backups: core.backups.clone(),
             state_dir: core.paths.app_state_dir.clone(),
             running: Arc::new(move |key: &str| running.upgrade().is_some_and(|c| c.launcher.is_running(key))),
             managed: Arc::new(move |build: &Build, game: &Path| {
@@ -112,11 +109,6 @@ fn dispatch(service: &SyncService, command: &str, args: Value) -> AppResult<Valu
         "tree" => {
             let a: TreeArgs = parse(args)?;
             answer(service.tree(&a.builds, &a.dir, a.editing.as_deref())?)
-        }
-        "history" => answer(service.history(&parse::<GroupArgs>(args)?.id)?),
-        "restore" => {
-            let a: RestoreArgs = parse(args)?;
-            answer(service.restore(&a.group, &a.id)?)
         }
         other => Err(AppError::new(ErrorCode::NotFound, format!("no command {other}"))),
     }

@@ -4,10 +4,7 @@ use launcher_shared::{AppError, BuildDto, BuildsSnapshot};
 use serde_json::Value;
 use ui_kit::ipc;
 
-use crate::dto::{
-    BuildArgs, GroupArgs, GroupView, HistoryEntry, PassReport, RestoreArgs, SaveArgs, SyncGroup, TreeArgs,
-    TreeEntry,
-};
+use crate::dto::{BuildArgs, GroupArgs, GroupView, PassReport, SaveArgs, SyncGroup, TreeArgs, TreeEntry};
 
 pub async fn groups() -> Result<Vec<GroupView>, AppError> {
     ipc::module_invoke(crate::ID, "groups", &Value::Null).await
@@ -36,14 +33,6 @@ pub async fn tree(
     editing: Option<String>,
 ) -> Result<Vec<TreeEntry>, AppError> {
     ipc::module_invoke(crate::ID, "tree", &TreeArgs { builds, dir, editing }).await
-}
-
-pub async fn history(id: &str) -> Result<Vec<HistoryEntry>, AppError> {
-    ipc::module_invoke(crate::ID, "history", &GroupArgs { id: id.into() }).await
-}
-
-pub async fn restore(group: &str, id: &str) -> Result<PassReport, AppError> {
-    ipc::module_invoke(crate::ID, "restore", &RestoreArgs { group: group.into(), id: id.into() }).await
 }
 
 pub async fn builds() -> Result<Vec<BuildDto>, AppError> {

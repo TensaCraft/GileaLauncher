@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-backend = ["dep:launcher-core", "dep:uuid", "dep:sha2", "dep:hex", "dep:tracing", "dep:chrono", "dep:tokio"]
+backend = ["dep:launcher-core", "dep:uuid", "dep:sha2", "dep:hex", "dep:tracing", "dep:tokio"]
 ui = ["dep:ui-kit", "dep:leptos", "dep:js-sys", "dep:wasm-bindgen"]
 
 [dependencies]
@@ -17,7 +17,6 @@ uuid = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
-chrono = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 ui-kit = { workspace = true, optional = true }
 leptos = { workspace = true, optional = true }

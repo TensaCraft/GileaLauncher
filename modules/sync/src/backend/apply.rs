@@ -1,53 +1,42 @@
 //! A pass's decisions written into its builds: each build through the core's file transaction,
-//! what it overwrites or removes of its own kept first in its history, the rest held until the
-//! pass ends, and the builds already written put back as they were when a later one fails.
+//! what it overwrites or removes held until the pass ends (no copy is kept after), and the builds
+//! already written put back as they were when a later one fails.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use launcher_core::backups::BuildBackups;
 use launcher_core::storage::journal::JournalName;
-use launcher_core::storage::json::write_json_file;
 use launcher_core::storage::transaction::{ApplyHooks, TransactionPlan, execute};
 use launcher_shared::{AppError, AppResult, ErrorCode};
-use serde_json::json;
 
-use super::decide::{Outcome, Remove, Saved, Write};
+use super::decide::{Held, Outcome, Remove, Write};
 use super::scan::modified_ms;
 use super::store::Seen;
-use crate::dto::SyncGroup;
 
 /// The journal of a sync pass's change in a build.
 pub const SYNC_JOURNAL: JournalName =
     JournalName { file: "build-sync.json", legacy: ".launcher-build-sync.json" };
 
-/// Where a member holds, until its pass ends, the versions it loses that history does not keep.
+/// Where a member holds, until its pass ends, the files the pass overwrites or removes there.
 pub const UNDO_DIR: &str = ".launcher/sync-undo";
 
 /// A build taking part in a pass.
 pub struct Member {
     pub key: String,
     pub game: PathBuf,
-    pub shelf: BuildBackups,
 }
 
-/// What a pass wrote: each written file as it is now (by build and key), and the history folders.
+/// What a pass wrote: each written file as it is now, by build and key.
 #[derive(Debug, Default)]
 pub struct Applied {
     pub seen: BTreeMap<(String, String), Seen>,
-    pub folders: Vec<PathBuf>,
 }
 
 fn io_error(path: &Path, e: io::Error) -> AppError {
     AppError::new(ErrorCode::Io, format!("{}: {e}", path.display()))
         .with_param("path", path.to_string_lossy())
-}
-
-fn millis(at: SystemTime) -> u64 {
-    at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
 /// Copies `from` to `to` (its folder made) with `from`'s modified time.
@@ -60,45 +49,13 @@ fn copy_dated(from: &Path, to: &Path) -> AppResult<()> {
     fs::File::options().write(true).open(to).and_then(|f| f.set_modified(time)).map_err(|e| io_error(to, e))
 }
 
-/// The folder for a pass's copies in `shelf`: its time (UTC), then the first free number.
-pub fn pass_folder(shelf: &BuildBackups, at: SystemTime) -> PathBuf {
-    let stamp = chrono::DateTime::<chrono::Utc>::from(at).format("%Y-%m-%d_%H-%M-%S").to_string();
-    (1..)
-        .map(|n| shelf.sync().join(format!("{stamp}-{n}")))
-        .find(|f| !f.exists())
-        .unwrap_or_else(|| shelf.sync())
-}
-
-/// Keeps `saved` (the member's versions about to go) in a new pass folder with a `change.json`.
-pub(crate) fn keep(
-    member: &Member,
-    saved: &[&Saved],
-    group: &SyncGroup,
-    at: SystemTime,
-) -> AppResult<PathBuf> {
-    let folder = pass_folder(&member.shelf, at);
-    for version in saved {
-        copy_dated(&member.game.join(&version.path), &folder.join("files").join(&version.path))?;
-    }
-    let change: Vec<_> = saved
-        .iter()
-        .map(|s| {
-            json!({"group": group.id, "group_name": group.name, "path": s.path, "from": s.from,
-                   "at_ms": millis(at), "reason": s.reason})
-        })
-        .collect();
-    let note = folder.join("change.json");
-    write_json_file(&note, &json!(change), 2).map_err(|e| io_error(&note, e))?;
-    Ok(folder)
-}
-
-/// Holds `saved` in the member's empty undo folder: each a second name for the file (the swap
+/// Holds `held` in the member's empty undo folder: each a second name for the file (the swap
 /// moves the original aside and never writes into it), or a copy where links cannot be made.
-fn hold(member: &Member, saved: &[&Saved]) -> AppResult<PathBuf> {
+fn hold(member: &Member, held: &[&Held]) -> AppResult<PathBuf> {
     let folder = member.game.join(UNDO_DIR);
     let _ = fs::remove_dir_all(&folder);
-    for version in saved {
-        let (from, to) = (member.game.join(&version.path), folder.join(&version.path));
+    for file in held {
+        let (from, to) = (member.game.join(&file.path), folder.join(&file.path));
         if let Some(parent) = to.parent() {
             fs::create_dir_all(parent).map_err(|e| io_error(parent, e))?;
         }
@@ -112,26 +69,24 @@ fn hold(member: &Member, saved: &[&Saved]) -> AppResult<PathBuf> {
 /// A member written, kept to be put back when a later member fails.
 struct Done<'a> {
     member: &'a Member,
-    /// Its history folder for the pass, and its undo folder.
+    /// Its undo folder, when the pass overwrote or removed a file there.
     folder: Option<PathBuf>,
-    held: Option<PathBuf>,
     writes: Vec<&'a Write>,
     removes: Vec<&'a Remove>,
-    saved: Vec<&'a Saved>,
+    held: Vec<&'a Held>,
 }
 
 /// Puts the members in `done` back as they were (best effort): a file it overwrote or removed
-/// from its copy, a file it added removed.
+/// from its undo folder, a file it added removed.
 fn undo(done: &[Done<'_>]) {
     for d in done.iter().rev() {
         let copy = |key: &str| {
-            let saved = d.saved.iter().find(|s| s.key == key)?;
-            let place = if saved.own { d.folder.as_ref()?.join("files") } else { d.held.clone()? };
-            Some((place.join(&saved.path), d.member.game.join(&saved.path)))
+            let file = d.held.iter().find(|h| h.key == key)?;
+            Some((d.folder.as_ref()?.join(&file.path), d.member.game.join(&file.path)))
         };
         for write in &d.writes {
             let target = d.member.game.join(&write.path);
-            let result = if d.saved.iter().any(|s| s.key == write.key) {
+            let result = if d.held.iter().any(|h| h.key == write.key) {
                 let _ = fs::remove_file(&target);
                 copy(&write.key).map_or(Ok(()), |(from, to)| copy_dated(&from, &to))
             } else {
@@ -165,15 +120,15 @@ fn release(members: &[Member]) {
 }
 
 /// Writes `outcome` into `members`, one after another, each through its own transaction; what a
-/// member's change overwrites or removes of its own is kept first in its history, the rest held
-/// until the pass ends. When a member fails, the ones before are put back and the error comes back.
-pub fn apply(members: &[Member], outcome: &Outcome, group: &SyncGroup, at: SystemTime) -> AppResult<Applied> {
-    let result = write_all(members, outcome, group, at);
+/// member's change overwrites or removes is held until the pass ends. When a member fails, the
+/// ones before are put back and the error comes back.
+pub fn apply(members: &[Member], outcome: &Outcome) -> AppResult<Applied> {
+    let result = write_all(members, outcome);
     release(members);
     result
 }
 
-fn write_all(members: &[Member], outcome: &Outcome, group: &SyncGroup, at: SystemTime) -> AppResult<Applied> {
+fn write_all(members: &[Member], outcome: &Outcome) -> AppResult<Applied> {
     let mut applied = Applied::default();
     let mut done: Vec<Done<'_>> = Vec::new();
     for member in members {
@@ -182,7 +137,7 @@ fn write_all(members: &[Member], outcome: &Outcome, group: &SyncGroup, at: Syste
         if writes.is_empty() && removes.is_empty() {
             continue;
         }
-        let saved: Vec<&Saved> = outcome.history.iter().filter(|s| s.build == member.key).collect();
+        let held: Vec<&Held> = outcome.held.iter().filter(|h| h.build == member.key).collect();
         let source_of = |write: &Write| -> AppResult<PathBuf> {
             members.iter().find(|m| m.key == write.from).map(|m| m.game.join(&write.path)).ok_or_else(|| {
                 AppError::internal(format!(
@@ -191,10 +146,8 @@ fn write_all(members: &[Member], outcome: &Outcome, group: &SyncGroup, at: Syste
                 ))
             })
         };
-        let result = (|| -> AppResult<(Option<PathBuf>, Option<PathBuf>)> {
-            let (own, rest): (Vec<&Saved>, Vec<&Saved>) = saved.iter().copied().partition(|s| s.own);
-            let folder = if own.is_empty() { None } else { Some(keep(member, &own, group, at)?) };
-            let held = if rest.is_empty() { None } else { Some(hold(member, &rest)?) };
+        let result = (|| -> AppResult<Option<PathBuf>> {
+            let folder = if held.is_empty() { None } else { Some(hold(member, &held)?) };
             let mut plan = TransactionPlan::new("build-sync");
             plan.replacements = writes.iter().map(|w| w.path.clone()).collect();
             plan.stale = removes.iter().map(|r| r.path.clone()).collect();
@@ -214,10 +167,10 @@ fn write_all(members: &[Member], outcome: &Outcome, group: &SyncGroup, at: Syste
                 },
                 ApplyHooks::default(),
             )?;
-            Ok((folder, held))
+            Ok(folder)
         })();
         match result {
-            Ok((folder, held)) => {
+            Ok(folder) => {
                 for write in &writes {
                     let path = member.game.join(&write.path);
                     let hash =
@@ -227,8 +180,7 @@ fn write_all(members: &[Member], outcome: &Outcome, group: &SyncGroup, at: Syste
                         applied.seen.insert((member.key.clone(), write.key.clone()), seen);
                     }
                 }
-                applied.folders.extend(folder.clone());
-                done.push(Done { member, folder, held, writes, removes, saved });
+                done.push(Done { member, folder, writes, removes, held });
             }
             Err(e) => {
                 undo(&done);
@@ -245,12 +197,8 @@ mod tests {
     use std::path::Path;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use launcher_core::backups::BuildBackups;
-    use serde_json::Value;
-
     use super::*;
-    use crate::backend::decide::{Outcome, Remove, Saved, Write};
-    use crate::dto::{Reason, SyncGroup};
+    use crate::backend::decide::{Held, Outcome, Remove, Write};
 
     fn put(root: &Path, relative: &str, bytes: &[u8]) {
         let path = root.join(relative);
@@ -261,26 +209,23 @@ mod tests {
     fn member(tmp: &Path, key: &str) -> Member {
         let game = tmp.join("games").join(key);
         fs::create_dir_all(&game).unwrap();
-        Member { key: key.into(), game, shelf: BuildBackups::of(&tmp.join("backups"), key) }
-    }
-
-    fn group() -> SyncGroup {
-        SyncGroup {
-            id: "g1".into(), name: "Налаштування".into(), start: "a".into(), ..SyncGroup::default()
-        }
+        Member { key: key.into(), game }
     }
 
     fn write(build: &str, path: &str) -> Write {
         Write { build: build.into(), key: path.into(), path: path.into(), from: "a".into() }
     }
 
-    fn saved(build: &str, path: &str, reason: Reason) -> Saved {
-        let from = (reason != Reason::Removed).then(|| "a".to_string());
-        Saved { build: build.into(), key: path.into(), path: path.into(), from, reason, own: true }
+    fn held(build: &str, path: &str) -> Held {
+        Held { build: build.into(), key: path.into(), path: path.into() }
+    }
+
+    fn remove(build: &str, path: &str) -> Remove {
+        Remove { build: build.into(), key: path.into(), path: path.into() }
     }
 
     #[test]
-    fn writes_and_removes_keep_their_history() {
+    fn writes_and_removes_keep_no_copy() {
         let tmp = tempfile::tempdir().unwrap();
         let (a, b) = (member(tmp.path(), "a"), member(tmp.path(), "b"));
         put(&a.game, "options.txt", b"new keys");
@@ -295,19 +240,11 @@ mod tests {
         put(&b.game, "servers.dat", b"servers");
         let outcome = Outcome {
             writes: vec![write("b", "options.txt")],
-            removes: vec![Remove {
-                build: "b".into(),
-                key: "servers.dat".into(),
-                path: "servers.dat".into(),
-            }],
-            history: vec![
-                saved("b", "options.txt", Reason::Changed),
-                saved("b", "servers.dat", Reason::Removed),
-            ],
+            removes: vec![remove("b", "servers.dat")],
+            held: vec![held("b", "options.txt"), held("b", "servers.dat")],
             ..Outcome::default()
         };
-        let at = UNIX_EPOCH + Duration::from_secs(1_791_800_000);
-        let applied = apply(&[a, b], &outcome, &group(), at).unwrap();
+        let applied = apply(&[a, b], &outcome).unwrap();
         let b = member(tmp.path(), "b");
         assert_eq!(fs::read(b.game.join("options.txt")).unwrap(), b"new keys");
         let time = fs::metadata(b.game.join("options.txt")).unwrap().modified().unwrap();
@@ -317,70 +254,37 @@ mod tests {
             "the source's time"
         );
         assert!(!b.game.join("servers.dat").exists());
-        let pass = b.shelf.sync().join("2026-10-12_10-13-20-1");
-        assert_eq!(fs::read(pass.join("files/options.txt")).unwrap(), b"old");
-        assert_eq!(fs::read(pass.join("files/servers.dat")).unwrap(), b"servers");
-        let change: Value = serde_json::from_slice(&fs::read(pass.join("change.json")).unwrap()).unwrap();
-        assert_eq!(change[0]["group"], "g1");
-        assert_eq!(change[0]["reason"], "changed");
-        assert_eq!(change[1]["reason"], "removed");
+        assert!(!b.game.join(UNDO_DIR).exists(), "nothing is left held");
         assert_eq!(applied.seen.get(&("b".to_string(), "options.txt".to_string())).map(|s| s.size), Some(8));
     }
 
     #[test]
-    fn a_failure_in_the_second_member_restores_the_first() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (a, b, c) = (member(tmp.path(), "a"), member(tmp.path(), "b"), member(tmp.path(), "c"));
-        put(&a.game, "options.txt", b"new");
-        put(&b.game, "options.txt", b"old b");
-        // In c the file's place is a folder: writing it fails.
-        put(&c.game, "options.txt/inside.txt", b"a folder");
-        let outcome = Outcome {
-            writes: vec![write("b", "options.txt"), write("c", "options.txt")],
-            history: vec![saved("b", "options.txt", Reason::Changed)],
-            ..Outcome::default()
-        };
-        assert!(apply(&[a, b, c], &outcome, &group(), SystemTime::now()).is_err());
-        let b = member(tmp.path(), "b");
-        assert_eq!(fs::read(b.game.join("options.txt")).unwrap(), b"old b", "put back as it was");
-        let c = member(tmp.path(), "c");
-        assert!(c.game.join("options.txt/inside.txt").is_file());
-    }
-
-    #[test]
-    fn a_version_not_its_own_is_put_back_on_a_failure_and_not_kept() {
+    fn a_failure_in_a_later_member_puts_the_earlier_back() {
         let tmp = tempfile::tempdir().unwrap();
         let (a, b, c) = (member(tmp.path(), "a"), member(tmp.path(), "b"), member(tmp.path(), "c"));
         put(&a.game, "xaero/map.txt", b"new");
-        put(&b.game, "xaero/map.txt", b"the group's");
-        put(&b.game, "xaero/gone.txt", b"the group's too");
+        put(&b.game, "xaero/map.txt", b"b's map");
+        put(&b.game, "xaero/gone.txt", b"b's file");
+        // In c the file's place is a folder: writing it fails.
         put(&c.game, "xaero/map.txt/inside.txt", b"a folder");
         let outcome = Outcome {
-            writes: vec![write("b", "xaero/map.txt"), write("c", "xaero/map.txt")],
-            removes: vec![Remove {
-                build: "b".into(),
-                key: "xaero/gone.txt".into(),
-                path: "xaero/gone.txt".into(),
-            }],
-            history: vec![
-                Saved { own: false, ..saved("b", "xaero/map.txt", Reason::Changed) },
-                Saved { own: false, ..saved("b", "xaero/gone.txt", Reason::Removed) },
+            writes: vec![
+                write("b", "xaero/map.txt"),
+                write("b", "xaero/added.txt"),
+                write("c", "xaero/map.txt"),
             ],
+            removes: vec![remove("b", "xaero/gone.txt")],
+            held: vec![held("b", "xaero/map.txt"), held("b", "xaero/gone.txt")],
             ..Outcome::default()
         };
-        assert!(apply(&[a, b, c], &outcome, &group(), SystemTime::now()).is_err());
+        put(&a.game, "xaero/added.txt", b"added");
+        assert!(apply(&[a, b, c], &outcome).is_err());
         let b = member(tmp.path(), "b");
-        assert_eq!(fs::read(b.game.join("xaero/map.txt")).unwrap(), b"the group's", "put back");
-        assert_eq!(fs::read(b.game.join("xaero/gone.txt")).unwrap(), b"the group's too", "put back");
-        assert!(!b.shelf.sync().exists(), "not in history");
+        assert_eq!(fs::read(b.game.join("xaero/map.txt")).unwrap(), b"b's map", "put back");
+        assert_eq!(fs::read(b.game.join("xaero/gone.txt")).unwrap(), b"b's file", "put back");
+        assert!(!b.game.join("xaero/added.txt").exists(), "what it added is taken away");
         assert!(!b.game.join(UNDO_DIR).exists(), "the undo folder is gone");
-        // And a pass that succeeds leaves no undo folder either.
-        let (a, c) = (member(tmp.path(), "a"), member(tmp.path(), "c"));
-        let outcome = Outcome { writes: vec![write("b", "xaero/map.txt")], ..outcome };
-        apply(&[a, b, c], &outcome, &group(), SystemTime::now()).unwrap();
-        let b = member(tmp.path(), "b");
-        assert_eq!(fs::read(b.game.join("xaero/map.txt")).unwrap(), b"new");
-        assert!(!b.game.join("xaero/gone.txt").exists());
-        assert!(!b.shelf.sync().exists() && !b.game.join(UNDO_DIR).exists());
+        let c = member(tmp.path(), "c");
+        assert!(c.game.join("xaero/map.txt/inside.txt").is_file());
     }
 }

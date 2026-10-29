@@ -1,4 +1,4 @@
-//! Sync passes over real folders: what each build ends up with, what history keeps, and what is
+//! Sync passes over real folders: what each build ends up with, that no copy is kept, and what is
 //! never touched.
 
 use std::collections::{HashMap, HashSet};
@@ -7,16 +7,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use launcher_core::backups::resolver;
 use launcher_core::feedback::{EventSink, FeedbackService};
 use launcher_core::launch::options::game_dir;
 use launcher_core::lock::{Coordinator, LockPlace, OsFileLock};
-use launcher_core::storage::config::ConfigStore;
 use launcher_core::storage::versions::{Build, VersionStore};
 use launcher_shared::events::{ActivityEntry, Alert, OpsSnapshot, Toast};
 use launcher_shared::{ErrorCode, Text};
 use module_sync::backend::service::{Deps, SyncService};
-use module_sync::dto::{GROUPS_EVENT, GroupState, Lock, Reason, SyncGroup, SyncMode};
+use module_sync::dto::{GROUPS_EVENT, GroupState, Lock, SyncGroup, SyncMode};
 
 /// What the window would hear.
 #[derive(Default)]
@@ -55,7 +53,6 @@ fn world() -> World {
     let mc = tmp.path().join("minecraft");
     let state = tmp.path().join("state");
     fs::create_dir_all(&mc).unwrap();
-    let config = Arc::new(ConfigStore::open(tmp.path().join("config.json")));
     let versions = Arc::new(VersionStore::open(&state, &mc));
     let instances = Arc::new(Coordinator::instances());
     let running = Arc::new(Mutex::new(HashSet::new()));
@@ -64,8 +61,6 @@ fn world() -> World {
         versions: versions.clone(),
         instances: instances.clone(),
         feedback: FeedbackService::new(window.clone()),
-        config: config.clone(),
-        backups: resolver(config, mc.clone()),
         state_dir: state.clone(),
         running: {
             let running = running.clone();
@@ -151,56 +146,27 @@ fn three_builds_and_a_removal() {
     let report = w.service.sync_group(&id, None).unwrap();
     assert_eq!(report.removed, 2);
     assert!(read(&ga, "config/jei/x.json").is_none() && read(&gb, "config/jei/x.json").is_none());
-    assert!(w.service.history(&id).unwrap().is_empty(), "they held the group's version, none of their own");
 }
 
 #[test]
-fn history_keeps_only_what_a_build_loses_of_its_own() {
-    let w = world();
-    let (a, ga) = w.build("Aero");
-    let (b, gb) = w.build("Lite");
-    let (c, gc) = w.build("Zeta");
-    put(&ga, "options.txt", "keys 1", 600);
-    let id = w.group(&[&a, &b, &c], &["options.txt"], SyncMode::Latest);
-    w.service.sync_group(&id, None).unwrap();
-    // An edit spreads: the others held the group's version, none of their own.
-    put(&ga, "options.txt", "keys 2", 300);
-    w.service.sync_group(&id, None).unwrap();
-    assert_eq!(read(&gc, "options.txt").as_deref(), Some("keys 2"));
-    assert!(w.service.history(&id).unwrap().is_empty(), "nothing of their own was lost");
-    // Edited in two: the older edit was that build's own.
-    put(&ga, "options.txt", "keys 3", 120);
-    put(&gb, "options.txt", "keys 4", 60);
-    w.service.sync_group(&id, None).unwrap();
-    let history = w.service.history(&id).unwrap();
-    assert_eq!(history.len(), 1, "{history:?}");
-    assert_eq!((history[0].build.as_str(), history[0].reason), (a.as_str(), Reason::Conflict));
-    for game in [&ga, &gb, &gc] {
-        assert!(!game.join(".launcher/sync-undo").exists(), "no copy is left for an undo");
-    }
-}
-
-#[test]
-fn in_base_mode_history_keeps_an_undone_edit_but_not_the_base_s_old_version() {
+fn a_pass_keeps_no_copies_of_what_it_overwrites_or_removes() {
     let w = world();
     let (a, ga) = w.build("Aero");
     let (b, gb) = w.build("Lite");
     put(&ga, "xaero/map.txt", "map 1", 600);
+    put(&gb, "xaero/map.txt", "lite's map", 600);
+    put(&gb, "xaero/only.txt", "only Lite", 600);
     let id = w.group(&[&a, &b], &["xaero"], SyncMode::Base);
     w.service.sync_group(&id, None).unwrap();
-    put(&ga, "xaero/map.txt", "map 2", 300);
-    w.service.sync_group(&id, None).unwrap();
-    assert_eq!(read(&gb, "xaero/map.txt").as_deref(), Some("map 2"));
-    assert!(w.service.history(&id).unwrap().is_empty(), "the base's old version is no loss of Lite's");
+    assert_eq!(read(&gb, "xaero/map.txt").as_deref(), Some("map 1"));
+    assert!(read(&gb, "xaero/only.txt").is_none());
     put(&gb, "xaero/map.txt", "explored in Lite", 60);
-    put(&gb, "xaero/new.txt", "only Lite", 60);
     w.service.sync_group(&id, None).unwrap();
-    assert_eq!(read(&gb, "xaero/map.txt").as_deref(), Some("map 2"));
-    let history = w.service.history(&id).unwrap();
-    let mut kept: Vec<&str> = history.iter().map(|h| h.path.as_str()).collect();
-    kept.sort();
-    assert_eq!(kept, ["xaero/map.txt", "xaero/new.txt"], "Lite's own edit and file");
-    assert!(history.iter().all(|h| h.build == b && h.reason == Reason::Base));
+    assert_eq!(read(&gb, "xaero/map.txt").as_deref(), Some("map 1"), "the edit undone");
+    assert!(!w.mc.join("backups").exists(), "no copy is kept anywhere");
+    for game in [&ga, &gb] {
+        assert!(!game.join(".launcher/sync-undo").exists(), "nor left from an undo");
+    }
 }
 
 #[test]
@@ -269,23 +235,6 @@ fn the_base_mode_mirrors_the_base() {
     w.service.sync_group(&id, None).unwrap();
     assert_eq!(read(&gb, "xaero/minimap.txt").as_deref(), Some("base"), "though older");
     assert!(read(&gb, "xaero/extra.txt").is_none());
-    let history = w.service.history(&id).unwrap();
-    assert!(history.iter().all(|h| h.reason == Reason::Base && h.build == b) && history.len() == 2);
-}
-
-#[test]
-fn a_restore_in_base_mode_goes_into_the_base() {
-    let w = world();
-    let (a, ga) = w.build("Aero");
-    let (b, gb) = w.build("Lite");
-    put(&ga, "options.txt", "base", 600);
-    put(&gb, "options.txt", "lite's", 10);
-    let id = w.group(&[&a, &b], &["options.txt"], SyncMode::Base);
-    w.service.sync_group(&id, None).unwrap();
-    let kept = w.service.history(&id).unwrap().remove(0);
-    w.service.restore(&id, &kept.id).unwrap();
-    assert_eq!(read(&ga, "options.txt").as_deref(), Some("lite's"), "into the base");
-    assert_eq!(read(&gb, "options.txt").as_deref(), Some("lite's"), "and spread");
 }
 
 #[test]
@@ -303,7 +252,6 @@ fn the_snapshot_is_untouched_after_a_failed_pass() {
     fs::create_dir_all(gc.join("options.txt/in")).unwrap();
     assert!(w.service.sync_group(&id, None).is_err());
     assert_eq!(read(&gb, "options.txt").as_deref(), Some("keys 1"), "put back");
-    assert!(w.service.history(&id).unwrap().is_empty(), "the version put back is not history");
     assert!(!gb.join(".launcher/sync-undo").exists() && !gc.join(".launcher/sync-undo").exists());
     let after: serde_json::Value =
         serde_json::from_slice(&fs::read(w.state.join("sync").join(format!("{id}.json"))).unwrap()).unwrap();
@@ -395,83 +343,6 @@ fn a_folder_the_server_starts_to_manage_is_not_removed_elsewhere() {
 }
 
 #[test]
-fn a_restore_of_a_path_the_group_no_longer_syncs_is_refused() {
-    let w = world();
-    let (a, ga) = w.build("Aero");
-    let (b, gb) = w.build("Lite");
-    put(&ga, "options.txt", "keys 1", 600);
-    put(&ga, "servers.dat", "list", 600);
-    let id = w.group(&[&a, &b], &["options.txt", "servers.dat"], SyncMode::Latest);
-    w.service.sync_group(&id, None).unwrap();
-    put(&ga, "options.txt", "keys 1b", 120);
-    put(&gb, "options.txt", "keys 2", 60);
-    w.service.sync_group(&id, None).unwrap();
-    let kept = w.service.history(&id).unwrap().remove(0);
-    assert_eq!(kept.path, "options.txt");
-    w.service.save(SyncGroup { paths: vec!["servers.dat".into()], ..w.saved(&id) }).unwrap();
-    let refused = w.service.restore(&id, &kept.id).unwrap_err();
-    assert_eq!(refused.params.get("message").map(String::as_str), Some("sync_error_restore_outside"));
-    assert_eq!(read(&ga, "options.txt").as_deref(), Some("keys 2"), "nothing written");
-}
-
-#[test]
-fn a_restore_skips_a_build_that_manages_the_path() {
-    let w = world();
-    let (a, ga) = w.build("Aero");
-    let (s, gs) = w.build("Server");
-    put(&ga, "config/x.toml", "first", 600);
-    let id = w.group(&[&a, &s], &["config"], SyncMode::Latest);
-    w.service.sync_group(&id, None).unwrap();
-    put(&ga, "config/x.toml", "aero's edit", 120);
-    put(&gs, "config/x.toml", "second", 60);
-    w.service.sync_group(&id, None).unwrap();
-    let kept = w.service.history(&id).unwrap().remove(0);
-    assert_eq!(kept.build, a, "Aero's edit was kept from Aero");
-    put(&ga, "config/x.toml", "the server's", 30);
-    w.managed.lock().unwrap().insert(a.clone(), vec!["config".into()]);
-    w.service.restore(&id, &kept.id).unwrap();
-    assert_eq!(read(&ga, "config/x.toml").as_deref(), Some("the server's"), "never touched there");
-    assert_eq!(read(&gs, "config/x.toml").as_deref(), Some("aero's edit"), "restored into the other build");
-}
-
-#[test]
-fn a_restore_in_base_mode_is_refused_when_the_base_manages_the_path() {
-    let w = world();
-    let (a, ga) = w.build("Aero");
-    let (b, gb) = w.build("Lite");
-    put(&ga, "config/x.toml", "base", 600);
-    put(&gb, "config/x.toml", "lite's", 10);
-    let id = w.group(&[&a, &b], &["config"], SyncMode::Base);
-    w.service.sync_group(&id, None).unwrap();
-    let kept = w.service.history(&id).unwrap().remove(0);
-    w.managed.lock().unwrap().insert(a.clone(), vec!["config".into()]);
-    let refused = w.service.restore(&id, &kept.id).unwrap_err();
-    assert_eq!(refused.params.get("message").map(String::as_str), Some("sync_error_restore_managed"));
-    assert_eq!(read(&ga, "config/x.toml").as_deref(), Some("base"));
-    assert_eq!(read(&gb, "config/x.toml").as_deref(), Some("base"));
-}
-
-#[test]
-fn a_restore_in_latest_mode_goes_back_into_its_build_and_spreads() {
-    let w = world();
-    let (a, ga) = w.build("Aero");
-    let (b, gb) = w.build("Lite");
-    put(&ga, "options.txt", "keys 1", 600);
-    let id = w.group(&[&a, &b], &["options.txt"], SyncMode::Latest);
-    w.service.sync_group(&id, None).unwrap();
-    put(&ga, "options.txt", "keys 1b", 120);
-    put(&gb, "options.txt", "keys 2", 60);
-    w.service.sync_group(&id, None).unwrap();
-    let kept = w.service.history(&id).unwrap().remove(0);
-    assert_eq!((kept.build.as_str(), kept.reason), (a.as_str(), Reason::Conflict));
-    w.service.restore(&id, &kept.id).unwrap();
-    assert_eq!(read(&ga, "options.txt").as_deref(), Some("keys 1b"));
-    assert_eq!(read(&gb, "options.txt").as_deref(), Some("keys 1b"), "the newest now, so it spreads");
-    let history = w.service.history(&id).unwrap();
-    assert!(history.iter().any(|h| h.reason == Reason::Restored && h.build == a), "what it replaced is kept");
-}
-
-#[test]
 fn a_build_added_later_takes_the_group_files_and_shares_its_own() {
     let w = world();
     let (a, ga) = w.build("Aero");
@@ -488,8 +359,6 @@ fn a_build_added_later_takes_the_group_files_and_shares_its_own() {
     assert_eq!(read(&gc, "config/x.toml").as_deref(), Some("group's"), "what the group agreed on");
     assert_eq!(read(&ga, "config/zeta.toml").as_deref(), Some("only zeta"));
     assert_eq!(read(&gb, "config/zeta.toml").as_deref(), Some("only zeta"));
-    let history = w.service.history(&id).unwrap();
-    assert!(history.iter().any(|h| h.build == c && h.path == "config/x.toml"), "its own version is kept");
 }
 
 #[test]
@@ -558,20 +427,4 @@ fn a_missing_group_reads_as_gone() {
     let e = w.service.sync_group("a1b2", None).unwrap_err();
     let message = e.params.get("message").map(String::as_str);
     assert_eq!((e.code, message), (ErrorCode::NotFound, Some("sync_error_group_gone")));
-}
-
-#[test]
-fn a_restore_into_a_running_base_says_so() {
-    let w = world();
-    let (a, ga) = w.build("Aero");
-    let (b, gb) = w.build("Lite");
-    put(&ga, "options.txt", "base", 600);
-    put(&gb, "options.txt", "lite's", 10);
-    let id = w.group(&[&a, &b], &["options.txt"], SyncMode::Base);
-    w.service.sync_group(&id, None).unwrap();
-    let kept = w.service.history(&id).unwrap().remove(0);
-    w.running.lock().unwrap().insert(a.clone());
-    let refused = w.service.restore(&id, &kept.id).unwrap_err();
-    assert_eq!(refused.params.get("message").map(String::as_str), Some("sync_error_restore_running"));
-    assert_eq!(refused.params.get("version").map(String::as_str), Some("Aero"), "by its name");
 }

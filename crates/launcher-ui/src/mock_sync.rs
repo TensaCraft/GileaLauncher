@@ -1,10 +1,8 @@
 //! Browser-preview backend for build sync: two groups over the mock builds (one by the latest
-//! edit, one from a base build), a tree with sizes and locks, passes and history.
+//! edit, one from a base build), a tree with sizes and locks, and passes.
 
 use launcher_shared::{AppError, AppResult, ErrorCode};
-use module_sync::dto::{
-    GroupState, GroupView, HistoryEntry, Lock, PassReport, Reason, SyncGroup, SyncMode, TreeEntry,
-};
+use module_sync::dto::{GroupState, GroupView, Lock, PassReport, SyncGroup, SyncMode, TreeEntry};
 use serde_json::Value;
 
 use crate::mock_builds::to_value;
@@ -44,44 +42,11 @@ fn entry(path: &str, dir: bool, megabytes: u64, present: u32) -> TreeEntry {
 
 pub struct MockSync {
     groups: Vec<GroupView>,
-    history: Vec<HistoryEntry>,
     made: u32,
 }
 
 impl MockSync {
     pub fn new() -> MockSync {
-        let history = vec![
-            HistoryEntry {
-                id: "vanilna_1_20_1/2026-10-12_09-13-20-1/options.txt".into(),
-                build: "vanilna_1_20_1".into(),
-                group: "settings".into(),
-                path: "options.txt".into(),
-                from: Some("aeronautics".into()),
-                reason: Reason::Changed,
-                at_ms: NOW_MS - 3_600_000,
-                size: 6 * 1024,
-            },
-            HistoryEntry {
-                id: "aeronautics/2026-10-11_20-02-11-1/options.txt".into(),
-                build: "aeronautics".into(),
-                group: "settings".into(),
-                path: "options.txt".into(),
-                from: Some("vanilna_1_20_1".into()),
-                reason: Reason::Conflict,
-                at_ms: NOW_MS - 50_000_000,
-                size: 6 * 1024,
-            },
-            HistoryEntry {
-                id: "vanilna_1_20_1/2026-10-11_20-02-11-1/xaero/minimap.txt".into(),
-                build: "vanilna_1_20_1".into(),
-                group: "minimap".into(),
-                path: "xaero/minimap.txt".into(),
-                from: Some("aeronautics".into()),
-                reason: Reason::Base,
-                at_ms: NOW_MS - 50_000_000,
-                size: 2 * 1024,
-            },
-        ];
         MockSync {
             groups: vec![
                 group(
@@ -92,7 +57,6 @@ impl MockSync {
                 ),
                 group("minimap", "Мінікарта", &["xaero"], SyncMode::Base),
             ],
-            history,
             made: 0,
         }
     }
@@ -165,13 +129,8 @@ impl MockSync {
                 self.groups.retain(|g| g.group.id != id);
                 Ok(Value::Null)
             }
-            "sync" | "restore" => {
-                let group = if command == "restore" {
-                    args["group"].as_str().unwrap_or_default().to_string()
-                } else {
-                    id
-                };
-                if let Some(view) = self.groups.iter_mut().find(|g| g.group.id == group) {
+            "sync" => {
+                if let Some(view) = self.groups.iter_mut().find(|g| g.group.id == id) {
                     view.state = GroupState::Synced;
                     view.last_ms = Some(NOW_MS);
                 }
@@ -188,7 +147,6 @@ impl MockSync {
                 to_value(names)
             }
             "tree" => to_value(self.tree(args["dir"].as_str().unwrap_or_default(), args["editing"].as_str())),
-            "history" => to_value(self.history.iter().filter(|h| h.group == id).cloned().collect::<Vec<_>>()),
             other => Err(AppError::internal(format!("mock: no sync command {other}"))),
         }
     }
@@ -196,13 +154,13 @@ impl MockSync {
 
 #[cfg(test)]
 mod tests {
-    use module_sync::dto::{GroupState, GroupView, HistoryEntry, PassReport, TreeEntry};
+    use module_sync::dto::{GroupState, GroupView, PassReport, TreeEntry};
     use serde_json::json;
 
     use super::*;
 
     #[test]
-    fn groups_sync_and_history() {
+    fn groups_sync_and_the_tree() {
         let mut mock = MockSync::new();
         let groups: Vec<GroupView> =
             serde_json::from_value(mock.handle("groups", &json!(null)).unwrap()).unwrap();
@@ -214,9 +172,6 @@ mod tests {
         let groups: Vec<GroupView> =
             serde_json::from_value(mock.handle("groups", &json!(null)).unwrap()).unwrap();
         assert_eq!(groups[0].state, GroupState::Synced);
-        let history: Vec<HistoryEntry> =
-            serde_json::from_value(mock.handle("history", &json!({"id": id})).unwrap()).unwrap();
-        assert!(!history.is_empty());
         let args = json!({"builds": ["aeronautics", "vanilna_1_20_1"], "dir": "", "editing": null});
         let tree: Vec<TreeEntry> = serde_json::from_value(mock.handle("tree", &args).unwrap()).unwrap();
         assert!(tree.iter().any(|e| e.lock.is_some()) && tree.iter().any(|e| e.present < e.total));

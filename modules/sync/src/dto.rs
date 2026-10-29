@@ -96,32 +96,6 @@ pub struct TreeEntry {
     pub managed_in: Vec<String>,
 }
 
-/// Why a version went to history.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Reason {
-    Changed,
-    Removed,
-    Conflict,
-    Base,
-    Restored,
-}
-
-/// A version a pass overwrote or removed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HistoryEntry {
-    /// `<build>/<pass folder>/<path>`: what restore names.
-    pub id: String,
-    pub build: String,
-    pub group: String,
-    pub path: String,
-    /// The build the new version came from (none for a removal).
-    pub from: Option<String>,
-    pub reason: Reason,
-    pub at_ms: u64,
-    pub size: u64,
-}
-
 /// What a pass did.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PassReport {
@@ -155,12 +129,6 @@ pub struct TreeArgs {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildArgs {
     pub key: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RestoreArgs {
-    pub group: String,
-    pub id: String,
 }
 
 #[cfg(test)]

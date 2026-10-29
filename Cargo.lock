@@ -3571,7 +3571,6 @@ dependencies = [
 name = "module-sync"
 version = "0.0.16"
 dependencies = [
- "chrono",
  "hex",
  "js-sys",
  "launcher-core",

@@ -1,5 +1,5 @@
 //! The sync service behind the commands, the launch hook and the game watcher: groups, a pass
-//! over a group, the editor's tree, history and restore.
+//! over a group and the editor's tree.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
@@ -7,29 +7,24 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use launcher_core::backups::{BackupsRoot, BuildBackups};
 use launcher_core::feedback::{FeedbackService, OperationSpec};
 use launcher_core::launch::alive::game_open;
 use launcher_core::launch::options::game_dir;
 use launcher_core::lock::{Coordinator, Lease, LockError, LockPlace, OsFileLock};
 use launcher_core::net::preflight::{SpaceRequest, preflight};
-use launcher_core::storage::config::ConfigStore;
-use launcher_core::storage::transaction::{ApplyHooks, TransactionPlan, execute};
 use launcher_core::storage::usage::dir_size;
 use launcher_core::storage::versions::{Build, VersionStore};
 use launcher_shared::{AppError, AppResult, ErrorCode, Level, Text};
 use serde_json::Value;
 
-use super::apply::{Applied, Member, SYNC_JOURNAL, apply, keep};
+use super::apply::{Applied, Member, apply};
 use super::blacklist::blocked;
-use super::decide::{Decision, Outcome, Saved, decide};
-use super::history;
+use super::decide::{Decision, Outcome, decide};
 use super::paths::{key, normalize, taken};
 use super::scan::{Found, is_managed, scan};
 use super::store::{FileRecord, Seen, Snapshot, Store};
 use crate::dto::{
-    GROUPS_EVENT, GroupState, GroupView, HistoryEntry, Lock, MESSAGE, PassReport, Reason, SyncGroup,
-    SyncMode, TreeEntry, error_text,
+    GROUPS_EVENT, GroupState, GroupView, Lock, MESSAGE, PassReport, SyncGroup, TreeEntry, error_text,
 };
 
 /// A pass that writes more shows as an operation; a smaller one passes quietly.
@@ -47,8 +42,6 @@ pub struct Deps {
     pub versions: Arc<VersionStore>,
     pub instances: Arc<Coordinator>,
     pub feedback: Arc<FeedbackService>,
-    pub config: Arc<ConfigStore>,
-    pub backups: BackupsRoot,
     pub state_dir: PathBuf,
     /// Whether build `key`'s game runs.
     pub running: Arc<dyn Fn(&str) -> bool + Send + Sync>,
@@ -97,10 +90,6 @@ impl SyncService {
 
     fn game(&self, build: &Build) -> PathBuf {
         game_dir(build, self.mc_dir())
-    }
-
-    fn shelf(&self, build: &Build) -> BuildBackups {
-        BuildBackups::of_build(&(self.deps.backups)(), build)
     }
 
     fn running(&self, build: &Build) -> bool {
@@ -213,7 +202,7 @@ impl SyncService {
                     Err(_) => continue,
                 }
             }
-            let member = Member { key: key.clone(), game, shelf: self.shelf(&build) };
+            let member = Member { key: key.clone(), game };
             members.push((build, member));
         }
         (members, leases)
@@ -276,7 +265,7 @@ impl SyncService {
         let members: Vec<Member> = members.into_iter().map(|(_, m)| m).collect();
         let size_of =
             |build: &str, key: &str| found.get(build).and_then(|f| f.get(key)).map_or(0, |f| f.size);
-        let mut requests: Vec<SpaceRequest> = members
+        let requests: Vec<SpaceRequest> = members
             .iter()
             .map(|m| SpaceRequest {
                 dir: m.game.clone(),
@@ -290,14 +279,6 @@ impl SyncService {
             })
             .filter(|r| r.bytes > 0)
             .collect();
-        let kept: u64 = outcome.history.iter().filter(|s| s.own).map(|s| size_of(&s.build, &s.key)).sum();
-        if kept > 0 {
-            requests.push(SpaceRequest {
-                dir: (self.deps.backups)(),
-                bytes: kept,
-                label: group.name.clone(),
-            });
-        }
         preflight(&requests)?;
         let now = SystemTime::now();
         let total: u64 = requests.iter().map(|r| r.bytes).sum();
@@ -306,7 +287,7 @@ impl SyncService {
                 .feedback
                 .begin(OperationSpec::new(Text::key("sync_operation").param("group", &group.name), "sync"))
         });
-        let applied = match apply(&members, &outcome, group, now) {
+        let applied = match apply(&members, &outcome) {
             Ok(applied) => applied,
             Err(e) => {
                 if let Some(op) = op {
@@ -325,9 +306,6 @@ impl SyncService {
         snapshot.state = GroupState::Synced;
         snapshot.note = None;
         self.store.write_snapshot(&group.id, snapshot)?;
-        for member in &members {
-            history::sweep(&member.shelf, &self.deps.config, now);
-        }
         let report = PassReport {
             written: outcome.writes.len() as u32,
             removed: outcome.removes.len() as u32,
@@ -411,111 +389,6 @@ impl SyncService {
             b.dir.cmp(&a.dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
         Ok(rows)
-    }
-
-    /// Every existing build of `group`, for its history.
-    fn all_members(&self, group: &SyncGroup) -> Vec<Member> {
-        group
-            .builds
-            .iter()
-            .filter_map(|k| self.deps.versions.get(k))
-            .map(|b| Member { key: b.key.clone(), game: self.game(&b), shelf: self.shelf(&b) })
-            .collect()
-    }
-
-    pub fn history(&self, id: &str) -> AppResult<Vec<HistoryEntry>> {
-        let group = self.store.group(id)?;
-        Ok(history::entries(&self.all_members(&group), id))
-    }
-
-    /// Puts history entry `entry` back as a new change: into the base (mode `Base`), else into
-    /// the build it was kept from (another that is not running and does not manage the path, when
-    /// that one does), dated now so it is the newest; then a pass spreads it. Refused for a path
-    /// the group no longer syncs.
-    pub fn restore(&self, id: &str, entry: &str) -> AppResult<PassReport> {
-        let group = self.store.group(id)?;
-        let all = self.all_members(&group);
-        let gone = || {
-            AppError::new(ErrorCode::NotFound, format!("no kept version {entry}"))
-                .with_param("path", entry)
-                .with_param(MESSAGE, "sync_error_version_gone")
-        };
-        let file = history::version_file(&all, entry).ok_or_else(gone)?;
-        let (owner, rest) = entry.split_once('/').ok_or_else(gone)?;
-        let path = normalize(rest.split_once('/').ok_or_else(gone)?.1)?;
-        if !is_managed(&path, &group.paths) {
-            return Err(AppError::new(ErrorCode::InvalidInput, format!("the group no longer syncs {path}"))
-                .with_param("path", &path)
-                .with_param(MESSAGE, "sync_error_restore_outside"));
-        }
-        let candidates: Vec<&str> = match group.mode {
-            SyncMode::Base => vec![group.start.as_str()],
-            SyncMode::Latest => std::iter::once(owner)
-                .chain(group.builds.iter().map(String::as_str).filter(|k| *k != owner))
-                .collect(),
-        };
-        let (mut managing, mut running) = (None, None);
-        let target = candidates.into_iter().filter_map(|k| self.deps.versions.get(k)).find(|b| {
-            if is_managed(&path, &(self.deps.managed)(b, &self.game(b))) {
-                managing.get_or_insert_with(|| b.name.clone());
-                false
-            } else if self.running(b) {
-                running.get_or_insert_with(|| b.name.clone());
-                false
-            } else {
-                true
-            }
-        });
-        let Some(target) = target else {
-            return Err(match (running, managing) {
-                (Some(name), _) => AppError::new(ErrorCode::InstanceBusy, "the build to restore into runs")
-                    .with_param("version", name)
-                    .with_param(MESSAGE, "sync_error_restore_running"),
-                (None, Some(name)) => {
-                    AppError::new(ErrorCode::InvalidInput, format!("{path} is kept in line in {name}"))
-                        .with_param("path", &path)
-                        .with_param("version", name)
-                        .with_param(MESSAGE, "sync_error_restore_managed")
-                }
-                (None, None) => gone(),
-            });
-        };
-        {
-            let _lock = self.lock_group(&group)?;
-            let game = self.game(&target);
-            let _lease = self.deps.instances.try_acquire(&game, "sync")?;
-            let member = Member { key: target.key.clone(), game: game.clone(), shelf: self.shelf(&target) };
-            if game.join(&path).is_file() {
-                let saved = Saved {
-                    build: target.key.clone(),
-                    key: key(&path),
-                    path: path.clone(),
-                    from: Some(owner.to_string()),
-                    reason: Reason::Restored,
-                    own: true,
-                };
-                keep(&member, &[&saved], &group, SystemTime::now())?;
-            }
-            let mut plan = TransactionPlan::new("build-sync-restore");
-            plan.replacements = vec![path.clone()];
-            plan.staged_bytes = fs::metadata(&file).map_or(0, |m| m.len());
-            execute(
-                &game,
-                SYNC_JOURNAL,
-                plan,
-                |transaction| {
-                    let staged = transaction.stage_path(&path)?;
-                    fs::copy(&file, &staged).map_err(|e| AppError::new(ErrorCode::Io, e.to_string()))?;
-                    fs::File::options()
-                        .write(true)
-                        .open(&staged)
-                        .and_then(|f| f.set_modified(SystemTime::now()))
-                        .map_err(|e| AppError::new(ErrorCode::Io, e.to_string()))
-                },
-                ApplyHooks::default(),
-            )?;
-        }
-        self.sync_group(id, None)
     }
 }
 

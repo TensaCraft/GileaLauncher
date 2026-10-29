@@ -14,7 +14,7 @@ use crate::dto::{GroupState, GroupView, error_text};
 #[component]
 pub fn HowItWorks() -> impl IntoView {
     let i18n = use_i18n();
-    let lines = ["sync_how_when", "sync_how_wins", "sync_how_history", "sync_how_packs"];
+    let lines = ["sync_how_when", "sync_how_wins", "sync_how_no_copies", "sync_how_packs"];
     view! {
         <div class="sync-how">
             <div class="sync-how__title"><Icon name="lightbulb" />{move || i18n.t("sync_how_title")}</div>
@@ -119,7 +119,7 @@ pub fn GroupCard(
             </div>
             <div class="sync-card__actions">
                 <IconAction icon="sync" title=t("sync_now") loading=syncing.running() on_click=Callback::new(move |()| sync()) />
-                <IconAction icon="history" title=t("sync_open") on_click=Callback::new(move |()| on_open.run(for_open.clone())) />
+                <IconAction icon="info" title=t("sync_open") on_click=Callback::new(move |()| on_open.run(for_open.clone())) />
                 <IconAction icon="edit" title=t("sync_edit") on_click=Callback::new(move |()| on_edit.run(for_edit.clone())) />
                 <IconAction
                     icon="delete_outline"
