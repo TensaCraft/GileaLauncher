@@ -13,6 +13,8 @@ use ui_kit::{Toasts, ipc, use_toasts};
 pub struct AppStore {
     pub info: RwSignal<Option<AppInfo>>,
     pub settings: RwSignal<SettingsSnapshot>,
+    /// `settings` holds the backend's answer, not the window's placeholder.
+    pub settings_loaded: RwSignal<bool>,
     pub ops: RwSignal<OpsSnapshot>,
     /// Newest first, at most 100 entries.
     pub activity: RwSignal<Vec<ActivityEntry>>,
@@ -74,6 +76,7 @@ impl AppStore {
     /// Shows `arrived` unless a later snapshot is shown already (answers and the backend's
     /// announcements of changes saved side by side may arrive in any order).
     pub fn show_settings(&self, arrived: SettingsSnapshot) {
+        self.settings_loaded.set(true);
         self.settings.maybe_update(|shown| {
             let newer = arrived.replaces(shown);
             if newer {
@@ -94,6 +97,7 @@ pub fn provide_store() -> AppStore {
             accent: launcher_shared::appearance::DEFAULT_ACCENT.into(),
             ..Default::default()
         }),
+        settings_loaded: RwSignal::new(false),
         ops: RwSignal::new(OpsSnapshot::default()),
         activity: RwSignal::new(Vec::new()),
         update: RwSignal::new(None),

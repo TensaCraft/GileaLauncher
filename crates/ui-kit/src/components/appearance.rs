@@ -12,9 +12,22 @@ pub fn chosen_preset(accent: &str) -> Option<&'static str> {
     ACCENT_PRESETS.iter().find(|p| p.hex == accent).map(|p| p.id)
 }
 
-/// What the hex field gives: a whole colour, normalised; nothing while it is still being typed.
+/// What the hex field gives on Enter: a whole colour (`#rgb` too), normalised.
 pub fn accent_input(text: &str) -> Option<String> {
     normalize_accent(text)
+}
+
+/// What the hex field gives while typed into: only a whole `#rrggbb` (a `#rgb` on the way to six
+/// digits would apply and rewrite the field under the fingers).
+pub fn live_accent(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.len() == 7 { normalize_accent(text) } else { None }
+}
+
+/// The field shows the setting again: not while it is being typed into, and not when it already
+/// says the same colour.
+pub fn field_follows(typed: &str, value: &str, focused: bool) -> bool {
+    !focused && accent_input(typed).as_deref() != Some(value)
 }
 
 #[component]
@@ -44,11 +57,26 @@ pub fn FontTiles(#[prop(into)] value: Signal<UiFont>, on_pick: Callback<UiFont>)
 #[component]
 pub fn AccentSwatches(#[prop(into)] value: Signal<String>, on_pick: Callback<String>) -> impl IntoView {
     let i18n = use_i18n();
+    // Only a new colour wakes the field, not every other change of the settings.
+    let value = Memo::new(move |_| value.get());
     let typed = RwSignal::new(value.get_untracked());
-    Effect::new(move |_| typed.set(value.get()));
-    // A whole colour typed into the field applies at once; a half-typed one waits.
+    let focused = RwSignal::new(false);
     Effect::new(move |_| {
-        if let Some(colour) = accent_input(&typed.get())
+        let (shown, editing) = (value.get(), focused.get());
+        if field_follows(&typed.get_untracked(), &shown, editing) {
+            typed.set(shown);
+        }
+    });
+    // A whole six-digit colour typed into the field applies at once; a shorter one on Enter.
+    Effect::new(move |_| {
+        if let Some(colour) = live_accent(&typed.get())
+            && colour != value.get_untracked()
+        {
+            on_pick.run(colour);
+        }
+    });
+    let enter = Callback::new(move |()| {
+        if let Some(colour) = accent_input(&typed.get_untracked())
             && colour != value.get_untracked()
         {
             on_pick.run(colour);
@@ -90,12 +118,13 @@ pub fn AccentSwatches(#[prop(into)] value: Signal<String>, on_pick: Callback<Str
                 />
                 <Icon name="colorize" />
             </label>
-            <div class="swatches__hex">
+            <div class="swatches__hex" on:focusin=move |_| focused.set(true) on:focusout=move |_| focused.set(false)>
                 <TextInput
                     value=typed
                     placeholder="#rrggbb"
                     icon="tag"
-                    invalid=Signal::derive(move || accent_input(&typed.get()).is_none())
+                    on_enter=enter
+                    invalid=Signal::derive(move || !focused.get() && accent_input(&typed.get()).is_none())
                 />
             </div>
         </div>
@@ -111,6 +140,23 @@ mod tests {
         assert_eq!(chosen_preset("#17c3a2"), Some("emerald"));
         assert_eq!(chosen_preset("#9b6cf6"), Some("amethyst"));
         assert_eq!(chosen_preset("#123456"), None, "the player's own");
+    }
+
+    #[test]
+    fn typing_applies_only_a_whole_six_digit_colour() {
+        for half in ["#", "#7", "#7a", "#7a5", "#7a5c", "#7a5cf"] {
+            assert_eq!(live_accent(half), None, "{half}");
+        }
+        assert_eq!(live_accent("#7A5CFF").as_deref(), Some("#7a5cff"));
+        assert_eq!(accent_input("#7a5").as_deref(), Some("#77aa55"), "Enter takes the short form");
+    }
+
+    #[test]
+    fn the_field_follows_the_setting_only_when_left_alone() {
+        assert!(!field_follows("#7a5c", "#17c3a2", true), "being typed into");
+        assert!(field_follows("#7a5c", "#17c3a2", false), "left half-typed: shows the setting again");
+        assert!(!field_follows("#17C3A2", "#17c3a2", false), "already shows it");
+        assert!(field_follows("#17c3a2", "#9b6cf6", false), "a swatch was picked");
     }
 
     #[test]

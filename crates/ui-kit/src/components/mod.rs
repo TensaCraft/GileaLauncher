@@ -20,7 +20,7 @@ pub mod toast;
 pub mod toggle;
 pub mod tooltip;
 
-pub use appearance::{AccentSwatches, FontTiles, accent_input, chosen_preset};
+pub use appearance::{AccentSwatches, FontTiles, accent_input, chosen_preset, field_follows, live_accent};
 pub use button::{ActionGap, ActionGroup, ActionTone, Button, IconAction, Size, Variant};
 pub use card::{BuildCard, CardPlayStyle, FALLBACK_IMAGE, card_image};
 pub use choice::{ChoiceCards, ChoiceOption};

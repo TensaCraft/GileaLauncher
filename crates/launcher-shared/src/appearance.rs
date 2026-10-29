@@ -173,12 +173,34 @@ const LINES: [(&str, &str); 4] =
 /// in proportion.
 const GREY: f64 = 0.25;
 
+/// How far a colour reads on the darkest surface, `--s-app` (WCAG contrast).
+fn contrast_on_app(rgb: (u8, u8, u8)) -> f64 {
+    let channel = |c: u8| {
+        let c = f64::from(c) / 255.0;
+        if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    let luminance = |(r, g, b): (u8, u8, u8)| 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    let (a, b) = (luminance(rgb), luminance((11, 20, 18)));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// The accent as the design uses it: a colour too dark to read on the dark surfaces (and to carry
+/// the primary button's dark ink) is lifted until it does; any other stays as chosen.
+fn readable(rgb: (u8, u8, u8)) -> ((u8, u8, u8), Hsl) {
+    let mut colour = to_hsl(rgb);
+    let mut lifted = rgb;
+    while contrast_on_app(lifted) < 3.2 && colour.l < 0.9 {
+        colour.l = (colour.l + 0.02).min(0.9);
+        lifted = to_rgb(colour);
+    }
+    (lifted, colour)
+}
+
 /// Every colour variable of the design, derived from `accent` (a bad one is the default). The
 /// default accent gives today's `tokens.css`.
 pub fn palette(accent: &str) -> Vec<(&'static str, String)> {
     let base = to_hsl(parse_hex(DEFAULT_ACCENT).unwrap_or((23, 195, 162)));
-    let rgb = parse_hex(accent).unwrap_or((23, 195, 162));
-    let a = to_hsl(rgb);
+    let (rgb, a) = readable(parse_hex(accent).unwrap_or((23, 195, 162)));
     // The pale, light and dark tints keep the default's relation to its accent.
     let hi = to_rgb(Hsl { h: a.h, s: a.s * 0.914, l: (a.l + 0.135).min(a.l.max(0.85)) });
     let lo = to_rgb(Hsl { h: a.h, s: (a.s * 1.023).min(1.0), l: (a.l - 0.1215).max(a.l.min(0.12)) });
@@ -187,7 +209,8 @@ pub fn palette(accent: &str) -> Vec<(&'static str, String)> {
     let top = to_rgb(Hsl { h: a.h, s: (a.s * 0.92).min(1.0), l: (a.l + 0.059).min(a.l.max(0.9)) });
     let bottom = to_rgb(Hsl { h: a.h, s: (a.s * 1.025).min(1.0), l: (a.l - 0.0375).max(0.0) });
     let top_hover = to_rgb(Hsl { h: a.h, s: (a.s * 0.96).min(1.0), l: (a.l + 0.12).min(a.l.max(0.9)) });
-    let shift = if a.s < GREY && a.s < base.s { 0.0 } else { a.h - base.h };
+    // A grey's hue does not matter: its share of colour (`colour`) is zero.
+    let shift = a.h - base.h;
     let colour = if a.s < GREY { a.s / GREY } else { 1.0 };
 
     let mut vars = vec![
@@ -343,6 +366,52 @@ mod tests {
             }
             assert_ne!(p["--primary-hi"], p["--primary-lo"], "{accent}");
         }
+    }
+
+    /// WCAG contrast of two colours.
+    fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
+        let lum = |(r, g, b): (u8, u8, u8)| {
+            let ch = |c: u8| {
+                let c = f64::from(c) / 255.0;
+                if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+            };
+            0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+        };
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn a_muted_accent_still_tints_the_neutrals_its_way() {
+        let accent = to_hsl(parse_hex("#6d5d8a").unwrap());
+        let p = map(palette("#6d5d8a"));
+        let app = to_hsl(rgb_of(&p["--s-app"]));
+        assert!((app.h - accent.h).abs() < 6.0, "{} vs {}", app.h, accent.h);
+        let tint: f64 = p["--tint-h"].parse().unwrap();
+        assert!((tint - accent.h).abs() < 1.0, "{tint} vs {}", accent.h);
+    }
+
+    #[test]
+    fn a_dark_accent_is_lifted_until_it_reads() {
+        for accent in ["#000000", "#1e1e5a", "#0000ff", "#3a0000"] {
+            let p = map(palette(accent));
+            let primary = rgb_of(&p["--primary"]);
+            assert!(
+                contrast(primary, rgb_of(&p["--s-app"])) >= 3.0,
+                "{accent}: {} on the app",
+                p["--primary"]
+            );
+            // The primary button's ink: hsl(var(--tint-h) calc(var(--tint-s) * 84.6%) 7.6%).
+            let tint: f64 = p["--tint-h"].parse().unwrap();
+            let share: f64 = p["--tint-s"].parse().unwrap();
+            let ink = to_rgb(Hsl { h: tint, s: 0.846 * share, l: 0.076 });
+            assert!(contrast(primary, ink) >= 3.0, "{accent}: the ink on {}", p["--primary"]);
+        }
+        assert_eq!(
+            map(palette(DEFAULT_ACCENT))["--primary"],
+            DEFAULT_ACCENT,
+            "a bright accent stays as chosen"
+        );
     }
 
     #[test]
