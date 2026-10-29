@@ -497,8 +497,8 @@ mod tests {
             |raw: &str| check_link(raw).map(|u| u.to_string()).map_err(|e| e.params.get(MESSAGE).cloned());
         assert_eq!(said(" s.namemc.com/i/abc.png "), Ok("https://s.namemc.com/i/abc.png".into()));
         assert_eq!(
-            said("http://x.ua/a.png"),
-            Ok("https://x.ua/a.png".into()),
+            said("http://example.com/a.png"),
+            Ok("https://example.com/a.png".into()),
             "the launcher downloads over https"
         );
         assert_eq!(
@@ -506,13 +506,19 @@ mod tests {
             Ok("http://127.0.0.1:8080/a.png".into()),
             "this computer's own"
         );
-        for bad in ["", "ftp://x.ua/a.png", "file:///C:/a.png", "two words", "data:image/png;base64,AA=="] {
+        for bad in
+            ["", "ftp://example.com/a.png", "file:///C:/a.png", "two words", "data:image/png;base64,AA=="]
+        {
             assert_eq!(said(bad), Err(Some("skins_error_bad_link".into())), "{bad:?}");
         }
         let name = |raw: &str| link_name(&Url::parse(raw).unwrap());
-        assert_eq!(name("https://x.ua/skins/%D0%9B%D0%B8%D1%86%D0%B0%D1%80.png?v=2"), "Лицар");
+        assert_eq!(name("https://example.com/skins/%D0%9B%D0%B8%D1%86%D0%B0%D1%80.png?v=2"), "Лицар");
         assert_eq!(name("https://mc-heads.net/skin/Notch/"), "Notch");
-        assert_eq!(name("https://x.ua/"), "x.ua", "the site's name when the address names no file");
+        assert_eq!(
+            name("https://example.com/"),
+            "example.com",
+            "the site's name when the address names no file"
+        );
     }
 
     #[test]

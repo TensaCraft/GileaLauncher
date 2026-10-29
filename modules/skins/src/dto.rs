@@ -199,9 +199,9 @@ mod tests {
 
     #[test]
     fn a_source_says_its_kind() {
-        let link = ImportArgs::new(SkinSource::Link { url: "https://x.ua/a.png".into() });
+        let link = ImportArgs::new(SkinSource::Link { url: "https://example.com/a.png".into() });
         let value = serde_json::to_value(&link).unwrap();
-        assert_eq!(value["source"], serde_json::json!({"kind": "link", "url": "https://x.ua/a.png"}));
+        assert_eq!(value["source"], serde_json::json!({"kind": "link", "url": "https://example.com/a.png"}));
         assert_eq!(serde_json::from_value::<ImportArgs>(value).unwrap(), link);
         let bare = serde_json::json!({"source": {"kind": "player", "name": "Alex"}});
         let args: ImportArgs = serde_json::from_value(bare).unwrap();

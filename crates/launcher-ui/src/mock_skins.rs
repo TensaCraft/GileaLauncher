@@ -468,7 +468,7 @@ mod tests {
         let file = json!({"source": {"kind": "file", "path": "C:/mock/skin.png"}});
         let added: LibrarySkin = parse(mock.handle("import", &file));
         assert_eq!(added.name, "skin");
-        let link = json!({"source": {"kind": "link", "url": "https://x.ua/a.png"}, "name": "Лицар", "variant": "slim"});
+        let link = json!({"source": {"kind": "link", "url": "https://example.com/a.png"}, "name": "Лицар", "variant": "slim"});
         let linked: LibrarySkin = parse(mock.handle("import", &link));
         assert_eq!((linked.name.as_str(), linked.variant), ("Лицар", SkinVariant::Slim));
         let renamed: LibrarySkin = parse(mock.handle("rename", &json!({"id": added.id, "name": "Новий"})));

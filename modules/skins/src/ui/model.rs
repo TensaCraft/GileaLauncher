@@ -162,8 +162,8 @@ mod tests {
         assert_eq!(import_args("player", "   ", "", "auto"), None, "nothing to add yet");
         let nick = import_args("player", " Notch ", "", "auto").unwrap();
         assert_eq!(nick, ImportArgs::new(SkinSource::Player { name: "Notch".into() }));
-        let link = import_args("link", "https://x.ua/a.png", " Лицар ", "slim").unwrap();
-        assert_eq!(link.source, SkinSource::Link { url: "https://x.ua/a.png".into() });
+        let link = import_args("link", "https://example.com/a.png", " Лицар ", "slim").unwrap();
+        assert_eq!(link.source, SkinSource::Link { url: "https://example.com/a.png".into() });
         assert_eq!((link.name.as_deref(), link.variant), (Some("Лицар"), Some(SkinVariant::Slim)));
         let file = import_args("file", "C:/a.png", "  ", "classic").unwrap();
         assert_eq!((file.name, file.variant), (None, Some(SkinVariant::Classic)), "a blank name is none");
