@@ -91,6 +91,7 @@ pub fn provide_store() -> AppStore {
             compact_sidebar: true,
             click_sound_enabled: true,
             hints: true,
+            accent: launcher_shared::appearance::DEFAULT_ACCENT.into(),
             ..Default::default()
         }),
         ops: RwSignal::new(OpsSnapshot::default()),

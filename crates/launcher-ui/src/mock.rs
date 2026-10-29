@@ -21,6 +21,8 @@ pub fn apply_update(s: &mut SettingsSnapshot, update: &SettingUpdate) {
         SettingUpdate::OnGameStart(v) => s.on_game_start = v,
         SettingUpdate::AskProfileOnLaunch(v) => s.ask_profile_on_launch = v,
         SettingUpdate::CompactSidebar(v) => s.compact_sidebar = v,
+        SettingUpdate::UiFont(v) => s.ui_font = v,
+        SettingUpdate::Accent(v) => s.accent = v,
         SettingUpdate::ClickSoundEnabled(v) => s.click_sound_enabled = v,
         SettingUpdate::ClickSound(v) => s.click_sound = v,
         SettingUpdate::DefaultMaxRamGb(v) => s.default_max_ram_gb = v,
@@ -232,6 +234,13 @@ pub fn install() {
         },
         items_per_page: launcher_shared::provider::SEARCH_LIMIT,
         game_fullscreen: false,
+        // `?font=minecraft&accent=9b6cf6` starts with that look.
+        ui_font: query_value("font")
+            .and_then(|f| serde_json::from_value(serde_json::Value::String(f)).ok())
+            .unwrap_or_default(),
+        accent: query_value("accent")
+            .and_then(|a| launcher_shared::appearance::normalize_accent(&format!("#{a}")))
+            .unwrap_or_else(|| launcher_shared::appearance::DEFAULT_ACCENT.into()),
         revision: 0,
     }));
     let info = AppInfo {
@@ -611,6 +620,15 @@ pub fn install() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mock_applies_font_and_accent() {
+        let mut s = SettingsSnapshot::default();
+        apply_update(&mut s, &SettingUpdate::UiFont(launcher_shared::appearance::UiFont::Minecraft));
+        apply_update(&mut s, &SettingUpdate::Accent("#9b6cf6".into()));
+        assert_eq!(s.ui_font, launcher_shared::appearance::UiFont::Minecraft);
+        assert_eq!(s.accent, "#9b6cf6");
+    }
 
     #[test]
     fn apply_update_changes_only_target_field() {

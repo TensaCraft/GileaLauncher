@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use launcher_shared::appearance::{DEFAULT_ACCENT, normalize_accent};
 use launcher_shared::provider::{PAGE_SIZES, SEARCH_LIMIT};
 use launcher_shared::recent::{RECENT_DEFAULT, RECENT_MOST};
 use launcher_shared::{
@@ -67,6 +68,11 @@ pub fn entry(update: SettingUpdate) -> AppResult<(&'static str, Option<serde_jso
         SettingUpdate::CardPlay(play) => (CARD_PLAY_KEY, Some(json!(play.as_config_str()))),
         SettingUpdate::Hints(v) => (HINTS_KEY, Some(json!(yes_no(v)))),
         SettingUpdate::HintsReset => (HINTS_DONE_KEY, None),
+        SettingUpdate::UiFont(font) => (UI_FONT_KEY, Some(json!(font))),
+        SettingUpdate::Accent(raw) => match normalize_accent(&raw) {
+            Some(accent) => (ACCENT_KEY, Some(json!(accent))),
+            None => return Err(invalid("not a #rrggbb colour").with_param("accent", raw)),
+        },
         // It adds to what is stored: `SettingsService::apply` reads the list.
         SettingUpdate::HintLearned(_) => {
             return Err(invalid("a learned hint is added by the settings service"));
@@ -107,6 +113,10 @@ pub const CARD_PLAY_KEY: &str = "home_card_play";
 pub const ITEMS_PER_PAGE_KEY: &str = "items_per_page";
 /// Games start full screen (`yes`), unless a build chose otherwise.
 pub const GAME_FULLSCREEN_KEY: &str = "game_fullscreen";
+/// The UI font (`UiFont` as its serde name).
+pub const UI_FONT_KEY: &str = "ui_font";
+/// The accent colour, lowercase `#rrggbb`.
+pub const ACCENT_KEY: &str = "accent";
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
@@ -192,6 +202,11 @@ impl SettingsService {
                 .filter(|n| PAGE_SIZES.contains(n))
                 .unwrap_or(SEARCH_LIMIT),
             game_fullscreen: c.get_bool(GAME_FULLSCREEN_KEY, false),
+            ui_font: c.get(UI_FONT_KEY).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+            accent: c
+                .get_str(ACCENT_KEY)
+                .and_then(|raw| normalize_accent(&raw))
+                .unwrap_or_else(|| DEFAULT_ACCENT.to_string()),
         }
     }
 
@@ -268,6 +283,7 @@ fn relative_to(path: &Path, base: &Path) -> Option<String> {
 mod tests {
     use super::*;
     use crate::paths::Os;
+    use launcher_shared::appearance::UiFont;
     use launcher_shared::{ClickSound, ErrorCode};
 
     fn service(home: &Path) -> SettingsService {
@@ -331,6 +347,41 @@ mod tests {
         assert_eq!(svc.apply(SettingUpdate::ItemsPerPage(7)).unwrap_err().code, ErrorCode::InvalidInput);
         svc.config.set(ITEMS_PER_PAGE_KEY, json!(400)).unwrap();
         assert_eq!(svc.snapshot().items_per_page, SEARCH_LIMIT, "a hand-edited size not offered");
+    }
+
+    #[test]
+    fn appearance_is_applied_and_kept() {
+        let home = tempfile::tempdir().unwrap();
+        let svc = service(home.path());
+        assert_eq!(
+            (svc.snapshot().ui_font, svc.snapshot().accent.as_str()),
+            (UiFont::Standard, DEFAULT_ACCENT)
+        );
+        assert_eq!(svc.apply(SettingUpdate::Accent(" #9B6CF6 ".into())).unwrap().accent, "#9b6cf6");
+        assert_eq!(svc.apply(SettingUpdate::UiFont(UiFont::Minecraft)).unwrap().ui_font, UiFont::Minecraft);
+        let reopened = service(home.path()).snapshot();
+        assert_eq!((reopened.ui_font, reopened.accent.as_str()), (UiFont::Minecraft, "#9b6cf6"));
+    }
+
+    #[test]
+    fn a_bad_accent_is_refused() {
+        let home = tempfile::tempdir().unwrap();
+        let svc = service(home.path());
+        assert_eq!(
+            svc.apply(SettingUpdate::Accent("teal".into())).unwrap_err().code,
+            ErrorCode::InvalidInput
+        );
+        assert_eq!(svc.snapshot().accent, DEFAULT_ACCENT);
+    }
+
+    #[test]
+    fn a_hand_edited_appearance_reads_as_the_default() {
+        let home = tempfile::tempdir().unwrap();
+        let svc = service(home.path());
+        svc.config.set(ACCENT_KEY, json!("teal")).unwrap();
+        svc.config.set(UI_FONT_KEY, json!("comic")).unwrap();
+        let s = svc.snapshot();
+        assert_eq!((s.ui_font, s.accent.as_str()), (UiFont::Standard, DEFAULT_ACCENT));
     }
 
     #[test]

@@ -289,10 +289,20 @@ pub struct SettingsSnapshot {
     /// Games start full screen, unless a build chose otherwise.
     #[serde(default)]
     pub game_fullscreen: bool,
+    /// The UI font.
+    #[serde(default)]
+    pub ui_font: crate::appearance::UiFont,
+    /// The accent colour, lowercase `#rrggbb`: the rest of the design's colours follow it.
+    #[serde(default = "accent_default")]
+    pub accent: String,
     /// How many changes were saved before this snapshot (this run): a later answer has a higher
     /// one.
     #[serde(default)]
     pub revision: u64,
+}
+
+fn accent_default() -> String {
+    crate::appearance::DEFAULT_ACCENT.to_string()
 }
 
 fn hints_default() -> bool {
@@ -349,6 +359,9 @@ pub enum SettingUpdate {
     HintLearned(String),
     /// Every hint shows again.
     HintsReset,
+    UiFont(crate::appearance::UiFont),
+    /// A `#rrggbb` (or `#rgb`) colour; anything else is refused.
+    Accent(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -870,5 +883,22 @@ mod loader_catalog_tests {
         assert_eq!(catalog.builds_for("1.20.1"), builds(&["0.17.2", "0.16.9"]), "the shared ones");
         assert_eq!(catalog.builds_for("1.12.2"), builds(&["14.23.5"]), "its own");
         assert_eq!(catalog.builds_for("1.8.9"), Vec::new(), "a version it does not have");
+    }
+}
+
+#[cfg(test)]
+mod appearance_settings_tests {
+    use super::*;
+    use crate::appearance::{DEFAULT_ACCENT, UiFont};
+
+    #[test]
+    fn settings_from_before_appearance_read_the_default_font_and_accent() {
+        let mut old = serde_json::to_value(SettingsSnapshot::default()).unwrap();
+        let map = old.as_object_mut().unwrap();
+        map.remove("ui_font");
+        map.remove("accent");
+        let read: SettingsSnapshot = serde_json::from_value(old).unwrap();
+        assert_eq!(read.ui_font, UiFont::Standard);
+        assert_eq!(read.accent, DEFAULT_ACCENT);
     }
 }
