@@ -111,6 +111,20 @@ impl AvatarCache {
         }
     }
 
+    /// Drops the cached head of `identifier` (its skin changed): the next `get` asks the hosts.
+    pub fn forget(&self, identifier: &str) {
+        let identifier = match identifier.trim() {
+            "" => "Steve",
+            trimmed => trimmed,
+        };
+        let file = cache_file(&self.dir, identifier);
+        if let Err(e) = fs::remove_file(&file)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::debug!("Unable to forget an avatar: {e}");
+        }
+    }
+
     async fn fetch(&self, url: &str) -> Option<Vec<u8>> {
         let response = self.client.get(url).timeout(self.timeout).send().await.ok()?;
         let is_image = response

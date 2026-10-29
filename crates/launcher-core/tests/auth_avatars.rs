@@ -103,3 +103,23 @@ async fn the_service_uses_the_profile_uuid() {
     );
     assert!(svc.avatar("nobody").await.is_none());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forgotten_avatar_is_fetched_again() {
+    let fake = fake_ms::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = AuthConfig::new("c", dir.path(), &dir.path().join("cache"));
+    cfg.endpoints = fake.endpoints();
+    cfg.timings = AuthTimings::fast();
+    cfg.avatar_sources = fake.avatar_sources();
+    let sink = Arc::new(NullSink);
+    let svc = AuthService::new(cfg, FeedbackService::new(sink.clone()), sink, Arc::new(NoOpener)).unwrap();
+    svc.create_offline("Steve").unwrap();
+    svc.avatar("Steve").await.unwrap();
+    svc.avatar("Steve").await.unwrap();
+    assert_eq!(fake.requests("/avatar/mc-heads").len(), 1, "the second look is cached");
+    svc.forget_avatar("Steve");
+    svc.avatar("Steve").await.unwrap();
+    assert_eq!(fake.requests("/avatar/mc-heads").len(), 2, "a forgotten head is asked for again");
+    svc.forget_avatar("nobody");
+}

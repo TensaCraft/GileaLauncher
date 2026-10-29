@@ -337,6 +337,16 @@ impl AuthService {
         self.avatars.get(&identifier).await
     }
 
+    /// Forgets `key`'s cached head (its skin changed), by UUID and by name.
+    pub fn forget_avatar(&self, key: &str) {
+        let Some(profile) = self.store.get(key) else { return };
+        for identifier in [profile.id.as_str(), profile.name.as_str()] {
+            if !identifier.trim().is_empty() {
+                self.avatars.forget(identifier);
+            }
+        }
+    }
+
     /// The account a launch uses: `key`, or the default profile.
     pub async fn launch_identity(&self, key: Option<&str>) -> AppResult<LaunchIdentity> {
         let key = match key {
