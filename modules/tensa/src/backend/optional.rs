@@ -165,20 +165,41 @@ pub fn recognize(
     }
     // A file two items' patterns take is neither's.
     let patterns: Vec<Option<&PreserveRule>> = items.iter().map(|item| own_glob(item, rules)).collect();
-    let mut by_pattern: Vec<usize> = Vec::new();
-    for (at, (relative, _)) in files.iter().enumerate() {
-        if owner.contains_key(&at) {
-            continue;
-        }
-        let takers: Vec<usize> = patterns
+    let takers = |relative: &str| -> Vec<usize> {
+        patterns
             .iter()
             .enumerate()
             .filter(|(_, rule)| {
                 rule.is_some_and(|rule| preserved(enabled_name(relative), std::slice::from_ref(rule)))
             })
             .map(|(i, _)| i)
-            .collect();
-        if let [i] = takers.as_slice() {
+            .collect()
+    };
+    // A mod the server renumbered: the file the launcher noted, unchanged since, is the item whose
+    // pattern alone takes it.
+    for noted in note.iter().filter(|(id, _)| !items.iter().any(|item| &item.id == *id)).map(|(_, n)| n) {
+        let key = name_key(enabled_name(&format!("{MODS}/{}", noted.file)));
+        let Some(at) = files.iter().position(|(relative, _)| name_key(enabled_name(relative)) == key) else {
+            continue;
+        };
+        if owner.contains_key(&at) || noted.sha256.is_empty() || hash_of(at).as_deref() != Some(&noted.sha256)
+        {
+            continue;
+        }
+        if let [i] = takers(&files[at].0).as_slice()
+            && !by_note.contains_key(i)
+        {
+            owner.insert(at, *i);
+            by_note.insert(*i, at);
+            named[*i] = true;
+        }
+    }
+    let mut by_pattern: Vec<usize> = Vec::new();
+    for (at, (relative, _)) in files.iter().enumerate() {
+        if owner.contains_key(&at) {
+            continue;
+        }
+        if let [i] = takers(relative).as_slice() {
             owner.insert(at, *i);
             by_pattern.push(at);
         }
@@ -327,13 +348,14 @@ pub fn for_sync(root: &Path, found: Option<&[Found]>, note: &Note) -> Optional {
     out
 }
 
-/// The note of `found`'s items the launcher put in that are the server's version, with their
-/// files' size and time now.
+/// The note of `found`'s items that are the server's version, with their files' size and time
+/// now: those the launcher put in and those put in by hand as the very same file, so a later
+/// version replaces either.
 pub fn note_after(found: &[Found], root: &Path) -> Note {
     found
         .iter()
         .filter_map(|f| {
-            let relative = f.current.as_ref().filter(|current| f.noted.as_ref() == Some(*current))?;
+            let relative = f.current.as_ref()?;
             let meta = fs::metadata(root.join(relative)).ok()?;
             let file = relative.strip_prefix("mods/").unwrap_or(relative).to_string();
             let noted = Noted {
@@ -568,8 +590,8 @@ mod tests {
         let note = note_after(&found, dir.path());
         assert_eq!(
             note.keys().collect::<Vec<_>>(),
-            ["goggles"],
-            "only what the launcher put in and is the server's version: not the old one, not one put by another"
+            ["barrel", "goggles"],
+            "what is the server's version, put in by the launcher or as the very same file by another: not the old one"
         );
         assert_eq!(note["goggles"].sha256, sha("goggles 8.6.9"));
         assert_eq!(note["goggles"].size, 13);

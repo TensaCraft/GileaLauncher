@@ -534,6 +534,69 @@ async fn a_hand_put_older_version_is_left_for_the_player_to_update() {
     assert_eq!(mods(&w, &build), ["core.jar", "goggles-1.jar"]);
 }
 
+/// The launcher's note of `file` under `id`, as a sync leaves it once it put `body` there.
+fn noted_as(w: &World, build: &Build, id: &str, file: &str, body: &str) {
+    let mut note = module_tensa::backend::optional::Note::new();
+    note.insert(
+        id.into(),
+        module_tensa::backend::optional::Noted {
+            file: file.into(),
+            sha256: sha256(body),
+            size: body.len() as u64,
+            modified_ms: 0,
+        },
+    );
+    module_tensa::backend::optional::write_note(&folder(w, build), &note).unwrap();
+}
+
+#[tokio::test]
+async fn an_optional_mod_keeps_updating_after_the_server_renumbers_it() {
+    let w = World::start().await;
+    catalog(&w, goggles_glob());
+    manifest(&w, &[("core.jar", "core")]);
+    whitelist(&w, &[("new-id", "goggles-2.jar", "goggles 2")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-1.jar", "goggles 1");
+    noted_as(&w, &build, "old-id", "goggles-1.jar", "goggles 1");
+    assert_eq!(run(&w, &build, false).await.unwrap(), Synced::Updated);
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-2.jar"]);
+    let note = module_tensa::backend::optional::read_note(&folder(&w, &build));
+    assert_eq!(note["new-id"].file, "goggles-2.jar");
+    assert!(!note.contains_key("old-id"), "the old number goes");
+}
+
+#[tokio::test]
+async fn a_renumbered_mod_changed_since_it_was_noted_is_left_to_the_player() {
+    let w = World::start().await;
+    catalog(&w, goggles_glob());
+    manifest(&w, &[("core.jar", "core")]);
+    whitelist(&w, &[("new-id", "goggles-2.jar", "goggles 2")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-1.jar", "goggles 1, patched by hand");
+    noted_as(&w, &build, "old-id", "goggles-1.jar", "goggles 1");
+    assert_eq!(run(&w, &build, false).await.unwrap(), Synced::Unchanged);
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-1.jar"]);
+}
+
+#[tokio::test]
+async fn the_server_s_version_put_by_hand_is_updated_with_the_server() {
+    let w = World::start().await;
+    catalog(&w, goggles_glob());
+    manifest(&w, &[("core.jar", "core")]);
+    whitelist(&w, &[("g", "goggles-1.jar", "goggles 1")]);
+    whitelist(&w, &[("g", "goggles-2.jar", "goggles 2")]);
+    let build = installed(&w);
+    put(&w, &build, "mods/core.jar", "core");
+    put(&w, &build, "mods/goggles-1.jar", "goggles 1");
+    assert_eq!(run(&w, &build, false).await.unwrap(), Synced::Unchanged);
+    let note = module_tensa::backend::optional::read_note(&folder(&w, &build));
+    assert_eq!(note["g"].file, "goggles-1.jar", "the server's very file is noted");
+    assert_eq!(run(&w, &build, false).await.unwrap(), Synced::Updated);
+    assert_eq!(mods(&w, &build), ["core.jar", "goggles-2.jar"]);
+}
+
 #[tokio::test]
 async fn a_mod_the_manifest_now_brings_is_left_to_the_manifest() {
     let w = World::start().await;
