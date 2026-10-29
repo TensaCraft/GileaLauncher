@@ -1,5 +1,6 @@
 //! Types shared between the Launcher backend (native) and UI (wasm32).
 
+pub mod appearance;
 pub mod args;
 pub mod branding;
 pub mod dto;
