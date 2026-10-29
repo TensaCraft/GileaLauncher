@@ -3592,6 +3592,7 @@ dependencies = [
  "launcher-core",
  "launcher-shared",
  "leptos",
+ "png",
  "reqwest",
  "serde",
  "serde_json",

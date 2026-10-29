@@ -1,5 +1,7 @@
 //! The skins module's backend: the skin library and the skins and capes of official profiles.
 
+pub mod png;
+
 use std::sync::Arc;
 
 use launcher_core::core_app::CoreApp;
