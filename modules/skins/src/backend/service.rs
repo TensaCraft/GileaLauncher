@@ -120,12 +120,16 @@ fn file_skin(path: &Path) -> AppResult<(SkinTexture, String, String)> {
     Ok((read_skin(&bytes)?, name_of(path), "file".to_string()))
 }
 
-/// The web address the player typed: `https://` is assumed when they left it out; else
-/// `skins_error_bad_link`.
+/// The web address the player typed, over https (the launcher downloads nothing else from the
+/// web): assumed when they left it out, put in place of `http` for any host but this computer's;
+/// else `skins_error_bad_link`.
 fn check_link(raw: &str) -> AppResult<Url> {
     let raw = raw.trim();
     let parsed = match Url::parse(raw) {
         Err(ParseError::RelativeUrlWithoutBase) => Url::parse(&format!("https://{raw}")),
+        Ok(url) if url.scheme() == "http" && !is_this_computer(&url) => {
+            Url::parse(&format!("https{}", &url.as_str()["http".len()..]))
+        }
         other => other,
     };
     match parsed {
@@ -133,6 +137,10 @@ fn check_link(raw: &str) -> AppResult<Url> {
         _ => Err(AppError::new(ErrorCode::InvalidInput, format!("{raw:?} is no web address"))
             .with_param(MESSAGE, "skins_error_bad_link")),
     }
+}
+
+fn is_this_computer(url: &Url) -> bool {
+    matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
 }
 
 /// The default name of a skin added from `url`: its file's name, else the site's.
@@ -386,7 +394,10 @@ impl SkinsService {
         let texture =
             self.deps.skins.at_link(url.as_str()).await.map_err(|e| match e.params.get(REASON) {
                 Some(reason) if reason == render::BAD_PNG => bad_png(e),
-                _ => e.with_param(MESSAGE, "skins_error_link"),
+                _ => {
+                    tracing::warn!("No skin could be had at {url}: {}", e.detail);
+                    e.with_param(MESSAGE, "skins_error_link")
+                }
             })?;
         Ok((texture, link_name(&url), format!("link:{url}")))
     }
@@ -485,7 +496,16 @@ mod tests {
         let said =
             |raw: &str| check_link(raw).map(|u| u.to_string()).map_err(|e| e.params.get(MESSAGE).cloned());
         assert_eq!(said(" s.namemc.com/i/abc.png "), Ok("https://s.namemc.com/i/abc.png".into()));
-        assert_eq!(said("http://x.ua/a.png"), Ok("http://x.ua/a.png".into()));
+        assert_eq!(
+            said("http://x.ua/a.png"),
+            Ok("https://x.ua/a.png".into()),
+            "the launcher downloads over https"
+        );
+        assert_eq!(
+            said("http://127.0.0.1:8080/a.png"),
+            Ok("http://127.0.0.1:8080/a.png".into()),
+            "this computer's own"
+        );
         for bad in ["", "ftp://x.ua/a.png", "file:///C:/a.png", "two words", "data:image/png;base64,AA=="] {
             assert_eq!(said(bad), Err(Some("skins_error_bad_link".into())), "{bad:?}");
         }

@@ -98,6 +98,22 @@ pub fn SkinsPage() -> impl IntoView {
         }
     });
 
+    // An account's head again once its skin is known or changed (put on here, or elsewhere).
+    let worn_skin = Memo::new(move |_| {
+        state.with(|s| match s {
+            Some(Ok(s)) => Some((s.profile.clone(), s.skin.as_ref().map(|k| k.sha256.clone()))),
+            _ => None,
+        })
+    });
+    Effect::new(move |_| {
+        let Some((key, _)) = worn_skin.get() else { return };
+        spawn_local(async move {
+            if let Some(src) = super::api::avatar(&key).await {
+                avatars.try_update(|m| m.insert(key, src));
+            }
+        });
+    });
+
     let load_library = move || {
         spawn_local(async move {
             match super::api::library().await {
@@ -225,7 +241,11 @@ pub fn SkinsPage() -> impl IntoView {
         spawn_local(async move {
             match super::api::set_variant(id.clone(), variant).await {
                 Ok(changed) => land_variant(library, changed),
-                Err(e) => return toasts.show(Level::Error, i18n.text(&error_text(&e)), None),
+                Err(e) => {
+                    // The switch moved at the click: it goes back to the model the skin still has.
+                    let _ = slim.try_set(!on);
+                    return toasts.show(Level::Error, i18n.text(&error_text(&e)), None);
+                }
             }
             if wearing {
                 match super::api::apply(profile.clone(), id).await {
