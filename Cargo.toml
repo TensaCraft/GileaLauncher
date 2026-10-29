@@ -91,7 +91,7 @@ getrandom = "0.3"
 tokio-util = "0.7"
 fs4 = "1.1"
 sha1 = "0.10"
-zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "9.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 lzma-rs = "0.3"
 fastnbt = "2"
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
