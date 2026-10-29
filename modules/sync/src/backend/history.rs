@@ -138,6 +138,7 @@ mod tests {
                 path: path.into(),
                 from: Some("a".into()),
                 reason: Reason::Changed,
+                own: true,
             }],
             ..Outcome::default()
         };

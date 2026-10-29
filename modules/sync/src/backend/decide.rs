@@ -43,7 +43,7 @@ pub struct Remove {
     pub path: String,
 }
 
-/// A member's version kept in history before it is overwritten or removed.
+/// A member's version a pass overwrites or removes, held until the pass ends to put it back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Saved {
     pub build: String,
@@ -51,6 +51,9 @@ pub struct Saved {
     pub path: String,
     pub from: Option<String>,
     pub reason: Reason,
+    /// The member's own: changed there since its last pass, or never synced there. Only such a
+    /// version stays in history; any other is the group's earlier one.
+    pub own: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -107,6 +110,7 @@ pub fn decide(input: &Decision<'_>) -> Outcome {
         let record = snapshot.files.get(&k);
         let file_of = |m: &str| input.found.get(m).and_then(|files| files.get(&k));
         let held = |m: &str| record.and_then(|r| r.held.get(m));
+        let own = |m: &str, f: &Found| held(m).is_none_or(|h| h.hash != f.hash);
         let spelling = input
             .members
             .iter()
@@ -176,14 +180,15 @@ pub fn decide(input: &Decision<'_>) -> Outcome {
                 for m in active.iter().copied().filter(|m| *m != source) {
                     match file_of(m) {
                         Some(own) if own.hash == file.hash => {}
-                        own => {
-                            if own.is_some() {
+                        present => {
+                            if let Some(present) = present {
                                 out.history.push(Saved {
                                     build: m.clone(),
                                     key: k.clone(),
-                                    path: own.map_or_else(|| spelling.clone(), |f| f.path.clone()),
+                                    path: present.path.clone(),
                                     from: Some(source.clone()),
                                     reason: reason_for(m, false),
+                                    own: own(m, present),
                                 });
                             }
                             out.writes.push(Write {
@@ -215,6 +220,7 @@ pub fn decide(input: &Decision<'_>) -> Outcome {
                             path: file.path.clone(),
                             from: None,
                             reason: reason_for(m, true),
+                            own: own(m, file),
                         });
                         out.removes.push(Remove {
                             build: m.clone(),
@@ -325,6 +331,10 @@ mod tests {
 
     fn saved(o: &Outcome) -> Vec<(String, Reason)> {
         o.history.iter().map(|h| (h.build.clone(), h.reason)).collect()
+    }
+
+    fn own(o: &Outcome) -> Vec<(String, bool)> {
+        o.history.iter().map(|h| (h.build.clone(), h.own)).collect()
     }
 
     fn agreed(o: &Outcome) -> Option<String> {
@@ -568,6 +578,54 @@ mod tests {
         .run();
         assert_eq!(removes(&o), vec!["b"]);
         assert_eq!(saved(&o), reasons(&[("b", Reason::Base)]));
+    }
+
+    #[test]
+    fn a_version_is_its_member_s_own_when_changed_there_or_never_synced() {
+        let spread = Case {
+            members: ABC,
+            before: ABC,
+            record: Some((Some("h0"), HELD)),
+            now: &[("a", Some(("h0", 1))), ("b", Some(("h1", 5))), ("c", Some(("h0", 1)))],
+            ..Case::latest()
+        }
+        .run();
+        assert_eq!(own(&spread), [("a".to_string(), false), ("c".to_string(), false)], "the group's");
+        let conflict = Case {
+            members: ABC,
+            before: ABC,
+            record: Some((Some("h0"), HELD)),
+            now: &[("a", Some(("h1", 5))), ("b", Some(("h2", 9))), ("c", Some(("h0", 1)))],
+            ..Case::latest()
+        }
+        .run();
+        assert_eq!(own(&conflict), [("a".to_string(), true), ("c".to_string(), false)], "the losing edit");
+        let removed = Case {
+            members: ABC,
+            before: ABC,
+            record: Some((Some("h0"), HELD)),
+            now: &[("a", None), ("b", Some(("h0", 1))), ("c", Some(("h0", 1)))],
+            ..Case::latest()
+        }
+        .run();
+        assert!(own(&removed).iter().all(|(_, own)| !own), "{removed:?}");
+        let first = Case {
+            members: ABC,
+            now: &[("a", Some(("h1", 1))), ("b", Some(("h2", 9))), ("c", None)],
+            ..Case::latest()
+        }
+        .run();
+        assert_eq!(own(&first), [("b".to_string(), true)], "never synced there");
+        let undone = Case {
+            mode: SyncMode::Base,
+            members: &["a", "b"],
+            before: &["a", "b"],
+            record: Some((Some("h0"), &[("a", "h0"), ("b", "h0")])),
+            now: &[("a", Some(("h0", 1))), ("b", Some(("h1", 99)))],
+            ..Case::latest()
+        }
+        .run();
+        assert_eq!(own(&undone), [("b".to_string(), true)], "an edit the base undoes");
     }
 
     #[test]

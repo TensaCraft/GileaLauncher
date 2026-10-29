@@ -290,7 +290,7 @@ impl SyncService {
             })
             .filter(|r| r.bytes > 0)
             .collect();
-        let kept: u64 = outcome.history.iter().map(|s| size_of(&s.build, &s.key)).sum();
+        let kept: u64 = outcome.history.iter().filter(|s| s.own).map(|s| size_of(&s.build, &s.key)).sum();
         if kept > 0 {
             requests.push(SpaceRequest {
                 dir: (self.deps.backups)(),
@@ -492,6 +492,7 @@ impl SyncService {
                     path: path.clone(),
                     from: Some(owner.to_string()),
                     reason: Reason::Restored,
+                    own: true,
                 };
                 keep(&member, &[&saved], &group, SystemTime::now())?;
             }
