@@ -226,6 +226,22 @@ fn a_running_build_is_neither_cleared_nor_cleaned() {
 }
 
 #[test]
+fn auto_cleaning_removes_what_old_sync_passes_kept() {
+    let w = world();
+    let (aero, _game) = build(&w, "Aero", true);
+    let sync = shelf(&w, &aero).sync();
+    let pass = put(&sync, "2026-10-12_09-00-00-1/files/region/r.0.0.mca", &[0; 40]);
+    let mine = put(&sync, "My notes/a.txt", b"mine");
+    for rule in StorageRule::ALL {
+        w.service.set_rule(rule, false).unwrap();
+    }
+    w.config.set("storage_cleaned_at", json!(0)).unwrap();
+    assert_eq!(w.service.auto_clean(SystemTime::now()), 40, "no rule needed: sync keeps no history now");
+    assert!(!sync.join("2026-10-12_09-00-00-1").exists() && !pass.exists());
+    assert!(mine.is_file(), "the player's own files in the backups folder stay");
+}
+
+#[test]
 fn auto_cleaning_runs_once_a_day_and_follows_the_switches() {
     let w = world();
     let (aero, game) = build(&w, "Aero", true);

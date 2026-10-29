@@ -18,7 +18,8 @@ use serde_json::json;
 
 use super::config::ConfigStore;
 use super::usage::{
-    THUMBS_CAP, build_items, dir_size, launcher_items, line_size, rule_items, stale_thumbnails, temp_files,
+    THUMBS_CAP, build_items, dir_size, launcher_items, line_size, old_sync_copies, rule_items,
+    stale_thumbnails, temp_files,
 };
 use super::versions::{Build, VersionStore};
 use crate::backups::{BackupsRoot, BuildBackups};
@@ -300,6 +301,9 @@ impl StorageService {
             for rule in rules.iter().filter(|r| last.is_some() || **r != StorageRule::ModBackups) {
                 freed += remove(&rule_items(*rule, &game, &shelf, now));
             }
+            // Sync keeps no copies since 0.0.18: what older passes kept goes, whatever the rules.
+            freed += remove(&old_sync_copies(&shelf));
+            let _ = fs::remove_dir(shelf.sync());
         }
         if rules.contains(&StorageRule::Thumbnails) {
             let thumbs = Thumbs::new(self.deps.cache_dir.join("thumbs"));

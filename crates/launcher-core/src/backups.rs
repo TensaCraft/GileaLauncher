@@ -79,7 +79,8 @@ impl BuildBackups {
         self.0.join("modpacks")
     }
 
-    /// What build sync overwrote or removed in it, a folder per pass (`<time>-<n>`).
+    /// Where build sync kept what it overwrote, a folder per pass (`<time>-<n>`), up to 0.0.17:
+    /// only leftovers the daily clean removes.
     pub fn sync(&self) -> PathBuf {
         self.0.join("sync")
     }

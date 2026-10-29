@@ -10,7 +10,6 @@ pub enum StorageLine {
     WorldBackups,
     ModBackups,
     ModpackBackups,
-    SyncHistory,
     ServiceFolder,
     CrashReports,
     GameLogs,
@@ -21,11 +20,10 @@ pub enum StorageLine {
 
 impl StorageLine {
     /// A build's lines, in the order the tab shows them.
-    pub const BUILD: [StorageLine; 7] = [
+    pub const BUILD: [StorageLine; 6] = [
         StorageLine::WorldBackups,
         StorageLine::ModBackups,
         StorageLine::ModpackBackups,
-        StorageLine::SyncHistory,
         StorageLine::ServiceFolder,
         StorageLine::CrashReports,
         StorageLine::GameLogs,
@@ -49,7 +47,6 @@ impl StorageLine {
             StorageLine::WorldBackups => "storage_line_world_backups",
             StorageLine::ModBackups => "storage_line_mod_backups",
             StorageLine::ModpackBackups => "storage_line_modpack_backups",
-            StorageLine::SyncHistory => "storage_line_sync_history",
             StorageLine::ServiceFolder => "storage_line_service_folder",
             StorageLine::CrashReports => "storage_line_crash_reports",
             StorageLine::GameLogs => "storage_line_game_logs",
@@ -66,7 +63,6 @@ impl StorageLine {
 pub enum StorageRule {
     ModBackups,
     ModpackBackups,
-    SyncHistory,
     JavaDumps,
     CrashReports,
     ServiceFolder,
@@ -74,10 +70,9 @@ pub enum StorageRule {
 }
 
 impl StorageRule {
-    pub const ALL: [StorageRule; 7] = [
+    pub const ALL: [StorageRule; 6] = [
         StorageRule::ModBackups,
         StorageRule::ModpackBackups,
-        StorageRule::SyncHistory,
         StorageRule::JavaDumps,
         StorageRule::CrashReports,
         StorageRule::ServiceFolder,
@@ -89,7 +84,6 @@ impl StorageRule {
         match self {
             StorageRule::ModBackups => "storage_rule_mod_backups",
             StorageRule::ModpackBackups => "storage_rule_modpack_backups",
-            StorageRule::SyncHistory => "storage_rule_sync_history",
             StorageRule::JavaDumps => "storage_rule_java_dumps",
             StorageRule::CrashReports => "storage_rule_crash_reports",
             StorageRule::ServiceFolder => "storage_rule_service_folder",
@@ -105,7 +99,6 @@ impl StorageRule {
         match self {
             StorageRule::ModBackups => "storage_rule_mod_backups_desc",
             StorageRule::ModpackBackups => "storage_rule_modpack_backups_desc",
-            StorageRule::SyncHistory => "storage_rule_sync_history_desc",
             StorageRule::JavaDumps => "storage_rule_java_dumps_desc",
             StorageRule::CrashReports => "storage_rule_crash_reports_desc",
             StorageRule::ServiceFolder => "storage_rule_service_folder_desc",
@@ -240,12 +233,6 @@ mod tests {
         assert_eq!(StorageRule::JavaDumps.desc_key(), "storage_rule_java_dumps_desc");
         assert_eq!(StorageLine::GameLogs.label_key(), "storage_line_game_logs");
         assert!(StorageLine::ModpackBackups.mods_only() && !StorageLine::CrashReports.mods_only());
-        assert_eq!(StorageLine::SyncHistory.label_key(), "storage_line_sync_history");
-        assert_eq!(StorageRule::SyncHistory.config_key(), "storage_rule_sync_history");
-        assert!(
-            StorageLine::BUILD.contains(&StorageLine::SyncHistory) && StorageLine::SyncHistory.unneeded()
-        );
-        assert!(StorageRule::ALL.contains(&StorageRule::SyncHistory));
     }
 
     #[test]

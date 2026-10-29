@@ -67,7 +67,6 @@ fn line_icon(line: StorageLine) -> &'static str {
         StorageLine::WorldBackups => "public",
         StorageLine::ModBackups => "extension",
         StorageLine::ModpackBackups => "inventory_2",
-        StorageLine::SyncHistory => "history",
         StorageLine::ServiceFolder => "folder_special",
         StorageLine::CrashReports => "bug_report",
         StorageLine::GameLogs => "description",
