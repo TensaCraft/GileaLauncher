@@ -207,13 +207,13 @@ impl InstallerJar {
         let mut files = Vec::new();
         for index in 0..self.archive.len() {
             let entry = self.archive.by_index(index).map_err(|e| io_error(&self.path, e))?;
-            let Some(rest) = entry.name().strip_prefix("maven/") else { continue };
+            let name = entry.name().map_err(|e| io_error(&self.path, e))?;
+            let Some(rest) = name.strip_prefix("maven/") else { continue };
             if entry.is_dir() || rest.is_empty() {
                 continue;
             }
-            let relative =
-                safe_relative(rest).ok_or_else(|| invalid(format!("unsafe entry {}", entry.name())))?;
-            files.push((entry.name().to_string(), libraries.join(relative)));
+            let relative = safe_relative(rest).ok_or_else(|| invalid(format!("unsafe entry {name}")))?;
+            files.push((name.to_string(), libraries.join(relative)));
         }
         for (name, dest) in &files {
             self.extract(name, dest)?;

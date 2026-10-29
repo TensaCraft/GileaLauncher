@@ -65,7 +65,11 @@ fn clean_text(raw: Option<&str>) -> Option<String> {
 pub fn inspect_mod_jar(path: &Path, loader: Option<LoaderKind>) -> Result<ModDescriptor, InspectError> {
     let file = File::open(path).map_err(|_| InspectError::UnreadableJar)?;
     let mut jar = ZipArchive::new(BufReader::new(file)).map_err(|_| InspectError::CorruptJar)?;
-    let names: Vec<String> = jar.file_names().map(str::to_string).collect();
+    let names: Vec<String> = jar
+        .file_names()
+        .map(|name| name.map(|name| name.into_owned()))
+        .collect::<Result<_, _>>()
+        .map_err(|_| InspectError::CorruptJar)?;
     let metadata_file = metadata_order(loader)
         .into_iter()
         .find(|f| names.iter().any(|n| n == f))

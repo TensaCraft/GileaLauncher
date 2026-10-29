@@ -133,17 +133,26 @@ async fn connect_to(host: &str, port: u16) -> (String, u16) {
     if port != DEFAULT_PORT || host.parse::<IpAddr>().is_ok() || host.eq_ignore_ascii_case("localhost") {
         return (host.to_string(), port);
     }
-    let Ok(builder) = hickory_resolver::TokioResolver::builder_tokio() else {
+    let Ok(resolver) = hickory_resolver::TokioResolver::builder_tokio().and_then(|builder| builder.build())
+    else {
         return (host.to_string(), port);
     };
-    match builder.build().srv_lookup(format!("_minecraft._tcp.{host}.")).await {
-        Ok(found) => found
-            .iter()
-            .min_by_key(|srv| srv.priority())
-            .map(|srv| (srv.target().to_utf8().trim_end_matches('.').to_string(), srv.port()))
-            .unwrap_or_else(|| (host.to_string(), port)),
+    match resolver.srv_lookup(format!("_minecraft._tcp.{host}.")).await {
+        Ok(found) => srv_target(found.answers()).unwrap_or_else(|| (host.to_string(), port)),
         Err(_) => (host.to_string(), port),
     }
+}
+
+/// The target and port of the SRV record of the first priority among `records`.
+fn srv_target(records: &[hickory_resolver::proto::rr::Record]) -> Option<(String, u16)> {
+    records
+        .iter()
+        .filter_map(|record| match &record.data {
+            hickory_resolver::proto::rr::RData::SRV(srv) => Some(srv),
+            _ => None,
+        })
+        .min_by_key(|srv| srv.priority)
+        .map(|srv| (srv.target.to_utf8().trim_end_matches('.').to_string(), srv.port))
 }
 
 /// The status of the server the player joins as `host:port`, or `None` when it does not answer
@@ -250,6 +259,24 @@ mod tests {
         let closed_port = closed.local_addr().unwrap().port();
         drop(closed);
         assert_eq!(status_within("127.0.0.1", closed_port, Duration::from_secs(2)).await, None);
+    }
+
+    #[test]
+    fn the_srv_record_of_the_first_priority_names_where_to_connect() {
+        use hickory_resolver::proto::rr::rdata::SRV;
+        use hickory_resolver::proto::rr::{Name, RData, Record};
+
+        let name = Name::from_ascii("_minecraft._tcp.play.example.").unwrap();
+        let srv = |priority, port, target: &str| {
+            Record::from_rdata(
+                name.clone(),
+                60,
+                RData::SRV(SRV::new(priority, 0, port, Name::from_ascii(target).unwrap())),
+            )
+        };
+        let records = [srv(20, 25566, "backup.example."), srv(10, 25570, "mc.example.")];
+        assert_eq!(srv_target(&records), Some(("mc.example".to_string(), 25570)));
+        assert_eq!(srv_target(&[]), None);
     }
 
     #[tokio::test]

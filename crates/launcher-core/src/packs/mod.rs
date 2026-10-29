@@ -105,7 +105,7 @@ pub fn overrides_of<R: Read + Seek>(
     for prefix in prefixes {
         for i in 0..zip.len() {
             let entry = zip.by_index(i).map_err(|e| invalid(e.to_string()))?;
-            let name = entry.name().to_string();
+            let name = entry.name().map_err(|e| invalid(e.to_string()))?.into_owned();
             let Some(rest) = name.strip_prefix(prefix) else { continue };
             if entry.is_dir() || rest.is_empty() {
                 continue;

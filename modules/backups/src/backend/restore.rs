@@ -151,9 +151,10 @@ pub fn restore(archive: &Path, saves: &Path, world: &str) -> AppResult<()> {
         if entry.is_dir() {
             continue;
         }
-        let rel = safe_relative(entry.name())
+        let name = entry.name().map_err(|e| invalid(e.to_string()))?;
+        let rel = safe_relative(&name)
             .filter(|_| !entry.is_symlink())
-            .ok_or_else(|| invalid(format!("unsafe path in the backup: {:?}", entry.name())))?;
+            .ok_or_else(|| invalid(format!("unsafe path in the backup: {name:?}")))?;
         has_level |= rel == Path::new(LEVEL);
         entries.push((i, rel, entry.size()));
     }

@@ -189,11 +189,12 @@ pub fn extract_natives(jar: &Path, dir: &Path, exclude: &[String]) -> AppResult<
     let mut written = 0;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(zip_error)?;
-        if entry.is_dir() || exclude.iter().any(|prefix| entry.name().starts_with(prefix.as_str())) {
+        let name = entry.name().map_err(zip_error)?.into_owned();
+        if entry.is_dir() || exclude.iter().any(|prefix| name.starts_with(prefix.as_str())) {
             continue;
         }
         let Some(relative) = entry.enclosed_name() else {
-            tracing::warn!("Skipping unsafe entry {:?} in {}", entry.name(), jar.display());
+            tracing::warn!("Skipping unsafe entry {name:?} in {}", jar.display());
             continue;
         };
         let target = dir.join(relative);

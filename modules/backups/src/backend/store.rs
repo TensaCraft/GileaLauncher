@@ -499,7 +499,7 @@ mod tests {
         let dir = store.world_dir("my_build", "World");
         let mut zip = zip::ZipArchive::new(fs::File::open(dir.join(&made.zip_name)).unwrap()).unwrap();
         let mut names: Vec<String> =
-            (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().to_string()).collect();
+            (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().unwrap().into_owned()).collect();
         names.sort();
         assert_eq!(names, vec!["level.dat", "region/r.0.0.mca"]);
         let meta: serde_json::Value =
