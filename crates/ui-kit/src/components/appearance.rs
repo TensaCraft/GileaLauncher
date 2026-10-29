@@ -1,10 +1,10 @@
 //! The look's pickers: the UI font as tiles, each set in its own font, and the accent as round
 //! swatches with the player's own colour last.
 
-use launcher_shared::appearance::{ACCENT_PRESETS, UiFont, font_stacks, normalize_accent};
+use launcher_shared::appearance::{ACCENT_PRESETS, DEFAULT_ACCENT, UiFont, font_stacks, normalize_accent};
 use leptos::prelude::*;
 
-use super::{Icon, TextInput};
+use super::{Icon, IconAction, TextInput};
 use crate::i18n::use_i18n;
 
 /// The preset `accent` is (its id), or `None` for the player's own colour.
@@ -127,6 +127,14 @@ pub fn AccentSwatches(#[prop(into)] value: Signal<String>, on_pick: Callback<Str
                     invalid=Signal::derive(move || !focused.get() && accent_input(&typed.get()).is_none())
                 />
             </div>
+            // The way back to the launcher's own colour, while another one is on.
+            <Show when=move || value.get() != DEFAULT_ACCENT>
+                <IconAction
+                    icon="restart_alt"
+                    title=Signal::derive(move || i18n.t("appearance_accent_reset"))
+                    on_click=Callback::new(move |()| on_pick.run(DEFAULT_ACCENT.to_string()))
+                />
+            </Show>
         </div>
     }
 }
@@ -137,7 +145,7 @@ mod tests {
 
     #[test]
     fn the_chosen_preset_is_found_by_its_colour() {
-        assert_eq!(chosen_preset("#17c3a2"), Some("emerald"));
+        assert_eq!(chosen_preset("#17c3a2"), Some("default"));
         assert_eq!(chosen_preset("#9b6cf6"), Some("amethyst"));
         assert_eq!(chosen_preset("#123456"), None, "the player's own");
     }

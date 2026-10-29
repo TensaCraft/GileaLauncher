@@ -48,7 +48,7 @@ const fn preset(id: &'static str, label_key: &'static str, hex: &'static str) ->
 }
 
 pub const ACCENT_PRESETS: [AccentPreset; 8] = [
-    preset("emerald", "appearance_accent_emerald", DEFAULT_ACCENT),
+    preset("default", "appearance_accent_default", DEFAULT_ACCENT),
     preset("grass", "appearance_accent_grass", "#5bc236"),
     preset("sky", "appearance_accent_sky", "#3d9cf5"),
     preset("ice", "appearance_accent_ice", "#34cfe6"),
@@ -436,7 +436,7 @@ mod tests {
             assert_eq!(normalize_accent(p.hex).as_deref(), Some(p.hex), "{}", p.id);
             assert_eq!(p.label_key, format!("appearance_accent_{}", p.id));
         }
-        assert_eq!((ACCENT_PRESETS[0].id, ACCENT_PRESETS[0].hex), ("emerald", DEFAULT_ACCENT));
+        assert_eq!((ACCENT_PRESETS[0].id, ACCENT_PRESETS[0].hex), ("default", DEFAULT_ACCENT));
     }
 
     #[test]
