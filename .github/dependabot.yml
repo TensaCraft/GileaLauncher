@@ -1,0 +1,32 @@
+# Weekly updates of the Rust crates and the workflows' actions, each kind in one pull request so
+# CI checks them together. Security updates come at once, on their own (repository settings).
+# Subjects follow the commit conventions: `build(deps): …`, `ci(deps): …`.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      crates:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns:
+          - "*"
