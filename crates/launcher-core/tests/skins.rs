@@ -214,6 +214,29 @@ async fn a_texture_by_url_is_fetched_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_skin_at_a_link_is_fetched_and_its_model_guessed() {
+    let fake = known().await;
+    let dir = tempfile::tempdir().unwrap();
+    let svc = service(config(&fake, dir.path()));
+    let alex = svc.at_link(&fake.texture_url("alex")).await.unwrap();
+    assert_eq!(alex.png, normalised(&skin_png(5, true)));
+    assert!(alex.slim, "guessed from the arm");
+    assert!(!alex.official, "a link is the player's word, not Mojang's");
+    let steve = svc.at_link(&fake.texture_url("steve")).await.unwrap();
+    assert!(!steve.slim);
+    svc.at_link(&fake.texture_url("steve")).await.unwrap();
+    assert_eq!(fake.requests("/textures/steve").len(), 2, "a link is asked anew: its picture may change");
+
+    fake.add_texture("broken", b"<html>a page</html>".to_vec());
+    let page = svc.at_link(&fake.texture_url("broken")).await.unwrap_err();
+    assert_eq!(
+        (page.code, page.params.get(REASON).map(String::as_str)),
+        (ErrorCode::InvalidInput, Some(render::BAD_PNG))
+    );
+    assert!(svc.at_link(&fake.texture_url("missing")).await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn official_says_why_it_has_nothing() {
     let fake = known().await;
     fake.add_player(Known::new("cc33cc33cc33cc33cc33cc33cc33cc33", "Plain", None, false));

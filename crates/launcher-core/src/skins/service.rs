@@ -454,13 +454,9 @@ impl SkinService {
         }
     }
 
-    /// The skin a third-party host has at `url`, asked anew (its answer changes) and kept under
-    /// its hash.
-    async fn fetch_from_host(&self, url: &str) -> AppResult<Fetched> {
-        let host = Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
-        let hosts = self.cfg.endpoints.texture_hosts.clone();
-        let origin =
-            Origin::new(move |u| u.host_str() == Some(host.as_str()) || Self::is_texture_host(&hosts, u));
+    /// The skin at `url`, asked anew (its answer changes) and kept under its hash; its bytes
+    /// come from where `origin` allows.
+    async fn fetch_from_host(&self, url: &str, origin: Origin) -> AppResult<Fetched> {
         let temp = self.textures_dir().join(format!("fetched-{}.tmp", uuid::Uuid::new_v4().simple()));
         let task = DownloadTask::new(url, &temp).origin(origin).transient();
         let fetched = self.downloader.download_one(task, &|_| {}).await;
@@ -481,7 +477,12 @@ impl SkinService {
     async fn hosts_skin(&self, identifier: &str) -> Option<Fetched> {
         for template in &self.cfg.endpoints.skin_hosts {
             let url = template.replace("{id}", &encode_segment(identifier));
-            match self.fetch_from_host(&url).await {
+            let host =
+                Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+            let hosts = self.cfg.endpoints.texture_hosts.clone();
+            let origin =
+                Origin::new(move |u| u.host_str() == Some(host.as_str()) || Self::is_texture_host(&hosts, u));
+            match self.fetch_from_host(&url, origin).await {
                 Ok(found) => return Some(found),
                 Err(e) => tracing::debug!("No skin of {identifier} at {url}: {}", e.detail),
             }
@@ -564,6 +565,14 @@ impl SkinService {
     pub async fn texture_by_url(&self, url: &str, slim: bool) -> AppResult<SkinTexture> {
         let (_, png, hash) = self.fetch_texture(url).await?;
         Ok(SkinTexture { png, slim, official: true, hash })
+    }
+
+    /// The skin file at a web address the player gave (any host, wherever it redirects), its
+    /// model guessed; asked anew each time.
+    pub async fn at_link(&self, url: &str) -> AppResult<SkinTexture> {
+        let origin = Origin::new(|u| matches!(u.scheme(), "http" | "https"));
+        let (_, png, hash) = self.fetch_from_host(url, origin).await?;
+        Ok(SkinTexture { slim: render::guess_slim(&png), official: false, hash, png })
     }
 
     /// `player` wears the skin at `url` on the model `slim` (their own account said so): it is
