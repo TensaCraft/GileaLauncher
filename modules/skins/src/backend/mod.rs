@@ -1,5 +1,6 @@
 //! The skins module's backend: the skin library and the skins and capes of official profiles.
 
+pub mod library;
 pub mod png;
 
 use std::sync::Arc;
