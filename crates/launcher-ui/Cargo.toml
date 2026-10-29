@@ -5,12 +5,13 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["mod-modrinth", "mod-curseforge", "mod-backups", "mod-reports", "mod-sync"]
+default = ["mod-modrinth", "mod-curseforge", "mod-backups", "mod-reports", "mod-sync", "mod-skins"]
 mod-tensa = ["dep:module-tensa"]
 mod-modrinth = ["dep:module-modrinth"]
 mod-curseforge = ["dep:module-curseforge"]
 mod-backups = ["dep:module-backups"]
 mod-sync = ["dep:module-sync"]
+mod-skins = ["dep:module-skins"]
 mod-reports = ["dep:module-reports"]
 # Postponed until after the release: not in `--modules all`.
 mod-diagnostics = ["dep:module-diagnostics"]
@@ -32,5 +33,6 @@ module-modrinth = { workspace = true, features = ["ui"], optional = true }
 module-curseforge = { workspace = true, features = ["ui"], optional = true }
 module-backups = { workspace = true, features = ["ui"], optional = true }
 module-sync = { workspace = true, features = ["ui"], optional = true }
+module-skins = { workspace = true, features = ["ui"], optional = true }
 module-reports = { workspace = true, features = ["ui"], optional = true }
 module-diagnostics = { workspace = true, features = ["ui"], optional = true }

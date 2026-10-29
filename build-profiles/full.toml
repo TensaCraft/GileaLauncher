@@ -1,6 +1,6 @@
 [profile]
 name = "full"
-modules = ["tensa", "modrinth", "curseforge", "backups", "sync", "reports"]
+modules = ["tensa", "modrinth", "curseforge", "backups", "sync", "skins", "reports"]
 
 [branding]
 app_name = "GileaLauncher"

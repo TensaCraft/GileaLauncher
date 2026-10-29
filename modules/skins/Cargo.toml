@@ -1,0 +1,57 @@
+[package]
+name = "module-skins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+backend = [
+    "dep:launcher-core",
+    "dep:image",
+    "dep:sha2",
+    "dep:hex",
+    "dep:base64",
+    "dep:tokio",
+    "dep:tracing",
+    "dep:reqwest",
+    "dep:uuid",
+]
+ui = ["dep:ui-kit", "dep:leptos", "dep:js-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys"]
+
+[dependencies]
+launcher-shared.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+launcher-core = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true, features = ["multipart"] }
+uuid = { workspace = true, optional = true }
+ui-kit = { workspace = true, optional = true }
+leptos = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true, features = [
+    "Document",
+    "Element",
+    "Event",
+    "EventTarget",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "HtmlScriptElement",
+    "Window",
+] }
+
+[dev-dependencies]
+tempfile.workspace = true
+axum = { workspace = true, features = ["multipart"] }
+tokio = { workspace = true, features = ["net"] }
+
+[[test]]
+name = "api"
+required-features = ["backend"]

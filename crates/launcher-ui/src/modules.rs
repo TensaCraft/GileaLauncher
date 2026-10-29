@@ -119,6 +119,8 @@ pub fn ui_modules() -> Vec<Box<dyn UiModule>> {
     modules.push(module_backups::ui::ui_module());
     #[cfg(feature = "mod-sync")]
     modules.push(module_sync::ui::ui_module());
+    #[cfg(feature = "mod-skins")]
+    modules.push(module_skins::ui::ui_module());
     #[cfg(feature = "mod-reports")]
     modules.push(module_reports::ui::ui_module());
     #[cfg(feature = "mod-diagnostics")]

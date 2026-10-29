@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 pub const KNOWN_MODULES: &[&str] =
-    &["tensa", "modrinth", "curseforge", "backups", "sync", "reports", "diagnostics"];
+    &["tensa", "modrinth", "curseforge", "backups", "sync", "skins", "reports", "diagnostics"];
 /// Modules put off until after the release: `--modules all` leaves them out; named, they are
 /// built in (`--modules diagnostics`).
 pub const POSTPONED_MODULES: &[&str] = &["diagnostics"];
@@ -305,7 +305,10 @@ mod tests {
     #[test]
     fn standard_profile_features_and_env() {
         let spec = parse_profile(STANDARD).unwrap();
-        assert_eq!(spec.features_arg(), "mod-modrinth,mod-curseforge,mod-backups,mod-sync,mod-reports");
+        assert_eq!(
+            spec.features_arg(),
+            "mod-modrinth,mod-curseforge,mod-backups,mod-sync,mod-skins,mod-reports"
+        );
         assert!(spec.env.contains(&("LAUNCHER_PROFILE".into(), "standard".into())));
         let issues = spec.env.iter().find(|(k, _)| k == "LAUNCHER_ISSUES_URL").map(|(_, v)| v.as_str());
         assert!(issues.is_some_and(|url| url.starts_with("https://github.com/") && url.ends_with("/issues")));
