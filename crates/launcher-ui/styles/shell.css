@@ -577,9 +577,10 @@
 .skins-stage__none { color: var(--text-4); }
 .skins-stage__none .icon { font-size: 64px; }
 .skins-stage__caption { max-width: 100%; min-height: 18px; font-size: 13px; font-weight: 600; color: var(--text-2); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.skins-stage__tools { display: flex; gap: 18px; }
-.skins-stage__switch { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); }
-.skins-stage__switch .icon { font-size: 18px; }
+.skins-stage__tools { display: flex; flex-direction: column; gap: 2px; width: 100%; padding-top: 6px; border-top: 1px solid var(--line); }
+.skins-stage__switch { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 4px; font-size: 13px; color: var(--text-2); }
+.skins-stage__switch .grow { flex: 1; min-width: 0; }
+.skins-stage__switch .icon { font-size: 18px; color: var(--text-3); }
 .skins-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .skins-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .skins-tools__nick { flex: 1 1 auto; min-width: 160px; max-width: 360px; }
@@ -591,7 +592,7 @@
 .skins-card__thumb { width: 64px; height: 128px; image-rendering: pixelated; }
 .skins-card__name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .skins-card__tags { display: flex; flex-wrap: wrap; gap: 4px; min-height: 22px; }
-.skins-card__actions { display: flex; align-items: center; gap: 6px; }
+.skins-card__actions { display: flex; align-items: center; gap: 6px; margin-top: auto; }
 .skins-card__wear { flex: 1; min-width: 0; }
 .skins-card__more { display: inline-flex; }
 /* A cape's front (10×16 of its 64×32 texture), six pixels to one. */

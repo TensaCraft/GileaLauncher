@@ -44,6 +44,12 @@ pub fn previewed(hovered: Option<&str>, chosen: Option<&str>) -> Option<String> 
     hovered.or(chosen).map(str::to_string)
 }
 
+/// The skin the model switch under the figure acts on: the one previewed, else the one worn (the
+/// figure shows it then).
+pub fn model_target(preview: Option<String>, worn: Option<String>) -> Option<String> {
+    preview.or(worn)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +117,16 @@ mod tests {
         assert_eq!(previewed(Some("a"), Some("b")).as_deref(), Some("a"));
         assert_eq!(previewed(None, Some("b")).as_deref(), Some("b"));
         assert_eq!(previewed(None, None), None, "then the worn one");
+    }
+
+    #[test]
+    fn the_model_switch_acts_on_the_figure_s_skin() {
+        assert_eq!(model_target(Some("hovered".into()), Some("worn".into())).as_deref(), Some("hovered"));
+        assert_eq!(
+            model_target(None, Some("worn".into())).as_deref(),
+            Some("worn"),
+            "nothing picked: the worn one"
+        );
+        assert_eq!(model_target(None, None), None);
     }
 }

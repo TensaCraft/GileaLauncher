@@ -16,7 +16,7 @@ use ui_kit::{
 use super::capes::CapesTab;
 use super::land::{land_accounts, land_state, land_variant};
 use super::library::LibraryTab;
-use super::model::{active_cape, previewed, worn_as, worn_id};
+use super::model::{active_cape, model_target, previewed, worn_as, worn_id};
 use super::viewer::SkinStage;
 use crate::dto::{Account, AccountState, LibrarySkin, MESSAGE, SkinVariant, error_text};
 
@@ -177,7 +177,10 @@ pub fn SkinsPage() -> impl IntoView {
             // Kept as it is until the picture comes.
             None => shown.cloned().flatten().or_else(worn_picture),
         },
-        None => worn_picture(),
+        // The worn skin shows on the model its library card has: the switch below previews it.
+        None => worn_picture().map(|(data, slim)| {
+            (data, worn.get().and_then(|id| entry(&id)).map_or(slim, |e| e.variant == SkinVariant::Slim))
+        }),
     });
     let viewer_cape = Signal::derive(move || {
         current.with(|s| {
@@ -192,36 +195,55 @@ pub fn SkinsPage() -> impl IntoView {
     });
     let caption = move || match preview.get().and_then(|id| entry(&id)) {
         Some(e) => e.name,
-        None => match current.with(|s| s.as_ref().map(|s| (s.skin.is_some(), worn_id(s)))) {
-            Some((true, Some(id))) => entry(&id).map(|e| e.name).unwrap_or_default(),
-            Some((false, _)) => i18n.t("skins_default_skin"),
-            _ => String::new(),
-        },
+        // A Mojang default skin (or none) is named so; a library skin by its name.
+        None => {
+            match current.with(|s| s.as_ref().map(|s| (s.skin.as_ref().map(|k| k.default), worn_id(s)))) {
+                Some((Some(false), Some(id))) => entry(&id).map(|e| e.name).unwrap_or_default(),
+                Some((None | Some(true), _)) => i18n.t("skins_default_skin"),
+                _ => String::new(),
+            }
+        }
     };
-    // The previewed library skin's model, changed from the switch under the figure.
+    // The model of the skin the figure shows (the previewed one, else the worn one), changed from
+    // the switch under it; a worn skin then can be put on again on its new model.
+    let target = Memo::new(move |_| model_target(preview.get(), worn.get()).filter(|id| entry(id).is_some()));
     let slim = RwSignal::new(false);
     Effect::new(move |_| {
-        let model = preview.get().and_then(|id| entry(&id)).map(|e| e.variant == SkinVariant::Slim);
+        let model = target.get().and_then(|id| entry(&id)).map(|e| e.variant == SkinVariant::Slim);
         slim.set(model.unwrap_or(false));
-    });
-    let set_model = Callback::new(move |on: bool| {
-        let Some(id) = preview.get_untracked() else { return };
-        let variant = if on { SkinVariant::Slim } else { SkinVariant::Classic };
-        spawn_local(async move {
-            match super::api::set_variant(id, variant).await {
-                Ok(changed) => land_variant(library, changed),
-                Err(e) => toasts.show(Level::Error, i18n.text(&error_text(&e)), None),
-            }
-        });
     });
     let on_state = Callback::new(move |answer: AccountState| {
         land_state(state, account, latest, answer);
         let _ = cape_pick.try_set(None);
     });
+    let set_model = Callback::new(move |on: bool| {
+        let Some(id) = target.get_untracked() else { return };
+        let variant = if on { SkinVariant::Slim } else { SkinVariant::Classic };
+        // The worn skin changes on the account too: it stays worn, on its new model.
+        let wearing = worn.get_untracked().as_deref() == Some(id.as_str());
+        let profile = account.get_untracked();
+        spawn_local(async move {
+            match super::api::set_variant(id.clone(), variant).await {
+                Ok(changed) => land_variant(library, changed),
+                Err(e) => return toasts.show(Level::Error, i18n.text(&error_text(&e)), None),
+            }
+            if wearing {
+                match super::api::apply(profile.clone(), id).await {
+                    Ok(answer) => {
+                        let _ = on_state.try_run(answer);
+                        if let Some(host) = host {
+                            host.avatar_changed.run(profile);
+                        }
+                    }
+                    Err(e) => toasts.show(Level::Error, i18n.text(&error_text(&e)), None),
+                }
+            }
+        });
+    });
 
     let chips = vec![
-        ChipDef { id: "skins", icon: "checkroom", label: t("skins_tab_skins"), tone: TagTone::Vanilla },
-        ChipDef { id: "capes", icon: "flag", label: t("skins_tab_capes"), tone: TagTone::Quilt },
+        ChipDef { id: "skins", icon: "brand:skin", label: t("skins_tab_skins"), tone: TagTone::Vanilla },
+        ChipDef { id: "capes", icon: "brand:cape", label: t("skins_tab_capes"), tone: TagTone::Quilt },
     ];
     let note = move || match state.get() {
         Some(Err(e)) if !needs_sign_in(&e) => Some(view! {
@@ -271,27 +293,36 @@ pub fn SkinsPage() -> impl IntoView {
                 <aside class="skins-stage">
                     <SkinStage skin=viewer_skin cape=viewer_cape walking=walking flat=flat />
                     <div class="skins-stage__caption">{caption}</div>
+                    // Each option its own row, its switch at the right edge, as in the settings.
                     <div class="skins-stage__tools">
-                        <span class="skins-stage__switch" data-tip=t("skins_walk_tip") data-tip-side="top">
+                        <div class="skins-stage__switch">
                             <Icon name="directions_walk" outlined=true />
+                            <span class="grow">{move || i18n.t("skins_walk_tip")}</span>
                             <Switch checked=walking label=t("skins_walk_tip") />
-                        </span>
-                        <span class="skins-stage__switch" data-tip=t("skins_slim_tip") data-tip-side="top">
+                        </div>
+                        <div class="skins-stage__switch">
                             <Icon name="accessibility_new" outlined=true />
+                            <span class="grow">{move || i18n.t("skins_slim_tip")}</span>
                             <Switch
                                 checked=slim
                                 label=t("skins_slim_tip")
-                                disabled=Signal::derive(move || preview.get().is_none())
+                                disabled=Signal::derive(move || target.get().is_none())
                                 on_change=set_model
                             />
-                        </span>
+                        </div>
                     </div>
                 </aside>
                 <section class="skins-main">
                     {note}
                     {move || match tab.get() {
                         "capes" => view! {
-                            <CapesTab state=current account=account cape_pick=cape_pick on_state=on_state />
+                            <CapesTab
+                                state=current
+                                failed=Signal::derive(move || state.with(|s| matches!(s, Some(Err(_)))))
+                                account=account
+                                cape_pick=cape_pick
+                                on_state=on_state
+                            />
                         }
                         .into_any(),
                         _ => view! {
@@ -318,7 +349,7 @@ pub fn SkinsPage() -> impl IntoView {
             {move || match has_accounts.get() {
                 None => view! { <div class="skins-body"><Skeleton /></div> }.into_any(),
                 Some(false) => view! {
-                    <EmptyState icon="checkroom" title=t("skins_empty_title") desc=t("skins_empty_desc")>
+                    <EmptyState icon="brand:skin" title=t("skins_empty_title") desc=t("skins_empty_desc")>
                         <Button
                             variant=Variant::Primary
                             icon="manage_accounts"

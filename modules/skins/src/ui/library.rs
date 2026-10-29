@@ -187,7 +187,7 @@ pub fn LibraryTab(
         let (for_menu, for_more, for_wear) = (skin.clone(), skin.clone(), skin.clone());
         let more = NodeRef::<leptos::html::Span>::new();
         let is_worn = move || worn.with(|w| is_worn(w.as_ref(), &for_worn));
-        let is_worn_tag = is_worn.clone();
+        let is_worn_label = is_worn.clone();
         let is_worn_button = is_worn.clone();
         view! {
             <div
@@ -208,7 +208,6 @@ pub fn LibraryTab(
                 <div class="skins-card__name" data-tip=skin.name.clone() data-tip-side="top">{skin.name.clone()}</div>
                 <div class="skins-card__tags">
                     <Tag tone=TagTone::Neutral>{model_name(skin.variant)}</Tag>
-                    {move || is_worn_tag().then(|| view! { <Tag tone=TagTone::Vanilla>{move || i18n.t("skins_worn")}</Tag> })}
                 </div>
                 <div class="skins-card__actions">
                     <Button
@@ -218,7 +217,9 @@ pub fn LibraryTab(
                         disabled=Signal::derive(move || is_worn_button() || !can_wear.get() || applying.get().is_some())
                         on_click=move |_| wear(for_wear.clone())
                     >
-                        {move || i18n.t("skins_wear")}
+                        // The worn skin says so on its button: every card keeps its rows, and its buttons
+                        // line up with the neighbours'.
+                        {move || i18n.t(if is_worn_label() { "skins_worn" } else { "skins_wear" })}
                     </Button>
                     <span node_ref=more class="skins-card__more">
                         <IconAction
@@ -241,7 +242,7 @@ pub fn LibraryTab(
         match library.get() {
         None => view! { <div class="skins-grid"><Skeleton /></div> }.into_any(),
         Some(list) if list.is_empty() => view! {
-            <EmptyState icon="checkroom" title=t("skins_library_empty_title") desc=t("skins_library_empty_desc") />
+            <EmptyState icon="brand:skin" title=t("skins_library_empty_title") desc=t("skins_library_empty_desc") />
         }
         .into_any(),
         Some(list) => view! { <div class="skins-grid">{list.into_iter().map(card).collect_view()}</div> }.into_any(),

@@ -4,7 +4,7 @@ use launcher_shared::Level;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{Button, EmptyState, Icon, Skeleton, Tag, TagTone, Variant, use_toasts};
+use ui_kit::{Button, EmptyState, Icon, Skeleton, Variant, use_toasts};
 
 use super::api;
 use crate::dto::{AccountState, Cape, error_text};
@@ -12,6 +12,9 @@ use crate::dto::{AccountState, Cape, error_text};
 #[component]
 pub fn CapesTab(
     #[prop(into)] state: Signal<Option<AccountState>>,
+    /// The account's state could not be read: the page's note says why, no loading rows stay.
+    #[prop(into)]
+    failed: Signal<bool>,
     account: RwSignal<String>,
     /// The cape the viewer shows (`Some(None)`: none); `None`: the one worn.
     cape_pick: RwSignal<Option<Option<String>>>,
@@ -66,9 +69,6 @@ pub fn CapesTab(
                     }}
                 </div>
                 <div class="skins-card__name" data-tip=tip data-tip-side="top">{shown_alias}</div>
-                <div class="skins-card__tags">
-                    {active.then(|| view! { <Tag tone=TagTone::Vanilla>{move || i18n.t("skins_active")}</Tag> })}
-                </div>
                 <div class="skins-card__actions">
                     <Button
                         variant=Variant::Primary
@@ -77,16 +77,18 @@ pub fn CapesTab(
                         disabled=Signal::derive(move || active || busy.get().is_some())
                         on_click=move |_| wear(for_wear.clone(), alias.clone())
                     >
-                        {move || i18n.t("skins_wear")}
+                        // The worn cape says so on its button: every card keeps its rows.
+                        {move || i18n.t(if active { "skins_active" } else { "skins_wear" })}
                     </Button>
                 </div>
             </div>
         }
     };
     move || match state.get() {
+        None if failed.get() => ().into_any(),
         None => view! { <div class="skins-grid"><Skeleton /></div> }.into_any(),
         Some(state) if state.capes.is_empty() => view! {
-            <EmptyState icon="flag" title=Signal::derive(move || i18n.t("skins_capes_empty")) />
+            <EmptyState icon="brand:cape" title=Signal::derive(move || i18n.t("skins_capes_empty")) />
         }
         .into_any(),
         Some(state) => {

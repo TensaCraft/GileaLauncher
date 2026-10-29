@@ -208,7 +208,7 @@ pub fn SkinStage(
             ></canvas>
             {move || failed.get().then(|| match flat.get() {
                 Some(src) => view! { <img class="skins-stage__flat" src=src alt="" /> }.into_any(),
-                None => view! { <div class="skins-stage__none"><Icon name="checkroom" outlined=true /></div> }.into_any(),
+                None => view! { <div class="skins-stage__none"><Icon name="brand:skin" /></div> }.into_any(),
             })}
         </div>
     }

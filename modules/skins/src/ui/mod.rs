@@ -30,7 +30,7 @@ impl UiModule for SkinsUi {
         vec![ModulePage {
             module: crate::ID,
             path: "/skins",
-            icon: "checkroom",
+            icon: "brand:skin",
             label: "skins_nav",
             view: || view! { <page::SkinsPage /> }.into_any(),
         }]
