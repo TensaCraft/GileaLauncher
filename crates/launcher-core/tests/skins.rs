@@ -234,6 +234,27 @@ async fn a_skin_at_a_link_is_fetched_and_its_model_guessed() {
         (ErrorCode::InvalidInput, Some(render::BAD_PNG))
     );
     assert!(svc.at_link(&fake.texture_url("missing")).await.is_err());
+
+    fake.add_texture("huge", vec![0; 4 * render::MAX_BYTES]);
+    let huge = svc.at_link(&fake.texture_url("huge")).await.unwrap_err();
+    assert_ne!(
+        huge.params.get(REASON).map(String::as_str),
+        Some(render::BAD_PNG),
+        "cut off while it comes, never written whole and read: {huge:?}"
+    );
+    let left: Vec<_> =
+        walkdir(dir.path()).into_iter().filter(|p| p.to_string_lossy().ends_with(".tmp")).collect();
+    assert!(left.is_empty(), "nothing is left behind: {left:?}");
+}
+
+/// Every file below `dir`.
+fn walkdir(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.is_dir() { out.extend(walkdir(&path)) } else { out.push(path) }
+    }
+    out
 }
 
 #[tokio::test(flavor = "multi_thread")]

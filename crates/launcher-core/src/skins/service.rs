@@ -438,7 +438,7 @@ impl SkinService {
         // An unreadable file is no texture: fetched anew.
         let _ = fs::remove_file(&dest);
         let origin = Origin::new(move |u| Self::is_texture_host(&hosts, u));
-        let task = DownloadTask::new(&url, &dest).origin(origin);
+        let task = DownloadTask::new(&url, &dest).origin(origin).at_most(render::MAX_BYTES as u64);
         self.downloader.download_one(task, &|_| {}).await?;
         let bytes = fs::read(&dest).map_err(|e| io_error(&dest, e))?;
         match render::normalise(&bytes) {
@@ -458,7 +458,8 @@ impl SkinService {
     /// come from where `origin` allows.
     async fn fetch_from_host(&self, url: &str, origin: Origin) -> AppResult<Fetched> {
         let temp = self.textures_dir().join(format!("fetched-{}.tmp", uuid::Uuid::new_v4().simple()));
-        let task = DownloadTask::new(url, &temp).origin(origin).transient();
+        // A skin is a small picture: anything larger stops as it comes.
+        let task = DownloadTask::new(url, &temp).origin(origin).at_most(render::MAX_BYTES as u64).transient();
         let fetched = self.downloader.download_one(task, &|_| {}).await;
         let bytes = fetched.and_then(|()| fs::read(&temp).map_err(|e| io_error(&temp, e)));
         let _ = fs::remove_file(&temp);

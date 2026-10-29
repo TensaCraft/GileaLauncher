@@ -146,6 +146,29 @@ async fn hash_mismatch_is_a_failure_without_a_file() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_file_over_its_cap_is_cut_off_without_a_file() {
+    let server = fake_files::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (fits, small, large) = (content(900, 1), content(5_000, 2), content(200 * 1024, 3));
+    for (name, body) in [("fits.png", &fits), ("small.png", &small), ("large.png", &large)] {
+        server.put(name, Served { body: body.clone(), ..Served::default() });
+    }
+    let capped =
+        |name: &str, cap: u64| DownloadTask::new(server.url(name), dir.path().join(name)).at_most(cap);
+    let report =
+        run(vec![capped("fits.png", 1_000), capped("small.png", 1_000), capped("large.png", 64 * 1024)])
+            .await
+            .unwrap();
+    assert_eq!(report.downloaded, 1);
+    assert_eq!(std::fs::read(dir.path().join("fits.png")).unwrap(), fits, "a file under its cap lands");
+    assert_eq!(report.failed.len(), 2, "{:?}", report.failed);
+    assert!(!dir.path().join("small.png").exists(), "cut off in memory");
+    assert!(!dir.path().join("large.png").exists(), "cut off while streamed");
+    assert!(leftovers(dir.path()).is_empty());
+    assert_eq!(server.seen("large.png").len(), 1, "too large is final, not retried");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn server_errors_are_retried() {
     let server = fake_files::start().await;
     let dir = tempfile::tempdir().unwrap();

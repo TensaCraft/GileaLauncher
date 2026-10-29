@@ -140,6 +140,8 @@ pub struct DownloadTask {
     pub url: String,
     pub dest: PathBuf,
     pub size: Option<u64>,
+    /// The most bytes taken when the size is not known: past it the download stops for good.
+    pub max_size: Option<u64>,
     pub hash: Option<ExpectedHash>,
     /// Where the bytes may come from; any host the downloader allows when `None`.
     pub origin: Option<Origin>,
@@ -156,6 +158,7 @@ impl DownloadTask {
             url: url.into(),
             dest: dest.into(),
             size: None,
+            max_size: None,
             hash: None,
             origin: None,
             credential: None,
@@ -193,6 +196,18 @@ impl DownloadTask {
     pub fn size(mut self, size: u64) -> Self {
         self.size = Some(size);
         self
+    }
+
+    /// A file of unknown size that may take at most `bytes` (a skin at a player's link): a larger
+    /// one is cut off as it comes, not written whole and refused after.
+    pub fn at_most(mut self, bytes: u64) -> Self {
+        self.max_size = Some(bytes);
+        self
+    }
+
+    /// The most bytes the body may have: its size when known, else its cap, else `fallback`.
+    fn limit(&self, fallback: u64) -> u64 {
+        self.size.or(self.max_size).unwrap_or(fallback)
     }
 
     pub fn hash(mut self, hash: ExpectedHash) -> Self {
@@ -879,7 +894,7 @@ impl Downloader {
         }
         let identity = identity(task);
         let partial = Partial::new(&task.dest, &identity);
-        if task.size.is_some_and(|size| size <= self.cfg.in_memory_up_to) {
+        if task.size.or(task.max_size).is_some_and(|size| size <= self.cfg.in_memory_up_to) {
             self.fetch_whole(url, task, &partial, counters, progress, reported).await
         } else {
             self.stream(url, task, &identity, &partial, counters, progress, reported).await
@@ -907,7 +922,7 @@ impl Downloader {
         if !status.is_success() {
             return Err(status_failure(&response));
         }
-        let limit = task.size.unwrap_or(self.cfg.in_memory_up_to);
+        let limit = task.limit(self.cfg.in_memory_up_to);
         let mut body = Vec::with_capacity(usize::try_from(limit).unwrap_or(0));
         let mut hasher = task.hash.as_ref().map(|h| Hasher::new(h.kind));
         counters.set_file_bytes(reported, 0);
@@ -980,7 +995,7 @@ impl Downloader {
             return Err(strayed);
         }
         let status = response.status();
-        let limit = task.size.unwrap_or(self.cfg.max_size);
+        let limit = task.limit(self.cfg.max_size);
         let (file, mut written) = match (status, resume) {
             (StatusCode::PARTIAL_CONTENT, Some((offset, validator)))
                 if range_matches(response.headers(), offset, task.size, limit)
