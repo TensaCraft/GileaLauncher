@@ -898,6 +898,8 @@
   "setup_step_cards_desc": "Де на картках збірок стоїть кнопка запуску.",
   "setup_step_sidebar": "Бічна панель",
   "setup_step_sidebar_desc": "Як виглядає меню ліворуч.",
+  "setup_step_look": "Вигляд",
+  "setup_step_look_desc": "Шрифт і колір лаунчера: видно одразу.",
   "setup_step_game": "Гра",
   "setup_step_game_desc": "Скільки пам'яті отримує Minecraft і що робить лаунчер, коли гра запустилася.",
   "setup_step_sound": "Звуки й оновлення",

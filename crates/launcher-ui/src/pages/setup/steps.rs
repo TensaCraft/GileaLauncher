@@ -1,10 +1,14 @@
 //! The wizard's steps after the folder: one question each, the looks shown with pictures.
 
+use launcher_shared::appearance::{ACCENT_PRESETS, UiFont};
 use launcher_shared::{CardPlay, ClickSound, GameStartAction, MemoryInfo, SettingUpdate};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{ChoiceCards, ChoiceOption, Icon, Select, SelectOption, SettingRow, Switch, ipc, sound};
+use ui_kit::{
+    AccentSwatches, ChoiceCards, ChoiceOption, FontTiles, Icon, Select, SelectOption, SettingRow, Switch,
+    ipc, sound,
+};
 
 use super::storage::StorageStep;
 use super::{Step, picture, use_wizard};
@@ -20,6 +24,7 @@ pub fn view(step: Step) -> AnyView {
         Step::Home => view! { <HomeStep /> }.into_any(),
         Step::Cards => view! { <CardsStep /> }.into_any(),
         Step::Sidebar => view! { <SidebarStep /> }.into_any(),
+        Step::Look => view! { <LookStep /> }.into_any(),
         Step::Game => view! { <GameStep /> }.into_any(),
         Step::Sound => view! { <SoundStep /> }.into_any(),
         Step::Done => view! { <DoneStep /> }.into_any(),
@@ -154,6 +159,39 @@ fn SidebarStep() -> impl IntoView {
     let on_change =
         Callback::new(move |v: String| wizard.choose(SettingUpdate::CompactSidebar(v == "compact")));
     view! { <ChoiceCards options=options label=Signal::derive(move || i18n.t("setup_step_sidebar")) value=compact on_change=on_change /> }
+}
+
+/// The font and the accent: each choice is saved at once, so the wizard itself shows it.
+#[component]
+fn LookStep() -> impl IntoView {
+    let store = use_store();
+    let i18n = use_i18n();
+    let wizard = use_wizard();
+    let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
+    view! {
+        <div class="wizard-look">
+            <SettingRow title=t("appearance_font") desc=t("appearance_font_desc") stacked=true>
+                <FontTiles
+                    value=Signal::derive(move || store.settings.with(|s| s.ui_font))
+                    on_pick=Callback::new(move |f| wizard.choose(SettingUpdate::UiFont(f)))
+                />
+            </SettingRow>
+            <SettingRow title=t("appearance_accent") desc=t("appearance_accent_desc") stacked=true>
+                <AccentSwatches
+                    value=Signal::derive(move || store.settings.with(|s| s.accent.clone()))
+                    on_pick=Callback::new(move |c| wizard.choose(SettingUpdate::Accent(c)))
+                />
+            </SettingRow>
+        </div>
+    }
+}
+
+/// The accent as the summary names it: its preset's name, or the colour itself.
+fn accent_name(i18n: ui_kit::i18n::I18nCtx, accent: &str) -> String {
+    ACCENT_PRESETS
+        .iter()
+        .find(|p| p.hex == accent)
+        .map_or_else(|| accent.to_string(), |p| i18n.t(p.label_key))
 }
 
 #[component]
@@ -327,6 +365,8 @@ fn DoneStep() -> impl IntoView {
                 i18n.t("setup_step_sidebar"),
                 i18n.t(if s.compact_sidebar { "setup_sidebar_compact" } else { "setup_sidebar_full" }),
             ),
+            (Step::Look, "text_fields", i18n.t("appearance_font"), i18n.t(UiFont::label_key(s.ui_font))),
+            (Step::Look, "palette", i18n.t("appearance_accent"), accent_name(i18n, &s.accent)),
             (Step::Game, "memory", i18n.t("default_max_ram_label"), memory),
             (Step::Game, "sports_esports", i18n.t("on_game_start"), i18n.t(start)),
             (Step::Sound, "volume_up", i18n.t("ui_click_sound_enabled"), sounds),

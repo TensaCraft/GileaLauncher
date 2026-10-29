@@ -23,18 +23,20 @@ pub enum Step {
     Home,
     Cards,
     Sidebar,
+    Look,
     Game,
     Sound,
     Done,
 }
 
 impl Step {
-    pub const ALL: [Step; 8] = [
+    pub const ALL: [Step; 9] = [
         Step::Welcome,
         Step::Storage,
         Step::Home,
         Step::Cards,
         Step::Sidebar,
+        Step::Look,
         Step::Game,
         Step::Sound,
         Step::Done,
@@ -59,6 +61,7 @@ impl Step {
             Step::Home => "home",
             Step::Cards => "play_circle",
             Step::Sidebar => "view_sidebar",
+            Step::Look => "palette",
             Step::Game => "sports_esports",
             Step::Sound => "volume_up",
             Step::Done => "check_circle",
@@ -73,6 +76,7 @@ impl Step {
             Step::Home => "setup_step_home",
             Step::Cards => "setup_step_cards",
             Step::Sidebar => "setup_step_sidebar",
+            Step::Look => "setup_step_look",
             Step::Game => "setup_step_game",
             Step::Sound => "setup_step_sound",
             Step::Done => "setup_step_done",
@@ -87,6 +91,7 @@ impl Step {
             Step::Home => "setup_step_home_desc",
             Step::Cards => "setup_step_cards_desc",
             Step::Sidebar => "setup_step_sidebar_desc",
+            Step::Look => "setup_step_look_desc",
             Step::Game => "setup_step_game_desc",
             Step::Sound => "setup_step_sound_desc",
             Step::Done => "setup_step_done_desc",
@@ -375,6 +380,10 @@ mod tests {
         assert_eq!(Step::Done.next(), None);
         assert_eq!(Step::Welcome.prev(), None);
         assert_eq!(Step::Done.prev(), Some(Step::Sound));
+        // The look is chosen right after the sidebar, and shows at once.
+        assert_eq!(Step::Sidebar.next(), Some(Step::Look));
+        assert_eq!(Step::Look.next(), Some(Step::Game));
+        assert_eq!((Step::Look.key(), Step::Look.icon()), ("setup_step_look", "palette"));
         let keys: Vec<_> = Step::ALL.iter().map(|s| s.key()).collect();
         assert!(keys.iter().all(|k| k.starts_with("setup_step_")), "{keys:?}");
     }

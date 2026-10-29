@@ -898,6 +898,8 @@
   "setup_step_cards_desc": "Where build cards have their Play button.",
   "setup_step_sidebar": "Sidebar",
   "setup_step_sidebar_desc": "How the menu on the left looks.",
+  "setup_step_look": "Appearance",
+  "setup_step_look_desc": "The launcher's font and colour: seen at once.",
   "setup_step_game": "Game",
   "setup_step_game_desc": "How much memory Minecraft gets and what the launcher does once the game runs.",
   "setup_step_sound": "Sounds and updates",
