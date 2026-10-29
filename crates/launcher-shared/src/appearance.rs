@@ -183,6 +183,10 @@ pub fn palette(accent: &str) -> Vec<(&'static str, String)> {
     let hi = to_rgb(Hsl { h: a.h, s: a.s * 0.914, l: (a.l + 0.135).min(a.l.max(0.85)) });
     let lo = to_rgb(Hsl { h: a.h, s: (a.s * 1.023).min(1.0), l: (a.l - 0.1215).max(a.l.min(0.12)) });
     let light = to_rgb(Hsl { h: a.h + 1.9, s: a.s * 0.824, l: 0.686 });
+    // The primary button's gradient, and its top when hovered.
+    let top = to_rgb(Hsl { h: a.h, s: (a.s * 0.92).min(1.0), l: (a.l + 0.059).min(a.l.max(0.9)) });
+    let bottom = to_rgb(Hsl { h: a.h, s: (a.s * 1.025).min(1.0), l: (a.l - 0.0375).max(0.0) });
+    let top_hover = to_rgb(Hsl { h: a.h, s: (a.s * 0.96).min(1.0), l: (a.l + 0.12).min(a.l.max(0.9)) });
     let shift = if a.s < GREY && a.s < base.s { 0.0 } else { a.h - base.h };
     let colour = if a.s < GREY { a.s / GREY } else { 1.0 };
 
@@ -195,6 +199,12 @@ pub fn palette(accent: &str) -> Vec<(&'static str, String)> {
         ("--accent-hi-rgb", triplet(hi)),
         ("--accent-light-rgb", triplet(light)),
         ("--ring", format!("0 0 0 3px rgba({}, 0.18)", triplet(rgb))),
+        ("--primary-top", hex(top)),
+        ("--primary-bottom", hex(bottom)),
+        ("--primary-top-hover", hex(top_hover)),
+        // The hue and the share of colour the design's dark tints take: `hsl(var(--tint-h) …)`.
+        ("--tint-h", format!("{:.1}", (base.h + shift).rem_euclid(360.0))),
+        ("--tint-s", if colour >= 1.0 { "1".to_string() } else { format!("{colour:.2}") }),
     ];
     for (name, today, alpha) in NEUTRALS {
         let n = to_hsl(today);
@@ -210,13 +220,17 @@ pub fn palette(accent: &str) -> Vec<(&'static str, String)> {
     for (name, alpha) in LINES {
         vars.push((name, format!("rgba({}, {alpha})", triplet(light))));
     }
-    let filter = match (shift.abs() < 1.0, colour < 1.0) {
-        (true, false) => "none".to_string(),
-        (true, true) => format!("saturate({colour:.2})"),
-        (false, false) => format!("hue-rotate({shift:.0}deg)"),
-        (false, true) => format!("hue-rotate({shift:.0}deg) saturate({colour:.2})"),
-    };
-    vars.push(("--bg-filter", filter));
+    // The picture keeps its own colours for the default; any other accent greys it and lays the
+    // accent over it in the `color` blend mode (hue and saturation from the accent, light from
+    // the picture), which keeps the hue exact where `hue-rotate` drifts.
+    if shift.abs() < 1.0 && colour >= 1.0 {
+        vars.push(("--bg-filter", "none".to_string()));
+        vars.push(("--bg-tint", "transparent".to_string()));
+    } else {
+        let saturation = (a.s * 85.0).min(75.0) * colour;
+        vars.push(("--bg-filter", "grayscale(1)".to_string()));
+        vars.push(("--bg-tint", format!("hsl({:.0} {saturation:.0}% 50%)", a.h)));
+    }
     vars
 }
 
@@ -245,6 +259,11 @@ mod tests {
         let inner = value.trim_start_matches("rgba(").trim_end_matches(')');
         let parts: Vec<u8> = inner.split(',').take(3).map(|p| p.trim().parse().unwrap()).collect();
         (parts[0], parts[1], parts[2])
+    }
+
+    /// The hue of an `hsl(H S% L%)` value.
+    fn hsl_hue(value: &str) -> f64 {
+        value.trim_start_matches("hsl(").split(' ').next().unwrap().parse().unwrap()
     }
 
     fn close(value: &str, want: &str) {
@@ -277,9 +296,13 @@ mod tests {
         close_rgba(&p["--s-input"], (7, 14, 12, 0.72));
         close_rgba(&p["--s-pop"], (12, 22, 20, 0.97));
         close_rgba(&p["--line-ctl"], (123, 227, 210, 0.26));
+        close(&p["--primary-top"], "#22d6b2");
+        close(&p["--primary-bottom"], "#13b494");
+        close(&p["--primary-top-hover"], "#34e3c0");
+        assert_eq!((p["--tint-h"].as_str(), p["--tint-s"].as_str()), ("168.5", "1"));
         assert_eq!(p["--accent-rgb"], "23, 195, 162");
         assert_eq!(p["--ring"], "0 0 0 3px rgba(23, 195, 162, 0.18)");
-        assert_eq!(p["--bg-filter"], "none");
+        assert_eq!((p["--bg-filter"].as_str(), p["--bg-tint"].as_str()), ("none", "transparent"));
     }
 
     #[test]
@@ -290,7 +313,8 @@ mod tests {
         let today = to_hsl((11, 20, 18));
         assert!((app.h - accent.h).abs() < 4.0, "{} vs {}", app.h, accent.h);
         assert!((app.l - today.l).abs() < 0.01);
-        assert!(p["--bg-filter"].starts_with("hue-rotate("), "{}", p["--bg-filter"]);
+        assert_eq!(p["--bg-filter"], "grayscale(1)");
+        assert_eq!(hsl_hue(&p["--bg-tint"]).round(), accent.h.round(), "{}", p["--bg-tint"]);
     }
 
     #[test]
@@ -298,7 +322,9 @@ mod tests {
         let p = map(palette("#c0c0c0"));
         assert!(to_hsl(rgb_of(&p["--s-app"])).s < 0.05);
         assert!(to_hsl(rgb_of(&p["--text-2"])).s < 0.05);
-        assert!(p["--bg-filter"].contains("saturate("), "{}", p["--bg-filter"]);
+        assert_eq!(p["--tint-s"], "0.00");
+        assert_eq!(p["--bg-filter"], "grayscale(1)");
+        assert!(p["--bg-tint"].contains(" 0% "), "{}", p["--bg-tint"]);
     }
 
     #[test]
@@ -309,6 +335,8 @@ mod tests {
                 let valid = value.starts_with('#') && parse_hex(value).is_some()
                     || value.starts_with("rgba(")
                     || value.contains(", ")
+                    || name.starts_with("--tint-") && value.parse::<f64>().is_ok()
+                    || name.ends_with("tint") && (value.starts_with("hsl(") || value == "transparent")
                     || name.ends_with("filter")
                     || name.ends_with("ring");
                 assert!(valid, "{accent}: {name} = {value}");

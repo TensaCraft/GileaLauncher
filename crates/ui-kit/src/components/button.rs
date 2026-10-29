@@ -223,7 +223,7 @@ mod tests {
     #[test]
     fn controls_in_a_row_show_one_visible_edge() {
         let tokens = include_str!("../../styles/tokens.css");
-        assert!(tokens.contains("--line-ctl: rgba(123, 227, 210, 0.26);"));
+        assert!(tokens.contains("--line-ctl: rgba(var(--accent-light-rgb), 0.26);"));
         let css = include_str!("../../styles/components.css");
         for selector in [".btn--secondary", ".btn--ghost", ".action", ".control", ".seg"] {
             assert!(rule(css, selector).contains("var(--line-ctl)"), "{selector}");

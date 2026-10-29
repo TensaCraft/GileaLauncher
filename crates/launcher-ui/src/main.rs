@@ -1,4 +1,5 @@
 mod app;
+mod appearance;
 mod builds;
 mod fold;
 mod hints;

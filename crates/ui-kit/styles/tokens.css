@@ -3,6 +3,17 @@
   --primary-hi: #3fe0c0;
   --primary-lo: #0f8d77;
   --primary-light: #7be3d2;
+  /* The accent's three tints as r, g, b: rgba(var(--accent-rgb), a). */
+  --accent-rgb: 23, 195, 162;
+  --accent-hi-rgb: 63, 224, 192;
+  --accent-light-rgb: 123, 227, 210;
+  /* The primary button's gradient, and its top when hovered. */
+  --primary-top: #22d6b2;
+  --primary-bottom: #13b494;
+  --primary-top-hover: #34e3c0;
+  /* The hue and the share of colour of the design's dark tints: hsl(var(--tint-h) …). */
+  --tint-h: 168.5;
+  --tint-s: 1;
   --ok: #45c27e;
   --danger: #f0524a;
   --danger-text: #ff8c85;
@@ -21,11 +32,11 @@
   --s-input: rgba(7, 14, 12, 0.72);
   --s-pop: rgba(12, 22, 20, 0.97);
 
-  --line: rgba(123, 227, 210, 0.09);
-  --line-2: rgba(123, 227, 210, 0.16);
-  --line-3: rgba(123, 227, 210, 0.32);
+  --line: rgba(var(--accent-light-rgb), 0.09);
+  --line-2: rgba(var(--accent-light-rgb), 0.16);
+  --line-3: rgba(var(--accent-light-rgb), 0.32);
   /* The edge of every control that sits in a row (buttons, actions, fields, segments). */
-  --line-ctl: rgba(123, 227, 210, 0.26);
+  --line-ctl: rgba(var(--accent-light-rgb), 0.26);
 
   --r-xs: 3px;
   --r-sm: 6px;
@@ -41,9 +52,12 @@
   --f-head: "Exo 2", "Inter", sans-serif;
   --f-mono: "JetBrains Mono", Consolas, monospace;
 
-  --ring: 0 0 0 3px rgba(23, 195, 162, 0.18);
+  --ring: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
   --cut: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
   --shadow-pop: 0 18px 40px rgba(0, 0, 0, 0.55);
+  /* The background picture follows the accent: greyed by the filter, coloured by the tint over it. */
+  --bg-filter: none;
+  --bg-tint: transparent;
   --dur-fast: 120ms;
   --dur: 180ms;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);

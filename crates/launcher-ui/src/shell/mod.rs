@@ -61,6 +61,7 @@ pub fn use_url_opener() -> UrlOpener {
 #[component]
 pub fn Shell(children: Children) -> impl IntoView {
     let store = use_store();
+    crate::appearance::follow_settings(store);
     let i18n = use_i18n();
     let toasts = use_toasts();
     let location = use_location();

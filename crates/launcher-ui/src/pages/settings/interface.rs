@@ -6,7 +6,8 @@ use launcher_shared::{
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    Button, Field, IconAction, Section, Select, SelectOption, SettingRow, Switch, TextInput, Variant, sound,
+    AccentSwatches, Button, Field, FontTiles, IconAction, Section, Select, SelectOption, SettingRow, Switch,
+    TextInput, Variant, sound,
 };
 
 use super::mirror_bool;
@@ -107,6 +108,18 @@ pub fn InterfaceSection() -> impl IntoView {
 
     view! {
         <Section icon="dashboard" title=t("interface") desc=t("interface_desc")>
+            <SettingRow title=t("appearance_font") desc=t("appearance_font_desc") stacked=true>
+                <FontTiles
+                    value=Signal::derive(move || store.settings.with(|s| s.ui_font))
+                    on_pick=Callback::new(move |f| writer.apply(SettingUpdate::UiFont(f)))
+                />
+            </SettingRow>
+            <SettingRow title=t("appearance_accent") desc=t("appearance_accent_desc") stacked=true>
+                <AccentSwatches
+                    value=Signal::derive(move || store.settings.with(|s| s.accent.clone()))
+                    on_pick=Callback::new(move |c| writer.apply(SettingUpdate::Accent(c)))
+                />
+            </SettingRow>
             <SettingRow title=t("compact_sidebar") desc=t("compact_sidebar_desc")>
                 <Switch checked=compact on_change=Callback::new(move |v| writer.apply(SettingUpdate::CompactSidebar(v))) />
             </SettingRow>
