@@ -138,7 +138,23 @@ pub async fn build_change_component(
     loader_version: Option<String>,
 ) -> AppResult<BuildSettingsDto> {
     let core = state.core.clone();
-    let result = core.builds.change_component(&key, loader, &mc, loader_version.as_deref()).await;
+    let running = || core.launcher.is_running(&key);
+    let result = core.builds.change_component(&key, loader, &mc, loader_version.as_deref(), running).await;
+    announce_builds(&app, &core);
+    result
+}
+
+#[tauri::command]
+pub async fn build_set_loader(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    key: String,
+    loader: LoaderKind,
+    loader_version: Option<String>,
+) -> AppResult<BuildSettingsDto> {
+    let core = state.core.clone();
+    let running = || core.launcher.is_running(&key);
+    let result = core.builds.set_loader(&key, loader, loader_version.as_deref(), running).await;
     announce_builds(&app, &core);
     result
 }

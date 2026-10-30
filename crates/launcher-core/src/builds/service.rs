@@ -419,16 +419,47 @@ impl BuildService {
         self.settings(key)
     }
 
+    /// The Minecraft version `build` runs: its own, else the one its component names.
+    fn minecraft_of(&self, build: &Build) -> AppResult<String> {
+        let own = build.version.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
+        let of_component = || {
+            let id = component_id(build).filter(|id| validate_component_id(id).is_ok())?;
+            let json = read_version_json(self.versions.minecraft_dir(), id).ok()?;
+            classify(id, &json).1
+        };
+        own.or_else(of_component).ok_or_else(|| {
+            AppError::new(ErrorCode::InvalidInput, format!("{} names no Minecraft version", build.name))
+                .with_param("version", &build.name)
+        })
+    }
+
+    /// Puts mod loader `kind` (its build `loader_version`) on build `key` for the build's own
+    /// Minecraft version, or takes the build back to vanilla (`LoaderKind::Minecraft`), as
+    /// `change_component` does. The game folder stays as it is, mods of another loader too.
+    pub async fn set_loader(
+        &self,
+        key: &str,
+        kind: LoaderKind,
+        loader_version: Option<&str>,
+        running: impl Fn() -> bool,
+    ) -> AppResult<BuildSettingsDto> {
+        let mc = self.minecraft_of(&self.find(key)?)?;
+        self.change_component(key, kind, &mc, loader_version, running).await
+    }
+
     /// "Install and use": installs the build of `kind` for Minecraft `mc` and
-    /// points build `key` at it — the record changes only once the install succeeded.
+    /// points build `key` at it — the record changes only once the install succeeded. Refused
+    /// while the build's game runs (`running()`, or `game_open`); its folder is held meanwhile, so
+    /// no game starts on a build half changed.
     pub async fn change_component(
         &self,
         key: &str,
         kind: LoaderKind,
         mc: &str,
         loader_version: Option<&str>,
+        running: impl Fn() -> bool,
     ) -> AppResult<BuildSettingsDto> {
-        self.find(key)?;
+        let build = self.find(key)?;
         let spec = match (kind, loader_version) {
             (LoaderKind::Minecraft, _) => ComponentSpec::vanilla(mc),
             (kind, Some(lv)) => ComponentSpec::loader(kind, mc, lv),
@@ -443,12 +474,27 @@ impl BuildService {
         if self.feedback.is_busy() {
             return Err(AppError::new(ErrorCode::Busy, "another operation is running"));
         }
-        let status = Text::key("version_component_installing")
-            .param("loader", kind.display_name())
-            .param("version", mc);
-        let op = self
-            .feedback
-            .begin(OperationSpec::new(Text::key("installation_started"), "install").status(status));
+        let folder = game_dir(&build, self.versions.minecraft_dir());
+        let _lease = self.instances.try_acquire(&folder, "loader")?;
+        if running() || game_open(&folder) {
+            return Err(running_error(&build));
+        }
+        let (title, status) = match &spec.loader_version {
+            None => (
+                Text::key("build_loader_removing").param("build", &build.name),
+                Text::key("installing_minecraft_version").param("version", mc),
+            ),
+            Some(lv) => (
+                Text::key("build_loader_installing")
+                    .param("build", &build.name)
+                    .param("loader", kind.display_name())
+                    .param("version", lv),
+                Text::key("version_component_installing")
+                    .param("loader", kind.display_name())
+                    .param("version", mc),
+            ),
+        };
+        let op = self.feedback.begin(OperationSpec::new(title, "install").status(status));
         let progress = |p: InstallProgress| {
             let bytes = p.download.map(|d| (d.bytes_done as f64, d.bytes_total as f64));
             op.update(Some(p.status), bytes.map(|b| b.0), bytes.map(|b| b.1));
@@ -471,11 +517,15 @@ impl BuildService {
             build.options.insert("executablePath".into(), json!(java.to_string_lossy()));
         }
         self.versions.save(&mut build)?;
-        self.feedback.success(
-            Text::key("version_component_install_complete")
+        let done = match &spec.loader_version {
+            None => Text::key("build_loader_removed").param("build", &build.name).param("mc", mc),
+            Some(lv) => Text::key("build_loader_set")
+                .param("build", &build.name)
                 .param("loader", kind.display_name())
-                .param("version", mc),
-        );
+                .param("version", lv)
+                .param("mc", mc),
+        };
+        self.feedback.success(done);
         self.settings(key)
     }
 

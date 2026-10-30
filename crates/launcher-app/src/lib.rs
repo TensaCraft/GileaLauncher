@@ -283,6 +283,7 @@ pub fn run() -> i32 {
             game_commands::build_settings_get,
             game_commands::build_settings_save,
             game_commands::build_change_component,
+            game_commands::build_set_loader,
             storage_commands::storage_snapshot,
             storage_commands::storage_clear,
             storage_commands::storage_clear_unneeded,
