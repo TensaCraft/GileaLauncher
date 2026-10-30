@@ -252,27 +252,45 @@ impl SkinsService {
         profile: ServicesProfile,
     ) -> AppResult<AccountState> {
         let (_, name, id) = session;
+        let mut unavailable = false;
         let skin = match profile.skins.iter().find(|s| s.state == "ACTIVE") {
             None => None,
             Some(remote) => {
                 let slim = remote.variant == SkinVariant::Slim;
-                let texture = self.deps.skins.wear(&Player::new(id, name), &remote.url, slim).await?;
-                let default = remote.alias.is_some();
-                let mut entry = self.library.find_sha(&texture.hash);
-                if !default && self.first_sight(id, &texture.hash) && entry.is_none() {
-                    let name: String = name.chars().take(NAME_MAX).collect();
-                    let added = self.library.add(&texture, &name, remote.variant, &format!("account:{name}"));
-                    match added {
-                        Ok((added, _)) => entry = Some(added),
-                        Err(e) => tracing::warn!("Unable to keep {name}'s skin in the library: {}", e.detail),
+                let wearer = Player::new(id, name);
+                // The worn file, else what Mojang names them by or another host's copy: the
+                // capes and the rest of the page never wait on one picture.
+                let texture = match self.deps.skins.wear(&wearer, &remote.url, slim).await {
+                    Ok(texture) => Some(texture),
+                    Err(e) => {
+                        tracing::warn!("{name}'s skin file could not be had: {}", e.detail);
+                        self.deps.skins.texture(&wearer).await
                     }
-                }
-                Some(CurrentSkin {
-                    sha256: texture.hash.clone(),
-                    variant: remote.variant,
-                    data: render::data_url(&texture.png),
-                    library_id: entry.map(|e| e.id),
-                    default,
+                };
+                unavailable = texture.is_none();
+                texture.map(|texture| {
+                    let default = remote.alias.is_some();
+                    let mut entry = self.library.find_sha(&texture.hash);
+                    // Only Mojang's own copy is kept: another host's may be out of date.
+                    if !default && texture.official && self.first_sight(id, &texture.hash) && entry.is_none()
+                    {
+                        let name: String = name.chars().take(NAME_MAX).collect();
+                        let added =
+                            self.library.add(&texture, &name, remote.variant, &format!("account:{name}"));
+                        match added {
+                            Ok((added, _)) => entry = Some(added),
+                            Err(e) => {
+                                tracing::warn!("Unable to keep {name}'s skin in the library: {}", e.detail)
+                            }
+                        }
+                    }
+                    CurrentSkin {
+                        sha256: texture.hash.clone(),
+                        variant: remote.variant,
+                        data: render::data_url(&texture.png),
+                        library_id: entry.map(|e| e.id),
+                        default,
+                    }
                 })
             }
         };
@@ -301,7 +319,7 @@ impl SkinsService {
                 Cape { active: c.state == "ACTIVE", id: c.id, alias: c.alias, data }
             })
             .collect();
-        Ok(AccountState { profile: key.to_string(), skin, capes })
+        Ok(AccountState { profile: key.to_string(), skin, capes, skin_unavailable: unavailable })
     }
 
     /// What account `key` wears and has.
@@ -425,12 +443,13 @@ impl SkinsService {
         let variant = self.library.get(id)?.variant;
         let skin = self.library.png(id)?;
         let client = &self.client;
-        let (profile, session) = self
+        let (answered, session) = self
             .with_token(key, |token| {
                 let skin = skin.clone();
                 async move { client.upload_skin(&token, skin, variant).await }
             })
             .await?;
+        let (profile, session) = self.changed_profile(key, answered, session).await?;
         self.after_change(key, &session, profile).await
     }
 
@@ -438,9 +457,27 @@ impl SkinsService {
     pub async fn set_cape(&self, key: &str, cape: Option<String>) -> AppResult<AccountState> {
         let client = &self.client;
         let cape = cape.as_deref();
-        let (profile, session) =
+        let (answered, session) =
             self.with_token(key, |token| async move { client.set_cape(&token, cape).await }).await?;
+        let (profile, session) = self.changed_profile(key, answered, session).await?;
         self.after_change(key, &session, profile).await
+    }
+
+    /// The profile after a change: the one its answer carried, else read anew. A refused read is
+    /// refreshed and tried again on its own: the change is never made twice.
+    async fn changed_profile(
+        &self,
+        key: &str,
+        answered: Option<ServicesProfile>,
+        session: Session,
+    ) -> AppResult<(ServicesProfile, Session)> {
+        match answered {
+            Some(profile) => Ok((profile, session)),
+            None => {
+                let client = &self.client;
+                self.with_token(key, |token| async move { client.profile(&token).await }).await
+            }
+        }
     }
 }
 

@@ -213,9 +213,13 @@ pub fn SkinsPage() -> impl IntoView {
         Some(e) => e.name,
         // A Mojang default skin (or none) is named so; a library skin by its name.
         None => {
-            match current.with(|s| s.as_ref().map(|s| (s.skin.as_ref().map(|k| k.default), worn_id(s)))) {
-                Some((Some(false), Some(id))) => entry(&id).map(|e| e.name).unwrap_or_default(),
-                Some((None | Some(true), _)) => i18n.t("skins_default_skin"),
+            let worn = current.with(|s| {
+                s.as_ref().map(|s| (s.skin.as_ref().map(|k| k.default), worn_id(s), s.skin_unavailable))
+            });
+            match worn {
+                Some((_, _, true)) => i18n.t("skins_skin_unavailable"),
+                Some((Some(false), Some(id), _)) => entry(&id).map(|e| e.name).unwrap_or_default(),
+                Some((None | Some(true), _, _)) => i18n.t("skins_default_skin"),
                 _ => String::new(),
             }
         }

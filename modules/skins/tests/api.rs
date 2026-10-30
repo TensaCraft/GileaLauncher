@@ -485,7 +485,7 @@ async fn the_profile_is_read() {
 async fn a_skin_is_uploaded_as_multipart() {
     let fake = fake_services::start().await;
     let png = b"\x89PNG fake skin".to_vec();
-    let profile = client(&fake).upload_skin(TOKEN, png.clone(), SkinVariant::Slim).await.unwrap();
+    let profile = client(&fake).upload_skin(TOKEN, png.clone(), SkinVariant::Slim).await.unwrap().unwrap();
     let sent = &fake.requests("/skins")[0];
     assert_eq!((sent.method.as_str(), sent.bearer.as_deref()), ("POST", Some(TOKEN)));
     assert_eq!(sent.fields.get("variant").map(Vec::as_slice), Some(&b"slim"[..]));
@@ -494,9 +494,9 @@ async fn a_skin_is_uploaded_as_multipart() {
     assert!(fake.requests("/profile").is_empty(), "no second request when the answer is a profile");
 
     fake.knobs().bare_answers = true;
-    let profile = client(&fake).upload_skin(TOKEN, png, SkinVariant::Classic).await.unwrap();
-    assert_eq!(profile.skins[0].variant, SkinVariant::Classic);
-    assert_eq!(fake.requests("/profile").len(), 1, "an empty answer is followed by the profile");
+    let answered = client(&fake).upload_skin(TOKEN, png, SkinVariant::Classic).await.unwrap();
+    assert!(answered.is_none(), "an empty answer carries no profile: the service reads it");
+    assert!(fake.requests("/profile").is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -504,14 +504,14 @@ async fn a_cape_is_put_on_and_taken_off() {
     let fake = fake_services::start().await;
     two_capes(&fake);
     let client = client(&fake);
-    let profile = client.set_cape(TOKEN, Some("c2")).await.unwrap();
+    let profile = client.set_cape(TOKEN, Some("c2")).await.unwrap().unwrap();
     let put = &fake.requests("/capes")[0];
     assert_eq!(put.method, "PUT");
     assert_eq!(put.json, Some(serde_json::json!({"capeId": "c2"})));
     let active: Vec<&str> =
         profile.capes.iter().filter(|c| c.state == "ACTIVE").map(|c| c.id.as_str()).collect();
     assert_eq!(active, ["c2"]);
-    let profile = client.set_cape(TOKEN, None).await.unwrap();
+    let profile = client.set_cape(TOKEN, None).await.unwrap().unwrap();
     assert_eq!(fake.requests("/capes")[1].method, "DELETE");
     assert!(profile.capes.iter().all(|c| c.state != "ACTIVE"));
 }
@@ -573,4 +573,33 @@ async fn a_skin_is_added_from_a_link() {
         );
     }
     assert_eq!(rig.library_names(), ["alex"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_read_back_does_not_upload_the_skin_again() {
+    let rig = rig().await;
+    rig.fake.knobs().bare_answers = true;
+    rig.fake.knobs().profile_status = Some(401);
+    let path = rig.dir.path().join("a.png");
+    std::fs::write(&path, skin_png(4, false)).unwrap();
+    let entry = rig.svc.import(&file(&path)).await.unwrap();
+    assert!(rig.svc.apply("steve", &entry.id).await.is_err(), "the account cannot be read");
+    assert_eq!(rig.fake.requests("/skins").len(), 1, "the skin is sent once; only the read is tried again");
+    assert_eq!(rig.fake.requests("/profile").len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn capes_show_when_the_skin_file_cannot_be_had() {
+    let rig = rig().await;
+    dressed(&rig, 7, false);
+    rig.fake.account().skin = Some(("gone".into(), false));
+    let state = rig.svc.state("steve").await.unwrap();
+    assert_eq!(state.capes.len(), 2, "the capes are there all the same");
+    assert!(state.skin.is_none() && state.skin_unavailable, "the skin is said to be missing, not default");
+
+    known_head(&rig, "old", 1);
+    let state = rig.svc.state("steve").await.unwrap();
+    let skin = state.skin.expect("the skin Mojang names the player by");
+    assert_eq!(skin.sha256, hash_of(&skin_png(1, false)));
+    assert!(!state.skin_unavailable);
 }

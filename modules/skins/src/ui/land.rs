@@ -58,7 +58,7 @@ mod tests {
     }
 
     fn answer(profile: &str) -> AccountState {
-        AccountState { profile: profile.into(), skin: None, capes: Vec::new() }
+        AccountState { profile: profile.into(), skin: None, capes: Vec::new(), skin_unavailable: false }
     }
 
     fn skin(id: &str, variant: SkinVariant) -> LibrarySkin {

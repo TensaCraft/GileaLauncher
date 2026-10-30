@@ -215,21 +215,14 @@ impl MojangClient {
         as_profile(&body).ok_or_else(|| network("the profile is unreadable"))
     }
 
-    /// The profile a change answered with, or asked for when the answer is none.
-    async fn after_change(&self, token: &str, body: &[u8]) -> Result<ServicesProfile, CallError> {
-        match as_profile(body) {
-            Some(profile) => Ok(profile),
-            None => self.profile(token).await,
-        }
-    }
-
-    /// `POST /minecraft/profile/skins`: puts `png` on as the account's skin.
+    /// `POST /minecraft/profile/skins`: puts `png` on as the account's skin; the profile the answer
+    /// carries, if any.
     pub async fn upload_skin(
         &self,
         token: &str,
         png: Vec<u8>,
         variant: SkinVariant,
-    ) -> Result<ServicesProfile, CallError> {
+    ) -> Result<Option<ServicesProfile>, CallError> {
         let file = reqwest::multipart::Part::bytes(png)
             .file_name("skin.png")
             .mime_str("image/png")
@@ -237,11 +230,16 @@ impl MojangClient {
         let form = reqwest::multipart::Form::new().text("variant", variant.as_str()).part("file", file);
         let request = self.client.post(self.services(&["skins"])?).multipart(form);
         let body = Self::send(request, token).await?;
-        self.after_change(token, &body).await
+        Ok(as_profile(&body))
     }
 
-    /// `PUT /minecraft/profile/capes/active` for a cape, `DELETE` for none.
-    pub async fn set_cape(&self, token: &str, cape: Option<&str>) -> Result<ServicesProfile, CallError> {
+    /// `PUT /minecraft/profile/capes/active` for a cape, `DELETE` for none; the profile the answer
+    /// carries, if any.
+    pub async fn set_cape(
+        &self,
+        token: &str,
+        cape: Option<&str>,
+    ) -> Result<Option<ServicesProfile>, CallError> {
         let url = self.services(&["capes", "active"])?;
         let request = match cape {
             Some(id) => self
@@ -253,7 +251,7 @@ impl MojangClient {
         };
         let sent = Self::send(request, token).await;
         let body = sent.map_err(|e| if e == CallError::Rejected { CallError::RejectedCape } else { e })?;
-        self.after_change(token, &body).await
+        Ok(as_profile(&body))
     }
 }
 

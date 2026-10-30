@@ -46,6 +46,7 @@
     "skins_added": "The skin «{name}» is added to the library",
     "skins_already": "This skin is already in the library: «{name}»",
     "skins_default_skin": "Minecraft's default skin",
+    "skins_skin_unavailable": "The skin could not be loaded — try refreshing later",
     "skins_error_rate": "Mojang limits skin changes for now — try again in a minute",
     "skins_error_rejected": "Mojang did not accept this skin",
     "skins_error_cape_rejected": "Mojang did not accept this cape",

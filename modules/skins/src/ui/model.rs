@@ -97,6 +97,7 @@ mod tests {
                 default: false,
             }),
             capes: vec![Cape { id: "c1".into(), alias: "Pan".into(), active: true, data: String::new() }],
+            skin_unavailable: false,
         }
     }
 

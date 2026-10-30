@@ -88,9 +88,12 @@ pub struct Cape {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountState {
     pub profile: String,
-    /// `None`: the account wears Minecraft's default skin.
+    /// `None`: the account wears Minecraft's default skin (or one that could not be had).
     pub skin: Option<CurrentSkin>,
     pub capes: Vec<Cape>,
+    /// The account wears a skin no host gave the file of: it is not a default one.
+    #[serde(default)]
+    pub skin_unavailable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,6 +190,7 @@ mod tests {
                 active: true,
                 data: String::new(),
             }],
+            skin_unavailable: false,
         };
         let value = serde_json::to_value(&state).unwrap();
         assert_eq!(serde_json::from_value::<AccountState>(value).unwrap(), state);

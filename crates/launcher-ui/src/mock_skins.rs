@@ -307,6 +307,7 @@ impl MockSkins {
                     data: data.clone(),
                 })
                 .collect(),
+            skin_unavailable: false,
         })
     }
 
