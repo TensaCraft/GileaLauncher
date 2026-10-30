@@ -14,7 +14,7 @@ use launcher_core::content::packs::{legacy_pack_names, listing_file, lists_any};
 use launcher_core::feedback::{FeedbackService, OperationHandle, OperationSpec};
 use launcher_core::launch::options::game_dir;
 use launcher_core::lock::Coordinator;
-use launcher_core::net::downloader::{DownloadProgress, DownloadTask, Downloader};
+use launcher_core::net::downloader::{DownloadProgress, DownloadTask, Downloader, HashKind, hash_reader};
 use launcher_core::packs::engine::{PackDeps, PackKind, PackVersionMeta};
 use launcher_core::packs::flow::{self, Fetched, HeldChoice, PackFuture, PackSource};
 use launcher_core::providers::{ContentProvider, ProviderFuture};
@@ -683,7 +683,57 @@ impl ModrinthService {
     }
 }
 
+impl ModrinthService {
+    /// The `.mrpack` `file` on this machine (one the player dropped): copied to `archive` and
+    /// read. Modrinth names its project and version when it knows the file by its SHA-512 (its
+    /// updates then come as any pack's); else the build keeps the pack's own version number.
+    async fn fetch_file(&self, file: &Path, archive: &Path) -> AppResult<Fetched> {
+        let (from, to) = (file.to_path_buf(), archive.to_path_buf());
+        let (pack, sha512) = blocking(move || {
+            let io = |e: std::io::Error| AppError::new(ErrorCode::Io, e.to_string());
+            if let Some(parent) = to.parent() {
+                fs::create_dir_all(parent).map_err(io)?;
+            }
+            fs::copy(&from, &to).map_err(io)?;
+            let sha512 = hash_reader(&mut fs::File::open(&to).map_err(io)?, HashKind::Sha512).map_err(io)?;
+            Ok((pack::read(fs::File::open(&to).map_err(io)?)?, sha512))
+        })
+        .await?;
+        let known = match self.api.versions_by_hashes(std::slice::from_ref(&sha512)).await {
+            Ok(mut found) => found.remove(&sha512),
+            Err(e) => {
+                tracing::info!("Modrinth cannot say whose pack {} is: {}", file.display(), e.detail);
+                None
+            }
+        };
+        let meta = match known {
+            Some(version) => PackVersionMeta {
+                project_id: text(&version, "project_id"),
+                version_id: text(&version, "id"),
+                version_number: text(&version, "version_number"),
+            },
+            None => PackVersionMeta {
+                project_id: String::new(),
+                version_id: String::new(),
+                version_number: pack.version.clone(),
+            },
+        };
+        Ok(Fetched { pack, meta, skipped: Vec::new() })
+    }
+}
+
 impl PackSource for ModrinthService {
+    fn fetch_file<'a>(
+        &'a self,
+        file: &'a Path,
+        _game: &'a Path,
+        archive: &'a Path,
+        _op: &'a OperationHandle,
+        _held: &'a HeldChoice,
+    ) -> PackFuture<'a, Fetched> {
+        Box::pin(ModrinthService::fetch_file(self, file, archive))
+    }
+
     fn fetch<'a>(
         &'a self,
         project: &'a str,

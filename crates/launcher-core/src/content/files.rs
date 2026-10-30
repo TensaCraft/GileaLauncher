@@ -10,7 +10,7 @@ use crate::storage::journal::normalized_path;
 use crate::storage::transaction::FileTransaction;
 
 /// File names Windows keeps for devices, whatever the extension.
-const RESERVED: [&str; 22] = [
+pub(crate) const RESERVED: [&str; 22] = [
     "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
     "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];

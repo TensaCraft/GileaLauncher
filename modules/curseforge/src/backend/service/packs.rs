@@ -14,8 +14,8 @@ use launcher_core::packs::flow::{self, Fetched, HeldChoice, PackFuture, PackSour
 use launcher_core::storage::atomic::rename_retrying;
 use launcher_core::storage::journal::JournalName;
 use launcher_shared::provider::{
-    ModpackBuild, PACKS_LIMIT, PackArgs, PackInstallArgs, PackInstalled, PackUpdateArgs, PackUpdated,
-    PackVersion, PacksArgs, SearchPage, held_error,
+    HeldFile, ModpackBuild, PACKS_LIMIT, PackArgs, PackInstallArgs, PackInstalled, PackUpdateArgs,
+    PackUpdated, PackVersion, PacksArgs, SearchPage, held_error,
 };
 use launcher_shared::{AppError, AppResult, ContentKind, ErrorCode};
 use serde_json::Value;
@@ -23,6 +23,7 @@ use serde_json::Value;
 use super::{CurseForgeService, blocking, id_of};
 use crate::backend::api::SearchQuery;
 use crate::backend::catalog::{InstallFile, SEARCH_CAP, Source, install_file, search_page, text};
+use crate::backend::fingerprint::fingerprint_file;
 use crate::backend::held::Held;
 use crate::backend::pack::{self, PACK_RECORD, PackHeld};
 use crate::backend::provenance::{installed, read};
@@ -225,7 +226,87 @@ impl CurseForgeService {
             .credential(self.credential.clone());
         let progress = |p: DownloadProgress| op.progress(p.bytes_done as f64, p.bytes_total.max(1) as f64);
         self.deps.downloader.download_all(vec![task], false, &progress).await?.into_result()?;
-        let path = kept.clone();
+        let (mut pack, skipped) = self.read_kept(&kept, game, archive, choice).await?;
+        pack.summary = text(&info, "summary");
+        let meta = PackVersionMeta {
+            project_id: project.to_string(),
+            version_id: file_id.to_string(),
+            version_number: version_label(&text(&info, "name"), &text(&file, "displayName")),
+        };
+        Ok(Fetched { pack, meta, skipped })
+    }
+
+    /// The pack's zip `file` on this machine (one the player dropped): kept apart as a downloaded
+    /// one is, read, its files named by CurseForge. CurseForge names its project and file when it
+    /// knows the zip by its fingerprint (its updates then come as any pack's); else the build
+    /// keeps the manifest's version.
+    async fn fetch_file(
+        &self,
+        file: &Path,
+        game: &Path,
+        archive: &Path,
+        choice: &HeldChoice,
+    ) -> AppResult<Fetched> {
+        let (from, dir) = (file.to_path_buf(), self.deps.kept_packs.clone());
+        let (kept, print) = blocking(move || {
+            let io = |e: std::io::Error| AppError::new(ErrorCode::Io, e.to_string());
+            let print = fingerprint_file(&from).map_err(io)?;
+            let kept = dir.join(format!("dropped-{print}.zip"));
+            forget_old_packs(&dir, &kept);
+            fs::create_dir_all(&dir).map_err(io)?;
+            fs::copy(&from, &kept).map_err(io)?;
+            Ok((kept, print))
+        })
+        .await?;
+        let known = match self.api.fingerprints(&[print]).await {
+            Ok(answer) => answer["exactMatches"].as_array().into_iter().flatten().find_map(|m| {
+                let file = &m["file"];
+                file["modId"].as_u64().zip(file["id"].as_u64()).map(|ids| (ids, file.clone()))
+            }),
+            Err(e) => {
+                tracing::info!("CurseForge cannot say whose pack {} is: {}", file.display(), e.detail);
+                None
+            }
+        };
+        let known = match known {
+            Some(((project, file_id), found)) => match self.api.mod_info(project).await {
+                Ok(info) if info["classId"].as_u64() == Some(u64::from(MODPACKS_CLASS)) => {
+                    Some((project, file_id, found, info))
+                }
+                _ => None,
+            },
+            None => None,
+        };
+        let (mut pack, skipped) = self.read_kept(&kept, game, archive, choice).await?;
+        let meta = match known {
+            Some((project, file_id, found, info)) => {
+                pack.summary = text(&info, "summary");
+                PackVersionMeta {
+                    project_id: project.to_string(),
+                    version_id: file_id.to_string(),
+                    version_number: version_label(&text(&info, "name"), &text(&found, "displayName")),
+                }
+            }
+            None => PackVersionMeta {
+                project_id: String::new(),
+                version_id: String::new(),
+                version_number: pack.version.clone(),
+            },
+        };
+        Ok(Fetched { pack, meta, skipped })
+    }
+
+    /// The pack in the zip `kept` for the build folder `game`: read, its files named by CurseForge
+    /// (those it holds back found, taken from their alternative or left out as `choice` says), and
+    /// the zip moved to `archive`; the held files still missing are `ProviderFilesHeld`.
+    async fn read_kept(
+        &self,
+        kept: &Path,
+        game: &Path,
+        archive: &Path,
+        choice: &HeldChoice,
+    ) -> AppResult<(launcher_core::packs::Pack, Vec<HeldFile>)> {
+        let path = kept.to_path_buf();
         let (manifest, overrides) = blocking(move || {
             let zip = std::fs::File::open(&path).map_err(|e| AppError::new(ErrorCode::Io, e.to_string()))?;
             pack::read(zip, Limits::default())
@@ -280,16 +361,10 @@ impl CurseForgeService {
         if !by_hand.is_empty() {
             return Err(held_error(&by_hand));
         }
-        let to = archive.to_path_buf();
-        blocking(move || move_file(&kept, &to).map_err(|e| AppError::new(ErrorCode::Io, e.to_string())))
+        let (from, to) = (kept.to_path_buf(), archive.to_path_buf());
+        blocking(move || move_file(&from, &to).map_err(|e| AppError::new(ErrorCode::Io, e.to_string())))
             .await?;
-        pack.summary = text(&info, "summary");
-        let meta = PackVersionMeta {
-            project_id: project.to_string(),
-            version_id: file_id.to_string(),
-            version_number: version_label(&text(&info, "name"), &text(&file, "displayName")),
-        };
-        Ok(Fetched { pack, meta, skipped })
+        Ok((pack, skipped))
     }
 
     /// The CurseForge projects of the enabled mods the player put in `game` (none of the pack's
@@ -325,6 +400,17 @@ impl PackSource for CurseForgeService {
         held: &'a HeldChoice,
     ) -> PackFuture<'a, Fetched> {
         Box::pin(self.fetch_pack(project, version, game, archive, op, held))
+    }
+
+    fn fetch_file<'a>(
+        &'a self,
+        file: &'a Path,
+        game: &'a Path,
+        archive: &'a Path,
+        _op: &'a OperationHandle,
+        held: &'a HeldChoice,
+    ) -> PackFuture<'a, Fetched> {
+        Box::pin(CurseForgeService::fetch_file(self, file, game, archive, held))
     }
 
     fn versions<'a>(&'a self, project: &'a str) -> PackFuture<'a, Vec<PackVersion>> {

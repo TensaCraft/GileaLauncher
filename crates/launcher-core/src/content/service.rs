@@ -6,6 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use launcher_shared::{AppError, AppResult, ContentKind, ContentList, ErrorCode, LoaderKind, Text};
 
@@ -337,6 +338,77 @@ impl ContentService {
             restore(game, backup, &entry.path, entry.item.enabled)?;
             Ok(Some(Text::key("mod_restored").param("name", display_name(entry))))
         })
+    }
+
+    /// Copies file `from` (one from outside: dropped on the build's tab) into build `key`'s folder
+    /// of `kind` under its own name; `from` stays. A file of that name already there, on or
+    /// switched off, is `ContentConflict` unless `replace`: the new one then takes its place, on
+    /// or off as it was. The list after it.
+    pub fn add(&self, key: &str, kind: ContentKind, from: &Path, replace: bool) -> AppResult<ContentList> {
+        let name = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let ending = if kind == ContentKind::Mods { ".jar" } else { ".zip" };
+        let lower = name.to_lowercase();
+        if lower.len() <= ending.len() || !lower.ends_with(ending) {
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                format!("{name} is no {} file", kind.folder()),
+            )
+            .with_param("name", name));
+        }
+        let relative = super::files::destination(kind, &name)?;
+        let source = fs::metadata(from).map_err(|e| io_error(from, e))?;
+        if !source.is_file() || source.len() == 0 {
+            return Err(AppError::new(ErrorCode::InvalidInput, format!("{name} is no file or an empty one"))
+                .with_param("name", name));
+        }
+        let build = self.build(key)?;
+        if kind == ContentKind::Mods && !mods_supported(build.client.as_deref()) {
+            return Err(AppError::new(ErrorCode::Unsupported, "the build runs no mods")
+                .with_param("version", build.name.clone()));
+        }
+        let game = self.folder(&build);
+        let _lease = self
+            .instances
+            .try_acquire(&game, "content")
+            .map_err(|e| e.with_param("version", build.name.clone()))?;
+        let on = game.join(&relative);
+        let off = on.with_file_name(format!("{name}.disabled"));
+        let target = match (on.exists(), off.exists()) {
+            (false, false) => on,
+            _ if !replace => {
+                return Err(AppError::new(
+                    ErrorCode::ContentConflict,
+                    format!("{} already exists", on.display()),
+                )
+                .with_param("name", name));
+            }
+            (true, _) => on,
+            (false, true) => off,
+        };
+        let folder = game.join(kind.folder());
+        fs::create_dir_all(&folder).map_err(|e| io_error(&folder, e))?;
+        // Copied beside it first: a copy cut short never takes the place of a whole file.
+        let part = folder.join(format!(".{name}.part"));
+        // The copy takes its own time: a list that knows the old file by its size and time reads
+        // the new one anew.
+        let copied = fs::copy(from, &part)
+            .and_then(|_| fs::File::options().write(true).open(&part)?.set_modified(SystemTime::now()));
+        if let Err(e) = copied {
+            let _ = fs::remove_file(&part);
+            return Err(io_error(from, e));
+        }
+        if let Err(e) = fs::rename(&part, &target) {
+            let _ = fs::remove_file(&part);
+            // Windows refuses to replace a file another program holds open: "access denied".
+            if e.kind() == io::ErrorKind::PermissionDenied && target.is_file() {
+                return Err(AppError::new(ErrorCode::FileInUse, format!("{}: {e}", target.display()))
+                    .with_param("path", target.to_string_lossy())
+                    .with_param("name", name));
+            }
+            return Err(io_error(&target, e));
+        }
+        self.feedback.info(Text::key("content_added").param("name", name));
+        Ok(self.list_of(&build, kind))
     }
 
     /// Runs `action` on the listed `file` of build `key` (with the build's pack naming, see

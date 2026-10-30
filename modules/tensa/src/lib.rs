@@ -20,6 +20,7 @@ pub fn provider_info() -> ProviderInfo {
         modpack_updates: false,
         content_clients: vec![CLIENT.into()],
         content_label: Some("tensa_optional_source".into()),
+        pack_file: None,
     }
 }
 

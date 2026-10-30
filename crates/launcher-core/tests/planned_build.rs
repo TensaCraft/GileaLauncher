@@ -118,6 +118,7 @@ impl Module for ShopModule {
             modpack_updates: false,
             content_clients: Vec::new(),
             content_label: None,
+            pack_file: None,
         })
     }
     fn provider(&self, _core: &Arc<CoreApp>) -> AppResult<Arc<dyn ContentProvider>> {

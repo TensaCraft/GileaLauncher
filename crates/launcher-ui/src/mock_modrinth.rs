@@ -308,6 +308,14 @@ impl MockModrinth {
             return Err(launcher_shared::provider::held_error(&missing));
         }
         let skipped = if args.project_id == "mock-adrenaline" && waits { missing } else { Vec::new() };
+        // A pack file dropped on the page: a build of its own, as one the provider does not know.
+        if args.file.is_some() {
+            let mut builds = self.builds.borrow_mut();
+            let build = builds.create_loader(&args.name, LoaderKind::Fabric, "1.21.1", "0.16.9")?;
+            builds.emit_builds();
+            toast(Level::Success, Text::key("version_install_success").param("version", &build.name));
+            return Ok(PackInstalled { key: build.key, name: build.name, skipped: Vec::new() });
+        }
         let version = Self::pack_versions(&PackArgs { project_id: args.project_id.clone() })
             .into_iter()
             .find(|v| v.id == args.version_id)

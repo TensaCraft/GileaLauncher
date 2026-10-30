@@ -180,6 +180,34 @@ pub async fn pick_image_file(app: AppHandle) -> AppResult<Option<String>> {
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
+/// An image dropped on a build's picture, checked to be one a build takes (`invalid_input` if not).
+#[tauri::command(async)]
+pub fn image_file_check(path: String) -> AppResult<()> {
+    launcher_core::builds::settings::read_icon(std::path::Path::new(&path)).map(|_| ())
+}
+
+/// The header that names a dropped file (`ui_kit::drop::NAME_HEADER`), percent-encoded.
+const DROP_NAME_HEADER: &str = "x-drop-name";
+
+/// The dropped file's name as the page sent it in its header (percent-encoded); empty without one.
+fn dropped_file_name(header: Option<&str>) -> String {
+    header
+        .map(|value| percent_encoding::percent_decode_str(value).decode_utf8_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// A file dropped on the window: its bytes are the body and its name is in the header. It is kept
+/// under the cache's `drops/`, and its path is given back for the step it was dropped for.
+#[tauri::command(async)]
+pub fn drop_stage(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> AppResult<String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(AppError::new(ErrorCode::InvalidInput, "a dropped file comes as its bytes"));
+    };
+    let name = dropped_file_name(request.headers().get(DROP_NAME_HEADER).and_then(|v| v.to_str().ok()));
+    let path = launcher_core::drops::stage(&state.core.paths.cache_dir, &name, bytes)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Only folders may be opened: a file path would be *executed* by the system shell.
 pub fn openable_dir(path: &str) -> AppResult<std::path::PathBuf> {
     let dir = std::path::PathBuf::from(path);
@@ -469,6 +497,21 @@ pub async fn profile_body(state: State<'_, AppState>, key: String) -> AppResult<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dropped_file_s_name_comes_from_its_header() {
+        assert_eq!(
+            dropped_file_name(Some("%D0%9C%D1%96%D0%B9%20%D1%81%D0%BA%D1%96%D0%BD.png")),
+            "Мій скін.png"
+        );
+        assert_eq!(dropped_file_name(Some("sodium-0.6.jar")), "sodium-0.6.jar");
+        assert_eq!(
+            dropped_file_name(Some("%2E%2E%2Fx.jar")),
+            "../x.jar",
+            "the core keeps only its last part"
+        );
+        assert_eq!(dropped_file_name(None), "", "no name: the core refuses it");
+    }
 
     #[test]
     fn only_a_whole_https_link_is_opened_and_it_goes_out_escaped() {

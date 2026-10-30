@@ -57,6 +57,20 @@ pub async fn content_restore(
     blocking(move || core.content.restore(&key, kind, &file)).await
 }
 
+/// Copies file `path` (dropped on a build's tab) into the build's folder of `kind`; a file of
+/// that name there is `ContentConflict` unless `replace`.
+#[tauri::command]
+pub async fn content_add(
+    state: State<'_, AppState>,
+    key: String,
+    kind: ContentKind,
+    path: String,
+    replace: bool,
+) -> AppResult<ContentList> {
+    let core = state.core.clone();
+    blocking(move || core.content.add(&key, kind, Path::new(&path), replace)).await
+}
+
 #[tauri::command(async)]
 pub fn content_open_dir(
     app: AppHandle,

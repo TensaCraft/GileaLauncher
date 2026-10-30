@@ -237,6 +237,7 @@ mod tests {
             modpack_updates: true,
             content_clients: Vec::new(),
             content_label: None,
+            pack_file: None,
         }
     }
 

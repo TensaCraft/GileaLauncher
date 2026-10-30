@@ -36,6 +36,10 @@ pub struct ProviderInfo {
     /// The translation key its content source is named by, instead of its name.
     #[serde(default)]
     pub content_label: Option<String>,
+    /// The ending of its modpacks' files (`mrpack`): such a file dropped on the Modpacks page
+    /// installs as a new build. `None`: it takes no pack files.
+    #[serde(default)]
+    pub pack_file: Option<String>,
 }
 
 /// What the app asks a provider for.
@@ -716,6 +720,10 @@ pub struct PackInstallArgs {
     /// Goes on without the held files still missing: the answer names them.
     #[serde(default)]
     pub skip_held: bool,
+    /// A pack's archive on this machine (one the player dropped on the window): installed from it,
+    /// `project_id` and `version_id` left empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
 }
 
 /// A build a provider installed from a modpack, with the newest version when it is newer.
@@ -943,6 +951,7 @@ mod tests {
             modpack_updates: false,
             content_clients: Vec::new(),
             content_label: None,
+            pack_file: None,
         }
     }
 

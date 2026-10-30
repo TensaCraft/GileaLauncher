@@ -62,6 +62,7 @@ pub fn provider_info() -> ProviderInfo {
         modpack_updates: true,
         content_clients: Vec::new(),
         content_label: None,
+        pack_file: Some("zip".into()),
     }
 }
 

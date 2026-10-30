@@ -490,3 +490,151 @@ fn only_the_newest_backup_counts_even_beside_older_ones() {
     let list = w.service.list(&key, ContentKind::Mods).unwrap();
     assert!(!list.items[0].has_backup, "the newest backup is this very file; an older one is not offered");
 }
+
+/// A file from outside the build (one dropped on its tab), named `name`.
+fn outside(w: &World, name: &str, body: &[u8]) -> PathBuf {
+    let dir = w._tmp.path().join("outside");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    fs::write(&path, body).unwrap();
+    path
+}
+
+#[test]
+fn files_from_outside_go_into_their_kind_s_folder() {
+    let w = world();
+    let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
+    let sodium = w._tmp.path().join("Sodium 0.6.jar");
+    jar(&sodium, br#"{"id":"sodium","name":"Sodium","version":"0.6"}"#);
+    let list = w.service.add(&key, ContentKind::Mods, &sodium, false).unwrap();
+    assert_eq!(files(&list.items), [("Sodium 0.6.jar", true)]);
+    assert!(sodium.exists(), "the dropped file stays where it was");
+    for (kind, name) in
+        [(ContentKind::ResourcePacks, "Faithful.zip"), (ContentKind::ShaderPacks, "Комплементарні.ZIP")]
+    {
+        let pack = outside(&w, name, b"PK");
+        w.service.add(&key, kind, &pack, false).unwrap();
+        assert_eq!(fs::read(dir.join(kind.folder()).join(name)).unwrap(), b"PK", "{name}");
+    }
+    let leftovers: Vec<_> =
+        fs::read_dir(dir.join("mods")).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(leftovers, ["Sodium 0.6.jar"], "no part file is left behind");
+}
+
+#[test]
+fn only_a_kind_s_own_files_are_taken() {
+    let w = world();
+    let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
+    for (kind, name) in [
+        (ContentKind::Mods, "pack.zip"),
+        (ContentKind::ResourcePacks, "sodium.jar"),
+        (ContentKind::ShaderPacks, "notes.txt"),
+        (ContentKind::Mods, ".jar"),
+        (ContentKind::Mods, "con.jar"),
+    ] {
+        let file = outside(&w, name, b"x");
+        let err = w.service.add(&key, kind, &file, false).unwrap_err();
+        assert_eq!((err.code, err.params["name"].as_str()), (ErrorCode::InvalidInput, name), "{name}");
+    }
+    let (vanilla, _) = build(&w, "Vanilla", "Minecraft", "1.21.1");
+    let sodium = outside(&w, "sodium.jar", b"x");
+    assert_eq!(
+        w.service.add(&vanilla, ContentKind::Mods, &sodium, false).unwrap_err().code,
+        ErrorCode::Unsupported
+    );
+    assert!(fs::read_dir(dir.join("mods")).unwrap().next().is_none());
+}
+
+#[test]
+fn a_file_of_the_same_name_is_replaced_only_when_asked() {
+    let w = world();
+    let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
+    fabric_mod(&dir, "sodium.jar.disabled", "sodium", "Sodium old");
+    let newer = w._tmp.path().join("sodium.jar");
+    jar(&newer, br#"{"id":"sodium","name":"Sodium new","version":"2.0"}"#);
+    let err = w.service.add(&key, ContentKind::Mods, &newer, false).unwrap_err();
+    assert_eq!((err.code, err.params["name"].as_str()), (ErrorCode::ContentConflict, "sodium.jar"));
+    let list = w.service.add(&key, ContentKind::Mods, &newer, true).unwrap();
+    assert_eq!(files(&list.items), [("sodium.jar.disabled", false)], "a switched-off mod stays off");
+    assert_eq!(fs::read(dir.join("mods/sodium.jar.disabled")).unwrap(), fs::read(&newer).unwrap());
+}
+
+#[test]
+fn a_busy_build_takes_no_files() {
+    let w = world();
+    let (key, dir) = build(&w, "Моя збірка", "Fabric", FABRIC);
+    let sodium = outside(&w, "sodium.jar", b"x");
+    let lease = w.instances.try_acquire(&dir, "copy").unwrap();
+    let busy = w.service.add(&key, ContentKind::Mods, &sodium, false).unwrap_err();
+    assert_eq!((busy.code, busy.params["version"].as_str()), (ErrorCode::InstanceBusy, "Моя збірка"));
+    drop(lease);
+    assert!(!dir.join("mods/sodium.jar").exists());
+}
+
+/// The game holds its jars open as Java does: a file dropped in their place waits, whole.
+#[cfg(windows)]
+#[test]
+fn a_jar_the_game_holds_is_in_use_and_stays_whole() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let w = world();
+    let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
+    fabric_mod(&dir, "sodium.jar", "sodium", "Sodium old");
+    let before = fs::read(dir.join("mods/sodium.jar")).unwrap();
+    let newer = outside(&w, "sodium.jar", b"newer");
+    // FILE_SHARE_READ | FILE_SHARE_WRITE: shared with readers and writers, not with a move.
+    let held = fs::OpenOptions::new().read(true).share_mode(1 | 2).open(dir.join("mods/sodium.jar")).unwrap();
+    let err = w.service.add(&key, ContentKind::Mods, &newer, true).unwrap_err();
+    assert_eq!(err.code, ErrorCode::FileInUse);
+    drop(held);
+    assert_eq!(fs::read(dir.join("mods/sodium.jar")).unwrap(), before);
+    let left: Vec<_> = fs::read_dir(dir.join("mods")).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(left, ["sodium.jar"], "no part file is left behind");
+}
+
+#[test]
+fn an_empty_file_a_folder_or_a_missing_file_is_refused() {
+    let w = world();
+    let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
+    let empty = outside(&w, "empty.jar", b"");
+    assert_eq!(
+        w.service.add(&key, ContentKind::Mods, &empty, false).unwrap_err().code,
+        ErrorCode::InvalidInput
+    );
+    let folder = w._tmp.path().join("outside").join("folder.jar");
+    fs::create_dir_all(&folder).unwrap();
+    assert_eq!(
+        w.service.add(&key, ContentKind::Mods, &folder, false).unwrap_err().code,
+        ErrorCode::InvalidInput
+    );
+    let gone = w._tmp.path().join("outside").join("gone.jar");
+    assert!(w.service.add(&key, ContentKind::Mods, &gone, false).is_err());
+    assert!(fs::read_dir(dir.join("mods")).unwrap().next().is_none(), "nothing came in, no part file either");
+}
+
+#[test]
+fn a_replacement_of_the_same_size_is_read_anew() {
+    let w = world();
+    let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
+    fabric_mod(&dir, "sodium.jar", "sodium", "Sodium old");
+    assert_eq!(w.service.list(&key, ContentKind::Mods).unwrap().items[0].name.as_deref(), Some("Sodium old"));
+    let newer = w._tmp.path().join("sodium.jar");
+    jar(&newer, br#"{"id":"sodium","name":"Sodium new","version":"1.0"}"#);
+    // Same size and time as the old one: only the new copy's own time tells them apart.
+    let old = fs::metadata(dir.join("mods/sodium.jar")).unwrap();
+    assert_eq!(fs::metadata(&newer).unwrap().len(), old.len());
+    fs::File::options().write(true).open(&newer).unwrap().set_modified(old.modified().unwrap()).unwrap();
+    let list = w.service.add(&key, ContentKind::Mods, &newer, true).unwrap();
+    assert_eq!(list.items[0].name.as_deref(), Some("Sodium new"));
+}
+
+#[test]
+fn a_resource_pack_comes_in_switched_off_and_options_stay() {
+    let w = world();
+    let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
+    fs::write(dir.join("options.txt"), "resourcePacks:[\"vanilla\"]\nlang:uk_ua\n").unwrap();
+    let before = fs::read(dir.join("options.txt")).unwrap();
+    let pack = outside(&w, "Faithful.zip", b"PK");
+    let list = w.service.add(&key, ContentKind::ResourcePacks, &pack, false).unwrap();
+    assert_eq!(files(&list.items), [("Faithful.zip", false)]);
+    assert_eq!(fs::read(dir.join("options.txt")).unwrap(), before);
+}

@@ -5,14 +5,14 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    ActionGroup, Button, ConfirmDialog, Dialog, DialogFooter, EmptyState, IconAction, MenuEntry, Rect,
-    Skeleton, TextInput, Variant, use_context_menu, use_toasts,
+    ActionGroup, Button, ConfirmDialog, Dialog, DialogFooter, DropZone, EmptyState, IconAction, MenuEntry,
+    Rect, Skeleton, TextInput, Variant, use_context_menu, use_toasts,
 };
 
 use super::add::AddSkinDialog;
 use super::api;
 use super::model::{is_worn, matching};
-use crate::dto::{AccountState, LibrarySkin, SkinVariant, error_text};
+use crate::dto::{AccountState, ImportArgs, LibrarySkin, SkinSource, SkinVariant, error_text};
 
 fn model_name(variant: SkinVariant) -> &'static str {
     match variant {
@@ -62,6 +62,20 @@ pub fn LibraryTab(
         let key = if known { "skins_already" } else { "skins_added" };
         toasts.show(Level::Success, i18n.tp(key, &[("name", skin.name.clone())]), None);
         let _ = chosen.try_set(Some(skin.id));
+    });
+    // Skins dropped from the system: each added as «Додати скін» adds a file, named after it.
+    let on_dropped = Callback::new(move |paths: Vec<String>| {
+        before.set_value(library.with_untracked(|l| l.iter().flatten().map(|s| s.id.clone()).collect()));
+        spawn_local(async move {
+            for path in paths {
+                match api::import(ImportArgs::new(SkinSource::File { path })).await {
+                    Ok(skin) => {
+                        let _ = on_added.try_run(skin);
+                    }
+                    Err(e) => fail(e),
+                }
+            }
+        });
     });
     let wear = move |skin: LibrarySkin| {
         if applying.get_untracked().is_some() {
@@ -210,20 +224,22 @@ pub fn LibraryTab(
     }
     };
     view! {
-        <div class="create__bar">
-            <div class="create__tools">
-                <div class="create__search">
-                    <TextInput value=query icon="search" placeholder=t("skins_search") />
+        <DropZone accept=&["png"] label=t("skins_drop") on_drop=on_dropped class="skins-library">
+            <div class="create__bar">
+                <div class="create__tools">
+                    <div class="create__search">
+                        <TextInput value=query icon="search" placeholder=t("skins_search") />
+                    </div>
+                    <ActionGroup>
+                        <IconAction icon="refresh" title=t("refresh") on_click=reload />
+                    </ActionGroup>
+                    <Button variant=Variant::Primary icon="add" on_click=move |_| open_add()>
+                        {move || i18n.t("skins_add")}
+                    </Button>
                 </div>
-                <ActionGroup>
-                    <IconAction icon="refresh" title=t("refresh") on_click=reload />
-                </ActionGroup>
-                <Button variant=Variant::Primary icon="add" on_click=move |_| open_add()>
-                    {move || i18n.t("skins_add")}
-                </Button>
             </div>
-        </div>
-        {grid}
+            {grid}
+        </DropZone>
         <AddSkinDialog open=add_open on_added=on_added />
         <Dialog open=rename_open title=t("skins_rename_title") icon="edit">
             <DialogFooter slot>

@@ -5,12 +5,13 @@ use launcher_shared::MemoryInfo;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{Button, Field, Icon, Section, Select, SelectOption, Variant, ipc};
+use ui_kit::{Button, DropZone, Field, Icon, Section, Select, SelectOption, Variant, ipc};
 
 use super::Wizard;
 use crate::builds::description::DescriptionField;
 use crate::builds::gpu::GpuChoice;
 use crate::builds::ram::RamSetting;
+use crate::pages::build_settings::IMAGE_ENDINGS;
 use crate::store::use_store;
 
 /// The memory the system reports; the slider shows the advice while the limit is automatic. A
@@ -90,6 +91,16 @@ pub fn Settings(wizard: Wizard) -> impl IntoView {
             }
         });
     };
+    // A picture dropped from the system: taken once the launcher has checked it.
+    let on_icon_dropped = Callback::new(move |paths: Vec<String>| {
+        let Some(path) = paths.into_iter().next() else { return };
+        spawn_local(async move {
+            let args = serde_json::json!({ "path": path });
+            if ipc::invoke::<_, ()>("image_file_check", &args).await.is_ok() {
+                let _ = wizard.state.try_update(|s| s.settings.image_path = Some(path));
+            }
+        });
+    });
 
     view! {
         <div class="build-wizard__settings">
@@ -104,21 +115,23 @@ pub fn Settings(wizard: Wizard) -> impl IntoView {
             </Section>
             <Section icon="image" title=t("wizard_icon_and_description")>
                 <Field label=t("wizard_icon")>
-                    <div class="wrap">
-                        <Button variant=Variant::Ghost icon="image" on_click=move |_| pick_icon()>
-                            {move || i18n.t("select_icon")}
-                        </Button>
-                        {move || icon.get().map(|path| view! {
-                            <span class="hint"><Icon name="check" />{file_name(&path)}</span>
-                            <Button
-                                variant=Variant::Ghost
-                                icon="close"
-                                on_click=move |_| wizard.state.update(|s| s.settings.image_path = None)
-                            >
-                                {move || i18n.t("remove_icon")}
+                    <DropZone accept=IMAGE_ENDINGS label=t("drop_picture") on_drop=on_icon_dropped>
+                        <div class="wrap">
+                            <Button variant=Variant::Ghost icon="image" on_click=move |_| pick_icon()>
+                                {move || i18n.t("select_icon")}
                             </Button>
-                        })}
-                    </div>
+                            {move || icon.get().map(|path| view! {
+                                <span class="hint"><Icon name="check" />{file_name(&path)}</span>
+                                <Button
+                                    variant=Variant::Ghost
+                                    icon="close"
+                                    on_click=move |_| wizard.state.update(|s| s.settings.image_path = None)
+                                >
+                                    {move || i18n.t("remove_icon")}
+                                </Button>
+                            })}
+                        </div>
+                    </DropZone>
                 </Field>
                 <DescriptionField value=description />
             </Section>

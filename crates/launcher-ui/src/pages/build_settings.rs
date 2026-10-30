@@ -12,8 +12,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    Button, CodeEditor, ConfirmDialog, Dialog, DialogFooter, Field, Icon, LabelSwitch, NavEntry, Section,
-    SegOption, Segmented, Select, SelectOption, SettingRow, SettingsNav, Size, TextInput, Variant,
+    Button, CodeEditor, ConfirmDialog, Dialog, DialogFooter, DropZone, Field, Icon, LabelSwitch, NavEntry,
+    Section, SegOption, Segmented, Select, SelectOption, SettingRow, SettingsNav, Size, TextInput, Variant,
     card_image, ipc, use_toasts,
 };
 
@@ -209,6 +209,9 @@ pub fn account_choices(
     choices
 }
 
+/// The endings of the pictures a build takes (`read_icon`).
+pub const IMAGE_ENDINGS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
+
 /// What picking an icon gave: a file to use, nothing (cancelled), or a file that is no usable
 /// image (the backend checks it when it is picked).
 #[derive(Debug, PartialEq, Eq)]
@@ -275,6 +278,11 @@ struct ChangeArgs {
     loader: LoaderKind,
     mc: String,
     loader_version: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct PathArgs {
+    path: String,
 }
 
 #[derive(serde::Serialize)]
@@ -614,23 +622,29 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
             let _ = saving.try_set(false);
         });
     };
-    let pick_icon = move || {
-        spawn_local(async move {
-            match icon_pick(ipc::call::<Option<String>>("pick_image_file").await) {
-                IconPick::Use(path) => {
-                    let _ = image_path.try_set(Some(path));
-                    let _ = remove_image.try_set(false);
-                    let _ = icon_error.try_set(None);
-                }
-                IconPick::Cancelled => {}
-                IconPick::Invalid => {
-                    let _ = image_path.try_set(None);
-                    let _ = icon_error.try_set(Some(i18n.t("version_icon_invalid")));
-                }
-            }
-        });
+    let take_icon = move |picked: Result<Option<String>, AppError>| match icon_pick(picked) {
+        IconPick::Use(path) => {
+            let _ = image_path.try_set(Some(path));
+            let _ = remove_image.try_set(false);
+            let _ = icon_error.try_set(None);
+        }
+        IconPick::Cancelled => {}
+        IconPick::Invalid => {
+            let _ = image_path.try_set(None);
+            let _ = icon_error.try_set(Some(i18n.t("version_icon_invalid")));
+        }
     };
-
+    let pick_icon = move || {
+        spawn_local(async move { take_icon(ipc::call::<Option<String>>("pick_image_file").await) });
+    };
+    // A picture dropped from the system: checked as a picked one is.
+    let on_icon_dropped = Callback::new(move |paths: Vec<String>| {
+        let Some(path) = paths.into_iter().next() else { return };
+        spawn_local(async move {
+            let checked = ipc::invoke::<_, ()>("image_file_check", &PathArgs { path: path.clone() }).await;
+            take_icon(checked.map(|()| Some(path)));
+        });
+    });
     let java_options = Signal::derive(move || {
         let saved =
             loaded.with(|l| l.as_ref().and_then(|r| r.as_ref().ok()).and_then(|s| s.java_path.clone()));
@@ -731,23 +745,25 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                 </Field>
             </Section>
             <Section icon="image" title=t("version_section_appearance") desc=t("version_section_appearance_desc")>
-                <div class="build-settings__icon">
-                    <img src=icon_src alt="" />
-                    <div class="wrap">
-                        <Button icon="upload_file" on_click=move |_| pick_icon()>{icon_label}</Button>
-                        <Button
-                            variant=Variant::Ghost
-                            icon="delete_outline"
-                            on_click=move |_| {
-                                remove_image.set(true);
-                                image_path.set(None);
-                                icon_error.set(None);
-                            }
-                        >
-                            {move || i18n.t("remove_icon")}
-                        </Button>
+                <DropZone accept=IMAGE_ENDINGS label=t("drop_picture") on_drop=on_icon_dropped>
+                    <div class="build-settings__icon">
+                        <img src=icon_src alt="" />
+                        <div class="wrap">
+                            <Button icon="upload_file" on_click=move |_| pick_icon()>{icon_label}</Button>
+                            <Button
+                                variant=Variant::Ghost
+                                icon="delete_outline"
+                                on_click=move |_| {
+                                    remove_image.set(true);
+                                    image_path.set(None);
+                                    icon_error.set(None);
+                                }
+                            >
+                                {move || i18n.t("remove_icon")}
+                            </Button>
+                        </div>
                     </div>
-                </div>
+                </DropZone>
                 {move || match icon_error.get() {
                     Some(e) => view! { <div class="error"><Icon name="error_outline" />{e}</div> }.into_any(),
                     None => view! { <div class="hint">{i18n.t("version_icon_hint")}</div> }.into_any(),

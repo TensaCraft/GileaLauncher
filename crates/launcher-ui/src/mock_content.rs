@@ -250,6 +250,38 @@ impl MockContent {
         Ok((self.list(key, kind), Some(Text::key(kind.deleted_key()).param("name", name))))
     }
 
+    /// A file dropped on a build's tab, as the backend's `ContentService::add` takes it.
+    pub fn add(
+        &mut self,
+        key: &str,
+        kind: ContentKind,
+        path: &str,
+        replace: bool,
+    ) -> Result<(ContentList, Option<Text>), AppError> {
+        let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_string();
+        let ending = if kind == ContentKind::Mods { ".jar" } else { ".zip" };
+        if name.len() <= ending.len() || !name.to_lowercase().ends_with(ending) {
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                format!("{name} is no {} file", kind.folder()),
+            )
+            .with_param("name", name));
+        }
+        if !self.list(key, kind).supported {
+            return Err(AppError::new(ErrorCode::Unsupported, "the build runs no mods"));
+        }
+        let items = self.items(key, kind);
+        match items.iter().position(|i| i.filename == name) {
+            Some(_) if !replace => {
+                return Err(AppError::new(ErrorCode::ContentConflict, format!("{name} already exists"))
+                    .with_param("name", name));
+            }
+            Some(at) => items[at].size = 2048,
+            None => items.push(item(&name, 2048, false)),
+        }
+        Ok((self.list(key, kind), Some(Text::key("content_added").param("name", name))))
+    }
+
     /// Answers `cmd`, or `None` when it is not a content command.
     pub fn handle(&mut self, cmd: &str, args: &Value) -> Option<Result<Value, AppError>> {
         let kind = serde_json::from_value::<ContentKind>(args["kind"].clone()).unwrap_or(ContentKind::Mods);
@@ -262,6 +294,10 @@ impl MockContent {
             }
             "content_delete" => self.delete(key, kind, arg(args, "file")).and_then(announce),
             "content_restore" => self.restore(key, kind, arg(args, "file")).and_then(announce),
+            "content_add" => {
+                let replace = args["replace"].as_bool().unwrap_or(false);
+                self.add(key, kind, arg(args, "path"), replace).and_then(announce)
+            }
             "content_open_dir" => Ok(Value::Null),
             "screenshots_list" => to_value(self.screenshots(key)),
             "screenshot_delete" => {
@@ -297,6 +333,20 @@ impl MockContent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dropped_file_is_added_and_a_twin_asks_first() {
+        let mut m = MockContent::new();
+        let (list, message) =
+            m.add("aeronautics", ContentKind::Mods, r"C:\cache\drops\x\new-mod.jar", false).unwrap();
+        assert!(list.items.iter().any(|i| i.file == "new-mod.jar" && i.enabled));
+        assert_eq!(message, Some(Text::key("content_added").param("name", "new-mod.jar")));
+        let twin = m.add("aeronautics", ContentKind::Mods, "new-mod.jar", false).unwrap_err();
+        assert_eq!(twin.code, ErrorCode::ContentConflict);
+        assert!(m.add("aeronautics", ContentKind::Mods, "new-mod.jar", true).is_ok());
+        let wrong = m.add("aeronautics", ContentKind::ShaderPacks, "a.jar", false).unwrap_err();
+        assert_eq!(wrong.code, ErrorCode::InvalidInput);
+    }
 
     #[test]
     fn a_mod_with_a_backup_restores_once() {

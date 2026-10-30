@@ -6,6 +6,7 @@ pub mod builds;
 pub mod content;
 pub mod core_app;
 pub mod crash;
+pub mod drops;
 pub mod feedback;
 pub mod java;
 pub mod launch;

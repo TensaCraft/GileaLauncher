@@ -163,8 +163,11 @@ pub async fn fill(
     if let Some(java) = &installed.java {
         build.options.insert("executablePath".into(), json!(java.to_string_lossy()));
     }
-    build.options.insert(kind.project_option.into(), json!(meta.project_id));
-    build.options.insert(kind.version_option.into(), json!(meta.version_id));
+    // A pack from a file the provider does not know is no project of its.
+    if !meta.project_id.is_empty() {
+        build.options.insert(kind.project_option.into(), json!(meta.project_id));
+        build.options.insert(kind.version_option.into(), json!(meta.version_id));
+    }
     deps.versions.create_in(&mut build, id)?;
     Ok(build)
 }

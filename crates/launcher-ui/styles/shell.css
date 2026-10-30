@@ -619,6 +619,8 @@
 .skins-card__thumb { width: 64px; height: 128px; image-rendering: pixelated; }
 .skins-card__title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .skins-card__name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.skins-library { display: flex; flex-direction: column; gap: 12px; }
+.content-drop { flex: 1; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .skins-card__model { flex: none; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
 .skins-card__actions { display: flex; align-items: center; gap: 6px; margin-top: auto; }
 .skins-card__wear { flex: 1; min-width: 0; }

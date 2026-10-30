@@ -2976,6 +2976,7 @@ dependencies = [
  "module-skins",
  "module-sync",
  "module-tensa",
+ "percent-encoding",
  "serde",
  "serde_json",
  "sys-locale",

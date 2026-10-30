@@ -68,6 +68,21 @@ pub trait PackSource: Send + Sync {
         held: &'a HeldChoice,
     ) -> PackFuture<'a, Fetched>;
 
+    /// The pack in the archive `file` on this machine (one the player dropped): copied to
+    /// `archive` and read. Its project and version when the provider knows the file, else empty
+    /// ones: the build is then a pack of its own, with no updates.
+    fn fetch_file<'a>(
+        &'a self,
+        file: &'a Path,
+        game: &'a Path,
+        archive: &'a Path,
+        op: &'a OperationHandle,
+        held: &'a HeldChoice,
+    ) -> PackFuture<'a, Fetched> {
+        let _ = (file, game, archive, op, held);
+        Box::pin(async { Err(AppError::new(ErrorCode::Unsupported, "packs from a file")) })
+    }
+
     /// The pack's versions, newest first.
     fn versions<'a>(&'a self, project: &'a str) -> PackFuture<'a, Vec<PackVersion>>;
 
@@ -132,7 +147,11 @@ async fn fill_new(
     let _lease = deps.instances.try_acquire(game, kind.lease)?;
     let archive = game.join(kind.archive);
     let held = HeldChoice::of_install(args);
-    let result = match source.fetch(&args.project_id, &args.version_id, game, &archive, op, &held).await {
+    let fetched = match &args.file {
+        Some(file) => source.fetch_file(Path::new(file), game, &archive, op, &held).await,
+        None => source.fetch(&args.project_id, &args.version_id, game, &archive, op, &held).await,
+    };
+    let result = match fetched {
         Ok(Fetched { pack, meta, skipped }) => {
             engine::fill(deps, kind, game, id, name, &meta, args.icon_url.clone(), &archive, &pack, op)
                 .await
@@ -180,7 +199,9 @@ pub async fn pack_builds(
     kind: &PackKind,
     source: &dyn PackSource,
 ) -> AppResult<Vec<ModpackBuild>> {
-    let owned = engine::owned(deps, kind).await?;
+    // A pack installed from a file the provider does not know has no project to ask about.
+    let owned: Vec<_> =
+        engine::owned(deps, kind).await?.into_iter().filter(|(_, r)| !r.project_id.is_empty()).collect();
     let projects: BTreeSet<String> = owned.iter().map(|(_, r)| r.project_id.clone()).collect();
     let (lists, last_error) = versions_of(source, projects).await;
     if lists.is_empty()
@@ -246,9 +267,10 @@ pub async fn update_pack(
     tokio::task::spawn_blocking(move || engine::recover(&versions, &pack_kind, &key, &root))
         .await
         .map_err(|e| AppError::internal(e.to_string()))??;
-    let record = PackRecord::read(&game, kind.record).ok_or_else(|| {
-        AppError::new(ErrorCode::InvalidInput, format!("the build is not a {} modpack's", kind.provider))
-    })?;
+    let record =
+        PackRecord::read(&game, kind.record).filter(|r| !r.project_id.is_empty()).ok_or_else(|| {
+            AppError::new(ErrorCode::InvalidInput, format!("the build is not a {} modpack's", kind.provider))
+        })?;
     let spec = OperationSpec::new(Text::key("installation_started"), "install")
         .status(Text::key("modpack_updating").param("name", &build.name))
         .on_build(&build.key);

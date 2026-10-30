@@ -476,3 +476,14 @@
 .swatch--custom .icon { font-size: 16px; color: var(--light); text-shadow: 0 1px 2px rgba(var(--shade-rgb), 0.6); pointer-events: none; }
 .swatch--custom.is-active .icon { color: var(--swatch-ink, var(--light)); text-shadow: none; }
 .swatches__hex { width: 150px; margin-left: 6px; }
+
+/* A drop zone: while files from the system are dragged over it, a veil says what a drop does. */
+.drop-zone { position: relative; }
+.drop-zone__veil {
+  position: absolute; inset: 0; z-index: 6; display: none; flex-direction: column; align-items: center; justify-content: center;
+  border: 2px dashed var(--primary); border-radius: var(--r-lg); background: rgba(var(--s-scrim-rgb), 0.78); backdrop-filter: blur(2px);
+  color: var(--primary-light); font: 600 14px var(--f-ui); text-align: center; pointer-events: none; animation: fade var(--dur-fast) ease-out;
+}
+/* A zone taller than the window keeps its words in view. */
+.drop-zone__label { position: sticky; top: 30vh; bottom: 30vh; display: flex; align-items: center; gap: 8px; padding: 6px 12px; }
+.drop-zone.is-over > .drop-zone__veil { display: flex; }

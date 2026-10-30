@@ -235,6 +235,18 @@ mod tests {
         );
     }
 
+    /// A zip that is no Modrinth pack (a resource pack, a CurseForge pack renamed) is refused as
+    /// one, not read as an empty pack.
+    #[test]
+    fn a_zip_without_the_index_is_refused() {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file("manifest.json", SimpleFileOptions::default()).unwrap();
+        zip.write_all(b"{}").unwrap();
+        let other = zip.finish().unwrap().into_inner();
+        assert_eq!(read(Cursor::new(other)).unwrap_err().code, ErrorCode::InvalidInput);
+        assert_eq!(read(Cursor::new(b"not a zip".to_vec())).unwrap_err().code, ErrorCode::InvalidInput);
+    }
+
     #[test]
     fn the_loader_is_the_first_of_neoforge_forge_fabric_quilt() {
         let loader = |deps: Value| read(Cursor::new(mrpack(&index(vec![], deps), &[]))).unwrap().loader;

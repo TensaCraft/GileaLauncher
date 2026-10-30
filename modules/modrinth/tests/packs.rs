@@ -185,3 +185,60 @@ async fn modpacks_are_searched_twenty_a_page_and_their_versions_listed() {
     assert_eq!(versions.len(), 1);
     assert_eq!(versions[0].label(), "sp-1 (1.21.1)");
 }
+
+/// A `.mrpack` dropped from the system, as the page hands it over: its path and the build's name.
+fn from_file(w: &World, pack: &[u8], name: &str) -> PackInstallArgs {
+    let file = w.tmp.path().join("drops").join("Speedy 1.0.mrpack");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, pack).unwrap();
+    PackInstallArgs {
+        name: name.into(),
+        file: Some(file.to_string_lossy().into_owned()),
+        ..Default::default()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pack_file_modrinth_knows_is_installed_as_its_project() {
+    let w = world().await;
+    let pack = mrpack(vec![mod_file(&w.server, "sodium.jar", b"sodium")], &[("overrides/options.txt", b"o")]);
+    publish_pack(&w.server, "SPEEDY", "sp-1", &pack);
+    let version = w.server.data.lock().unwrap().version_ids["sp-1"].clone();
+    w.server.know(&pack, &version);
+    let args = from_file(&w, &pack, "З файлу");
+    let done = w.service.install_pack(&args).await.unwrap();
+    let build = w.versions.get(&done.key).unwrap();
+    assert_eq!(done.name, "З файлу");
+    assert_eq!(
+        (build.options["modrinthProjectId"].clone(), build.options["modrinthVersionId"].clone()),
+        (json!("SPEEDY"), json!("sp-1")),
+        "its updates come as any pack's"
+    );
+    let game = game_dir(&build, w.versions.minecraft_dir());
+    assert_eq!(std::fs::read(game.join("mods/sodium.jar")).unwrap(), b"sodium");
+    assert_eq!(std::fs::read(game.join("options.txt")).unwrap(), b"o");
+    assert!(std::path::Path::new(args.file.as_deref().unwrap()).exists(), "the dropped file stays");
+    assert!(!game.join(".launcher/modpack.mrpack").exists(), "the copy read goes");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pack_file_modrinth_does_not_know_is_a_build_of_its_own() {
+    let w = world().await;
+    let pack = mrpack(vec![mod_file(&w.server, "sodium.jar", b"sodium")], &[("overrides/options.txt", b"o")]);
+    let done = w.service.install_pack(&from_file(&w, &pack, "Своя")).await.unwrap();
+    let build = w.versions.get(&done.key).unwrap();
+    assert_eq!((build.version.as_deref(), build.client.as_deref()), (Some("1.21.1"), Some("Fabric")));
+    assert!(build.options.get("modrinthProjectId").is_none(), "no project to update it from");
+    let game = game_dir(&build, w.versions.minecraft_dir());
+    assert_eq!(std::fs::read(game.join("mods/sodium.jar")).unwrap(), b"sodium");
+    assert!(w.service.modpack_builds().await.unwrap().is_empty(), "nothing to look up for it");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_that_is_no_pack_leaves_no_build_and_no_folder() {
+    let w = world().await;
+    let args = from_file(&w, b"not a zip", "Ніщо");
+    assert_eq!(w.service.install_pack(&args).await.unwrap_err().code, ErrorCode::InvalidInput);
+    assert_eq!(folders(&w), 0);
+    assert!(w.versions.list().is_empty());
+}

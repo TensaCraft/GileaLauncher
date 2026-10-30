@@ -124,6 +124,10 @@ pub struct TabTexts {
     pub enable: &'static str,
     pub disable: &'static str,
     pub confirm_delete: &'static str,
+    /// What the veil over the tab says while files from the system are dragged over it.
+    pub drop: &'static str,
+    /// The endings of the files the tab takes from a drop.
+    pub endings: &'static [&'static str],
 }
 
 pub fn texts(kind: ContentKind) -> TabTexts {
@@ -134,6 +138,8 @@ pub fn texts(kind: ContentKind) -> TabTexts {
             enable: "enable_mod",
             disable: "disable_mod",
             confirm_delete: "confirm_delete_mod",
+            drop: "drop_mods",
+            endings: &["jar"],
         },
         ContentKind::ResourcePacks => TabTexts {
             search: "search_resourcepacks",
@@ -141,6 +147,8 @@ pub fn texts(kind: ContentKind) -> TabTexts {
             enable: "enable_resourcepack",
             disable: "disable_resourcepack",
             confirm_delete: "confirm_delete_resourcepack",
+            drop: "drop_resourcepacks",
+            endings: &["zip"],
         },
         ContentKind::ShaderPacks => TabTexts {
             search: "search_shaders",
@@ -148,8 +156,15 @@ pub fn texts(kind: ContentKind) -> TabTexts {
             enable: "enable_shaderpack",
             disable: "disable_shaderpack",
             confirm_delete: "confirm_delete_shaderpack",
+            drop: "drop_shaderpacks",
+            endings: &["zip"],
         },
     }
+}
+
+/// The file names of `paths`, for a question about them.
+pub fn file_names(paths: &[String]) -> String {
+    paths.iter().map(|p| p.rsplit(['/', '\\']).next().unwrap_or(p)).collect::<Vec<_>>().join(", ")
 }
 
 /// A mod's own name, else the file name.
@@ -508,6 +523,21 @@ mod tests {
         assert_eq!(texts(ContentKind::ShaderPacks).confirm_delete, "confirm_delete_shaderpack");
         assert_eq!(texts(ContentKind::ResourcePacks).empty, "no_resourcepacks_installed");
         assert_eq!(texts(ContentKind::Mods).enable, "enable_mod");
+        assert_eq!(
+            (texts(ContentKind::Mods).drop, texts(ContentKind::Mods).endings),
+            ("drop_mods", &["jar"][..])
+        );
+        assert_eq!(texts(ContentKind::ResourcePacks).endings, ["zip"]);
+        assert_eq!(
+            (texts(ContentKind::ShaderPacks).drop, texts(ContentKind::ShaderPacks).endings),
+            ("drop_shaderpacks", &["zip"][..])
+        );
+    }
+
+    #[test]
+    fn taken_names_are_listed_by_file_name() {
+        let paths = [r"C:\cache\drops\a\sodium.jar".to_string(), "/tmp/drops/b/Faithful 32x.zip".into()];
+        assert_eq!(file_names(&paths), "sodium.jar, Faithful 32x.zip");
     }
 
     #[test]

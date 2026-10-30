@@ -20,6 +20,7 @@ use ui_kit::{
 use super::cards::{ListSkeleton, Pager, ProjectRow};
 use super::held::{HeldDialog, HeldGoOn, use_skipped_held};
 use super::{DEBOUNCE, api, describe, open_page};
+use crate::pages::modpacks::pack_title;
 
 /// The original's pause after typing.
 /// Characters of a modpack's description.
@@ -31,6 +32,10 @@ pub fn ProviderModpacks(
     /// The page's switch between sources, placed right after the search.
     #[prop(optional)]
     sources: Option<ViewFn>,
+    /// A pack file dropped on the page (its provider's id, its path): this provider's own opens the
+    /// install dialog on it.
+    #[prop(optional)]
+    dropped: Option<RwSignal<Option<(String, String)>>>,
 ) -> impl IntoView {
     let (i18n, toasts) = (use_i18n(), use_toasts());
     let info = StoredValue::new(provider.clone());
@@ -77,6 +82,18 @@ pub fn ProviderModpacks(
 
     let dialog_open = RwSignal::new(false);
     let chosen = RwSignal::new(None::<ProjectHit>);
+    let file = RwSignal::new(None::<String>);
+    if let Some(dropped) = dropped {
+        let id = provider.id.clone();
+        Effect::new(move |_| {
+            if let Some((_, path)) = dropped.get().filter(|(owner, _)| *owner == id) {
+                dropped.set(None);
+                chosen.set(None);
+                file.set(Some(path));
+                dialog_open.set(true);
+            }
+        });
+    }
     let card = move |hit: ProjectHit| {
         let (for_site, for_install) = (hit.clone(), hit.clone());
         view! {
@@ -97,6 +114,7 @@ pub fn ProviderModpacks(
                     variant=Variant::Primary
                     icon="download"
                     on_click=Callback::new(move |()| {
+                        file.set(None);
                         chosen.set(Some(for_install.clone()));
                         dialog_open.set(true);
                     })
@@ -153,17 +171,19 @@ pub fn ProviderModpacks(
             page=Signal::derive(move || page.with(|p| p.as_ref().and_then(|r| r.as_ref().ok()).cloned()))
             on_page=Callback::new(search)
         />
-        <PackInstallDialog provider=provider open=dialog_open hit=chosen />
+        <PackInstallDialog provider=provider open=dialog_open hit=chosen file=file />
     }
 }
 
 /// The original's ModpackInstallModal: the build's name (the pack's, made unique) and the pack's
-/// version, newest first; the name is checked as the app's own dialogs check it.
+/// version, newest first; the name is checked as the app's own dialogs check it. For a pack file
+/// dropped on the page (`file`), the name alone, the file's.
 #[component]
 fn PackInstallDialog(
     provider: ProviderInfo,
     open: RwSignal<bool>,
     hit: RwSignal<Option<ProjectHit>>,
+    file: RwSignal<Option<String>>,
 ) -> impl IntoView {
     let (i18n, toasts) = (use_i18n(), use_toasts());
     let info = StoredValue::new(provider);
@@ -179,6 +199,28 @@ fn PackInstallDialog(
     let picked = RwSignal::new(String::new());
     Effect::new(move |_| {
         if !open.get() {
+            return;
+        }
+        if let Some(path) = file.get_untracked() {
+            let Some(request) = latest.try_with_value(|l| l.begin()) else { return };
+            let title = pack_title(&path);
+            name.set(title.clone());
+            error.set(None);
+            versions.set(Some(Ok(Vec::new())));
+            spawn_local(async move {
+                let list =
+                    ipc::call::<BuildsSnapshot>("builds_list").await.map(|s| s.builds).unwrap_or_default();
+                if !latest.try_with_value(|l| l.is_current(request)).unwrap_or(false) {
+                    return;
+                }
+                if let Some(free) = name
+                    .try_with_untracked(|typed| free_name(typed, &title, default_build_name(&title, &list)))
+                    .flatten()
+                {
+                    let _ = name.try_set(free);
+                }
+                let _ = builds.try_set(list);
+            });
             return;
         }
         let Some(h) = hit.get_untracked() else { return };
@@ -259,23 +301,36 @@ fn PackInstallDialog(
         }
     });
     let submit = move || {
-        let Some(h) = hit.get_untracked().filter(|_| loaded()) else { return };
+        if !loaded() {
+            return;
+        }
+        let (dropped, h) = (file.get_untracked(), hit.get_untracked());
+        if dropped.is_none() && h.is_none() {
+            return;
+        }
         let raw = name.get_untracked();
         match builds.with_untracked(|b| check_new_name(&raw, b)) {
             Err(problem) => error.set(Some(i18n.tp(problem.key(), &[("name", raw.trim().to_string())]))),
             Ok(name) => {
                 open.set(false);
-                run.run(PackInstallArgs {
-                    project_id: h.project_id,
-                    version_id: picked.get_untracked(),
-                    name,
-                    icon_url: h.icon_url,
-                    ..Default::default()
+                run.run(match (dropped, h) {
+                    (Some(path), _) => PackInstallArgs { name, file: Some(path), ..Default::default() },
+                    (None, Some(h)) => PackInstallArgs {
+                        project_id: h.project_id,
+                        version_id: picked.get_untracked(),
+                        name,
+                        icon_url: h.icon_url,
+                        ..Default::default()
+                    },
+                    (None, None) => return,
                 });
             }
         }
     };
-    let title = move || hit.with(|h| h.as_ref().map(|h| h.title.clone()).unwrap_or_default());
+    let title = move || match file.get() {
+        Some(path) => pack_title(&path),
+        None => hit.with(|h| h.as_ref().map(|h| h.title.clone()).unwrap_or_default()),
+    };
 
     view! {
         <Dialog
@@ -303,13 +358,15 @@ fn PackInstallDialog(
                     on_enter=Callback::new(move |()| submit())
                 />
             </Field>
-            <Field
-                label=t("modpack_version_label")
-                hint=Signal::derive(move || versions.with(Option::is_none).then(|| i18n.t("loading_modpack_details")))
-                error=Signal::derive(move || versions.with(|v| v.as_ref().and_then(|r| r.as_ref().err().cloned())))
-            >
-                <Select options=options value=picked disabled=Signal::derive(move || !loaded()) />
-            </Field>
+            <Show when=move || file.with(Option::is_none)>
+                <Field
+                    label=t("modpack_version_label")
+                    hint=Signal::derive(move || versions.with(Option::is_none).then(|| i18n.t("loading_modpack_details")))
+                    error=Signal::derive(move || versions.with(|v| v.as_ref().and_then(|r| r.as_ref().err().cloned())))
+                >
+                    <Select options=options value=picked disabled=Signal::derive(move || !loaded()) />
+                </Field>
+            </Show>
         </Dialog>
         <HeldDialog
             provider=Signal::derive(move || info.try_with_value(|p| p.name.clone()).unwrap_or_default())

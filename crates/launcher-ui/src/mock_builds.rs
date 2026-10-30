@@ -628,6 +628,15 @@ impl MockBuilds {
                 })
             }
             "pick_image_file" => Ok(json!("C:\\Users\\Player\\Pictures\\icon.png")),
+            "image_file_check" => {
+                let path = args["path"].as_str().unwrap_or_default().to_ascii_lowercase();
+                let image = [".png", ".jpg", ".jpeg", ".gif", ".webp"].iter().any(|e| path.ends_with(e));
+                if image {
+                    Ok(Value::Null)
+                } else {
+                    Err(AppError::new(ErrorCode::InvalidInput, "not an image"))
+                }
+            }
             "pick_java_file" => Ok(json!("C:\\Program Files\\Java\\jdk-21\\bin\\javaw.exe")),
             _ => return None,
         };

@@ -2,6 +2,7 @@
 
 pub mod busy;
 pub mod components;
+pub mod drop;
 pub mod i18n;
 pub mod ipc;
 pub mod latest;
@@ -14,5 +15,6 @@ pub mod sound;
 
 pub use busy::InFlight;
 pub use components::*;
+pub use drop::{DropZone, Endings};
 pub use latest::LatestRequest;
 pub use lists::Reloadable;

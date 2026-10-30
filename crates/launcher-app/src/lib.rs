@@ -233,6 +233,8 @@ pub fn run() -> i32 {
             commands::pick_java_file,
             commands::pick_file,
             commands::pick_image_file,
+            commands::drop_stage,
+            commands::image_file_check,
             commands::open_path,
             commands::log_view,
             commands::reveal_path,
@@ -300,6 +302,7 @@ pub fn run() -> i32 {
             content_commands::content_toggle,
             content_commands::content_delete,
             content_commands::content_restore,
+            content_commands::content_add,
             content_commands::content_open_dir,
             content_commands::screenshots_list,
             content_commands::screenshot_delete,
@@ -414,5 +417,13 @@ mod tests {
     fn main_window_starts_hidden_until_the_core_is_ready() {
         let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert_eq!(conf["app"]["windows"][0]["visible"], serde_json::json!(false));
+    }
+
+    /// A file dropped on the window comes to the page (`DropZone`): the window's own drop would
+    /// take it first and stop the build list's drag to reorder.
+    #[test]
+    fn the_window_takes_no_file_drop_of_its_own() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["app"]["windows"][0]["dragDropEnabled"], serde_json::json!(false));
     }
 }

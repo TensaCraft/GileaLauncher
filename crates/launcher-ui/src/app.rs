@@ -65,6 +65,8 @@ pub fn App() -> impl IntoView {
     }
     // An app window, not a browser: no browser menu or keys.
     crate::shell::browser::install();
+    // A file dropped outside a drop zone is never opened by the window.
+    ui_kit::drop::guard_window();
     let modules = StoredValue::new_local(crate::modules::ui_modules());
     provide_context(crate::shell::sidebar::ModulePages(
         modules.with_value(|m| m.iter().flat_map(|m| m.pages()).collect()),

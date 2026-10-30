@@ -48,6 +48,7 @@ fn args(version: u64) -> PackInstallArgs {
         icon_url: None,
         replace_held: Vec::new(),
         skip_held: false,
+        file: None,
     }
 }
 
@@ -406,4 +407,70 @@ async fn a_curseforge_pack_s_files_are_curseforge_s_own() {
         .unwrap();
     let marks: Vec<(String, bool)> = overview.notes.into_iter().map(|n| (n.file, n.installed)).collect();
     assert_eq!(marks, [("create-1.jar".to_string(), true)], "the pack put it there");
+}
+
+/// A pack's zip dropped from the system, as the page hands it over: its path and the build's name.
+fn from_file(w: &World, zip: &[u8]) -> PackInstallArgs {
+    let file = w.tmp.path().join("drops").join("Big Pack 1.0.zip");
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(&file, zip).unwrap();
+    PackInstallArgs {
+        name: "З файлу".into(),
+        file: Some(file.to_string_lossy().into_owned()),
+        ..Default::default()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pack_zip_curseforge_knows_is_installed_as_its_project() {
+    let w = world().await;
+    publish_content(&w);
+    let zip = pack_zip(&[(100, 1001), (200, 2001)], &[("overrides/config/a.toml", b"one")], "1.0");
+    publish_pack(&w.server, PACK, vec![pack_file(&w.server, 3001, PACK, &zip, "1.20.1", "Forge")]);
+    let args = from_file(&w, &zip);
+    let done = w.service.install_pack(&args).await.unwrap();
+    let build = w.versions.get(&done.key).unwrap();
+    let game = game_dir(&build, w.versions.minecraft_dir());
+    assert_eq!(fs::read(game.join("mods/create-1.jar")).unwrap(), mod_jar("create"));
+    assert_eq!(fs::read(game.join("config/a.toml")).unwrap(), b"one");
+    assert_eq!(
+        (build.options["curseforgeProjectId"].clone(), build.options["curseforgeVersionId"].clone()),
+        (json!("300"), json!("3001")),
+        "its updates come as any pack's"
+    );
+    assert_eq!(build.description, "Big Pack does things");
+    let downloads = w.server.seen().into_iter().filter(|s| s.path.starts_with("/files/")).count();
+    assert_eq!(downloads, 2, "its two files: the zip is the dropped one");
+    assert!(std::path::Path::new(args.file.as_deref().unwrap()).exists(), "the dropped file stays");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pack_zip_curseforge_does_not_know_is_a_build_of_its_own() {
+    let w = world().await;
+    publish_content(&w);
+    let zip = pack_zip(&[(100, 1001)], &[("overrides/config/a.toml", b"mine")], "2.5");
+    let done = w.service.install_pack(&from_file(&w, &zip)).await.unwrap();
+    let build = w.versions.get(&done.key).unwrap();
+    assert!(build.options.get("curseforgeProjectId").is_none(), "no project to update it from");
+    let game = game_dir(&build, w.versions.minecraft_dir());
+    assert_eq!(fs::read(game.join("mods/create-1.jar")).unwrap(), mod_jar("create"));
+    assert_eq!(fs::read(game.join("config/a.toml")).unwrap(), b"mine");
+    let record: Value =
+        serde_json::from_slice(&fs::read(game.join(".launcher/curseforge-pack.json")).unwrap()).unwrap();
+    assert_eq!(record["version_number"], json!("2.5"));
+    assert!(w.service.modpack_builds().await.unwrap().is_empty(), "nothing to look up for it");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_zip_that_is_no_pack_leaves_no_build_and_no_folder() {
+    let w = world().await;
+    use std::io::{Cursor, Write};
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    zip.start_file("pack.mcmeta", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(b"{}").unwrap();
+    let resource_pack = zip.finish().unwrap().into_inner();
+    let err = w.service.install_pack(&from_file(&w, &resource_pack)).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidInput);
+    assert_eq!(folders(&w), 0);
+    assert!(w.versions.list().is_empty());
 }

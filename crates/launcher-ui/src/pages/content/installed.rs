@@ -3,17 +3,17 @@
 //! their parts beside the tools and before each row's actions.
 
 use launcher_shared::provider::{Need, ProviderInfo, UpdateSummary, UpdatesStatus, updates_text};
-use launcher_shared::{BuildDto, ContentItem, ContentKind, ContentList, Level};
+use launcher_shared::{BuildDto, ContentItem, ContentKind, ContentList, ErrorCode, Level};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde_json::Value;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    ActionGroup, ActionTone, Button, ConfirmDialog, EmptyState, IconAction, Skeleton, TextInput, ipc,
-    use_toasts,
+    ActionGroup, ActionTone, Button, ConfirmDialog, DropZone, EmptyState, IconAction, Skeleton, TextInput,
+    ipc, use_toasts,
 };
 
-use super::{display_name, matches, search_text, subtitle, texts};
+use super::{display_name, file_names, matches, search_text, subtitle, texts};
 use crate::builds::LatestRequest;
 use crate::providers::installed::{ContentIcon, ProviderRowActions, ProviderTools, updates_badge};
 use crate::providers::store::store;
@@ -32,6 +32,14 @@ struct FileArgs {
     /// For a switch: the state the user asked for.
     #[serde(skip_serializing_if = "Option::is_none")]
     enable: Option<bool>,
+}
+
+#[derive(serde::Serialize)]
+struct AddArgs {
+    key: String,
+    kind: ContentKind,
+    path: String,
+    replace: bool,
 }
 
 /// What the panel shows.
@@ -162,6 +170,37 @@ pub fn InstalledPanel(
             }
         });
     };
+
+    // Files dropped from the system: copied in one by one; those whose name the build has wait
+    // for one question, then take their place.
+    let taken = RwSignal::new(Vec::<String>::new());
+    let replace_open = RwSignal::new(false);
+    let add_files = move |paths: Vec<String>, replace: bool| {
+        let build_key = key.get_value();
+        spawn_local(async move {
+            let mut asks = Vec::new();
+            for path in paths {
+                let args = AddArgs { key: build_key.clone(), kind, path: path.clone(), replace };
+                match ipc::invoke::<_, ContentList>("content_add", &args).await {
+                    Ok(fresh) => {
+                        let _ = list.try_set(Some(Ok(fresh)));
+                        let _ = revision.try_update(|n| *n += 1);
+                    }
+                    Err(e) if e.code == ErrorCode::ContentConflict && !replace => asks.push(path),
+                    Err(e) => toasts.show(Level::Error, i18n.error(&e), None),
+                }
+            }
+            if !asks.is_empty() {
+                let _ = taken.try_set(asks);
+                let _ = replace_open.try_set(true);
+            }
+        });
+    };
+    let on_dropped = Callback::new(move |paths: Vec<String>| add_files(paths, false));
+    let confirm_replace = Callback::new(move |()| add_files(taken.get_untracked(), true));
+    let replace_text =
+        Signal::derive(move || i18n.tp("content_replace_ask", &[("names", taken.with(|p| file_names(p)))]));
+    let unsupported = Signal::derive(move || list.with(|l| matches!(l, Some(Ok(l)) if !l.supported)));
 
     let delete_of = RwSignal::new(None::<ContentItem>);
     let delete_open = RwSignal::new(false);
@@ -380,62 +419,72 @@ pub fn InstalledPanel(
     };
 
     view! {
-        <div class="create__bar">
-            // At the right, in this order: the search, where to look, refresh, updates and the folder.
-            <div class="create__tools">
-                <div class="create__search">
-                    <TextInput value=query icon="search" placeholder=t(texts.search) />
-                </div>
-                {sources.map(|s| s.run())}
-                <ActionGroup>
-                    <IconAction icon="refresh" title=t("refresh") on_click=Callback::new(move |()| load()) />
-                    {(!checking.is_empty()).then(|| {
-                        let busy = checking.clone();
-                        let checking = checking.clone();
-                        let (for_badge, for_tip) = (waiting.clone(), waiting.clone());
-                        view! {
-                            <IconAction
-                                icon="update"
-                                tone=ActionTone::Info
-                                title=Signal::derive(move || {
-                                    match for_tip() {
-                                        0 => i18n.t("check_updates_now"),
-                                        available => {
-                                            let summary = UpdateSummary { status: UpdatesStatus::Available, available, unchecked: 0 };
-                                            let (text_key, params) = updates_text(&summary, kind);
-                                            i18n.tp(text_key, &params)
+        <DropZone accept=texts.endings label=t(texts.drop) on_drop=on_dropped disabled=unsupported class="content-drop">
+            <div class="create__bar">
+                // At the right, in this order: the search, where to look, refresh, updates and the folder.
+                <div class="create__tools">
+                    <div class="create__search">
+                        <TextInput value=query icon="search" placeholder=t(texts.search) />
+                    </div>
+                    {sources.map(|s| s.run())}
+                    <ActionGroup>
+                        <IconAction icon="refresh" title=t("refresh") on_click=Callback::new(move |()| load()) />
+                        {(!checking.is_empty()).then(|| {
+                            let busy = checking.clone();
+                            let checking = checking.clone();
+                            let (for_badge, for_tip) = (waiting.clone(), waiting.clone());
+                            view! {
+                                <IconAction
+                                    icon="update"
+                                    tone=ActionTone::Info
+                                    title=Signal::derive(move || {
+                                        match for_tip() {
+                                            0 => i18n.t("check_updates_now"),
+                                            available => {
+                                                let summary = UpdateSummary { status: UpdatesStatus::Available, available, unchecked: 0 };
+                                                let (text_key, params) = updates_text(&summary, kind);
+                                                i18n.tp(text_key, &params)
+                                            }
                                         }
-                                    }
-                                })
-                                badge=Signal::derive(move || updates_badge(for_badge()))
-                                loading=Signal::derive(move || busy.iter().any(|p| store().checking(&p.id, &key.get_value(), kind)))
-                                on_click=Callback::new(move |()| {
-                                    for p in &checking {
-                                        crate::providers::installed::load(p, key.get_value(), kind);
-                                    }
-                                })
-                            />
-                        }
-                    })}
-                    <IconAction
-                        icon="folder_open"
-                        tone=ActionTone::Info
-                        title=t("open_directory")
-                        on_click=Callback::new(move |()| open_dir())
-                    />
-                </ActionGroup>
+                                    })
+                                    badge=Signal::derive(move || updates_badge(for_badge()))
+                                    loading=Signal::derive(move || busy.iter().any(|p| store().checking(&p.id, &key.get_value(), kind)))
+                                    on_click=Callback::new(move |()| {
+                                        for p in &checking {
+                                            crate::providers::installed::load(p, key.get_value(), kind);
+                                        }
+                                    })
+                                />
+                            }
+                        })}
+                        <IconAction
+                            icon="folder_open"
+                            tone=ActionTone::Info
+                            title=t("open_directory")
+                            on_click=Callback::new(move |()| open_dir())
+                        />
+                    </ActionGroup>
+                </div>
             </div>
-        </div>
-        // Made once: a provider's part (its update check and dialogs) keeps its own state and
-        // follows `revision`.
-        {providers
-            .get_value()
-            .into_iter()
-            .map(|p| view! {
-                <ProviderTools provider=p key=key.get_value() kind=kind revision=Signal::from(revision) reload=reload />
-            })
-            .collect_view()}
-        {body}
+            // Made once: a provider's part (its update check and dialogs) keeps its own state and
+            // follows `revision`.
+            {providers
+                .get_value()
+                .into_iter()
+                .map(|p| view! {
+                    <ProviderTools provider=p key=key.get_value() kind=kind revision=Signal::from(revision) reload=reload />
+                })
+                .collect_view()}
+            {body}
+        </DropZone>
+        <ConfirmDialog
+            open=replace_open
+            title=t("confirmation")
+            message=replace_text
+            confirm_label=t("replace")
+            cancel_label=t("cancel")
+            on_confirm=confirm_replace
+        />
         <ConfirmDialog
             open=delete_open
             danger=true
@@ -518,6 +567,7 @@ mod tests {
             modpack_updates: false,
             content_clients: clients.iter().map(|c| c.to_string()).collect(),
             content_label: label.map(str::to_string),
+            pack_file: None,
         }
     }
 

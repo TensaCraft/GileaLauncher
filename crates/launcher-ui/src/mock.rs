@@ -453,6 +453,9 @@ pub fn install() {
         "pick_directory" => Ok(json!("D:\\Games\\Launcher")),
         "pick_file" => Ok(mock_pick_file(&args)),
         #[cfg(feature = "mod-tensa")]
+        "drop_stage" => {
+            Ok(json!(format!(r"C:\cache\drops\mock\{}", args["name"].as_str().unwrap_or("file"))))
+        }
         cmd if cmd.starts_with("provider_") && args["provider"] == module_tensa::ID => {
             tensa.borrow_mut().handle_provider(cmd, &args)
         }
