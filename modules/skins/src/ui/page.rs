@@ -386,6 +386,23 @@ pub fn SkinsPage() -> impl IntoView {
         <div class="page skins-page">
             {move || match has_accounts.get() {
                 None => view! { <div class="skins-body"><Skeleton /></div> }.into_any(),
+                // No profile at all: one comes first, added right here.
+                Some(false) if host.is_some_and(|h| !h.has_profiles.get()) => view! {
+                    <EmptyState icon="person_add" title=t("skins_need_profile_title") desc=t("skins_need_profile_desc")>
+                        <Button
+                            variant=Variant::Primary
+                            icon="person_add"
+                            on_click=move |_| {
+                                if let Some(host) = host {
+                                    host.add_account.run(());
+                                }
+                            }
+                        >
+                            {move || i18n.t("add_account")}
+                        </Button>
+                    </EmptyState>
+                }
+                .into_any(),
                 Some(false) => view! {
                     <EmptyState icon="brand:skin" title=t("skins_empty_title") desc=t("skins_empty_desc")>
                         <Button

@@ -27,6 +27,8 @@
     "skins_walk_tip": "Walking",
     "skins_empty_title": "Sign in with Microsoft to change your skin and cape",
     "skins_empty_desc": "Minecraft shows offline profiles no skin of their own.",
+    "skins_need_profile_title": "Add a profile first",
+    "skins_need_profile_desc": "Skins and capes change for a Microsoft account. Add one to start.",
     "skins_open_profiles": "Profiles",
     "skins_reauth_title": "Profile «{profile}» needs a new sign-in",
     "skins_reauth_desc": "Sign in again to change its skin and cape.",

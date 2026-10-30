@@ -3,7 +3,8 @@ use leptos::prelude::*;
 use ui_kit::menu::use_context_menu;
 use ui_kit::*;
 
-use crate::profiles::launch::{LaunchProfileSelector, ProfileRequiredDialog};
+use crate::profiles::add::use_add_account;
+use crate::profiles::launch::LaunchProfileSelector;
 use crate::shell::PageHeader;
 
 #[component]
@@ -13,7 +14,7 @@ pub fn KitPage() -> impl IntoView {
     }
     let toasts = use_toasts();
     let menu = use_context_menu();
-    let need_profile = RwSignal::new(false);
+    let add_account = use_add_account();
     let pick_profile = RwSignal::new(false);
     let name = RwSignal::new("Aeronautics".to_string());
     let port = RwSignal::new("70000".to_string());
@@ -134,7 +135,7 @@ pub fn KitPage() -> impl IntoView {
                 <div class="wrap">
                     <Button on_click=move |_| dialog.set(true)>"Діалог"</Button>
                     <Button variant=Variant::Danger on_click=move |_| confirm.set(true)>"Підтвердження"</Button>
-                    <Button on_click=move |_| need_profile.set(true)>"Потрібен профіль"</Button>
+                    <Button on_click=move |_| add_account.open_for_launch()>"Потрібен профіль"</Button>
                     <Button on_click=move |_| pick_profile.set(true)>"Вибір профілю"</Button>
                     <Button on_click=move |_| toasts.show(Level::Success, "Збірку створено".into(), Some("Готова до гри.".into()))>"Тост ✓"</Button>
                     <Button on_click=move |_| toasts.show(Level::Warning, "Закрийте Minecraft".into(), None)>"Тост !"</Button>
@@ -168,7 +169,6 @@ pub fn KitPage() -> impl IntoView {
                     cancel_label=s("Скасувати")
                     on_confirm=Callback::new(|_| {})
                 />
-                <ProfileRequiredDialog open=need_profile />
                 <LaunchProfileSelector
                     open=pick_profile
                     version=Signal::derive(|| "Aeronautics".to_string())

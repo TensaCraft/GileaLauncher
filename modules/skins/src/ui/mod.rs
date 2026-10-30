@@ -34,6 +34,7 @@ impl UiModule for SkinsUi {
             icon: "brand:skin",
             label: "skins_nav",
             view: || view! { <page::SkinsPage /> }.into_any(),
+            before_settings: false,
         }]
     }
 }

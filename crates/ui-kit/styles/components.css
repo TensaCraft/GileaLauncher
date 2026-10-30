@@ -320,8 +320,9 @@
 
 /* ---------- toasts ---------- */
 .toaster { position: fixed; right: 16px; bottom: 60px; width: 350px; display: flex; flex-direction: column; gap: 8px; z-index: 90; pointer-events: none; }
-.toast { --c: var(--info); pointer-events: auto; display: grid; grid-template-columns: auto 1fr auto; gap: 11px; padding: 12px 12px 13px 14px; background: var(--s-pop); border: 1px solid var(--line-2); border-radius: var(--r-md); box-shadow: 0 14px 34px rgba(var(--shade-rgb), 0.5); position: relative; overflow: hidden; animation: toast-in 220ms var(--ease); }
-.toast--success { --c: var(--ok); }
+.toast { --c: var(--primary); pointer-events: auto; display: grid; grid-template-columns: auto 1fr auto; gap: 11px; padding: 12px 12px 13px 14px; background: var(--s-pop); border: 1px solid var(--line-2); border-radius: var(--r-md); box-shadow: 0 14px 34px rgba(var(--shade-rgb), 0.5); position: relative; overflow: hidden; animation: toast-in 220ms var(--ease); }
+/* An info and a success are the accent's; a warning and an error keep their state colours. */
+.toast--success { --c: var(--primary); }
 .toast--warning { --c: var(--warn); }
 .toast--error { --c: var(--danger); }
 @keyframes toast-in { from { opacity: 0; transform: translateX(16px); } }

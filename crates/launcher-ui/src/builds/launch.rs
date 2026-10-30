@@ -11,7 +11,8 @@ use ui_kit::i18n::use_i18n;
 
 use super::actions::{BuildActions, LaunchAsks, use_build_actions};
 use super::{LaunchStep, find_build, next_launch_step, own_profile};
-use crate::profiles::launch::{LaunchProfileSelector, ProfileRequiredDialog};
+use crate::profiles::add::use_add_account;
+use crate::profiles::launch::LaunchProfileSelector;
 use crate::store::{AppStore, use_store};
 
 #[derive(Clone, Copy)]
@@ -164,6 +165,14 @@ pub fn LaunchDialogs() -> impl IntoView {
             flow.launch(build, Some(profile_key));
         }
     });
+    // No profile at all: «Додати акаунт» opens at once and says a launch needs one.
+    let add = use_add_account();
+    Effect::new(move |_| {
+        if flow.need_profile.get() {
+            flow.need_profile.set(false);
+            add.open_for_launch();
+        }
+    });
     view! {
         <ConfirmDialog
             open=flow.confirm_duplicate
@@ -182,7 +191,6 @@ pub fn LaunchDialogs() -> impl IntoView {
             on_confirm=start_anyway
         />
         <LaunchProfileSelector open=flow.pick_profile version=name on_pick=pick />
-        <ProfileRequiredDialog open=flow.need_profile />
     }
 }
 

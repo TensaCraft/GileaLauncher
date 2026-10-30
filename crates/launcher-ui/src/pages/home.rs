@@ -1,12 +1,14 @@
 //! Home: «Продовжити гру» (the builds played last, each with its last server or world), then a
-//! grid of build cards; hover shows Play, right-click the build menu.
+//! grid of build cards (hover shows Play, right-click the build menu) ending in «Нова збірка».
 
 use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
 use ui_kit::module::provide_home_cards;
 use ui_kit::reorder::{Reorder, Reorderable};
-use ui_kit::{BuildCard, Button, EmptyState, MenuEntry, NudgeSide, Size, Variant, use_context_menu};
+use ui_kit::{
+    BuildCard, Button, EmptyState, Icon, MenuEntry, NudgeSide, Size, Variant, sound, use_context_menu,
+};
 
 use crate::builds::actions::use_build_actions;
 use crate::builds::dialogs::use_build_menu;
@@ -126,6 +128,21 @@ pub fn HomePage() -> impl IntoView {
                         }
                     />
                     <ModuleCards />
+                    // The last card makes a build, as «Додати акаунт» ends the profiles (owner, 2026-10-30);
+                    // with no build at all the empty state's button does.
+                    <Show when=move || !empty()>
+                        <button
+                            type="button"
+                            class="card card--add"
+                            on:click=move |_| {
+                                sound::play_click();
+                                store.go("/builds/new");
+                            }
+                        >
+                            <Icon name="add" size=28 />
+                            <span>{move || i18n.t("new_build")}</span>
+                        </button>
+                    </Show>
             </div>
         </div>
     }

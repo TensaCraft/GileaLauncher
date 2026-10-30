@@ -1,6 +1,7 @@
 //! Accounts UI: avatars, profile actions, the Microsoft sign-in dialog and the launch pickers.
 
 pub mod actions;
+pub mod add;
 pub mod auth;
 pub mod avatar;
 pub mod launch;
@@ -24,6 +25,13 @@ pub fn kind_text(profile: &ProfileDto, t: impl Fn(&str) -> String) -> String {
         (AccountKind::Yggdrasil | AccountKind::Module, Some(name)) => name.clone(),
         (kind, _) => t(kind_key(kind)),
     }
+}
+
+/// The page where an account on another auth server changes its skin: Ely.by has no way to set
+/// one from a launcher, only its site.
+pub fn skin_site(profile: &ProfileDto) -> Option<&'static str> {
+    (profile.kind == AccountKind::Yggdrasil && profile.server.as_deref() == Some("elyby"))
+        .then_some("https://ely.by/skins")
 }
 
 /// "Microsoft Account • Default".
@@ -57,6 +65,27 @@ mod tests {
         assert_eq!(kind_text(&ely, t), "<auth_server_account>");
         ely.kind = AccountKind::Offline;
         assert_eq!(kind_text(&ely, t), "<offline_account>");
+    }
+
+    #[test]
+    fn an_elyby_account_changes_its_skin_on_the_site() {
+        let mut ely = ProfileDto {
+            key: "elyby:Alex".into(),
+            name: "Alex".into(),
+            id: "7c0d1a2b".into(),
+            kind: AccountKind::Yggdrasil,
+            is_default: false,
+            reauth_required: false,
+            reauth_reason: None,
+            server: Some("elyby".into()),
+            server_name: Some("Ely.by".into()),
+        };
+        assert_eq!(skin_site(&ely), Some("https://ely.by/skins"));
+        ely.server = Some("my-server".into());
+        assert_eq!(skin_site(&ely), None, "another auth server has no known skins page");
+        ely.server = Some("elyby".into());
+        ely.kind = AccountKind::Offline;
+        assert_eq!(skin_site(&ely), None);
     }
 
     #[test]

@@ -27,6 +27,8 @@
     "skins_walk_tip": "Ходьба",
     "skins_empty_title": "Увійдіть через Microsoft, щоб змінювати скін і плащ",
     "skins_empty_desc": "Офлайн-профілям Minecraft не показує власних скінів.",
+    "skins_need_profile_title": "Спершу додайте профіль",
+    "skins_need_profile_desc": "Скіни й плащі змінюються для акаунта Microsoft. Додайте його, щоб почати.",
     "skins_open_profiles": "Профілі",
     "skins_reauth_title": "Профіль «{profile}» потребує нового входу",
     "skins_reauth_desc": "Увійдіть ще раз, щоб змінювати його скін і плащ.",

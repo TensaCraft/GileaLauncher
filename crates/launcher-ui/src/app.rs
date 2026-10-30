@@ -87,10 +87,14 @@ pub fn App() -> impl IntoView {
     provide_launch_flow();
     crate::recent::provide_recent();
     provide_build_dialogs();
+    crate::profiles::add::provide_add_account();
     // What modules may ask of the app: a build's content tab, a build started as Play starts it.
     let flow = crate::builds::launch::use_launch_flow();
     let profile_actions = crate::profiles::actions::use_profile_actions();
+    let add_account = crate::profiles::add::use_add_account();
     ui_kit::module::provide_module_host(ui_kit::module::ModuleHost {
+        add_account: Callback::new(move |()| add_account.open()),
+        has_profiles: Signal::derive(move || store.profiles.with(|p| !p.is_empty())),
         go: Callback::new(move |path: String| store.go(&path)),
         sign_in: Callback::new(move |()| profile_actions.sign_in()),
         avatar_changed: Callback::new(move |key: String| crate::profiles::avatar::reload_avatar(store, &key)),
@@ -232,15 +236,15 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/settings") view=SettingsPage />
                     <Route path=path!("/setup") view=SetupPage />
                     <Route path=path!("/dev/kit") view=KitPage />
+                    // A module's page (`/sync`, `/skins`) is a route of its own, not the fallback: two
+                    // quick visits of a fallback page left it on screen under the next page.
+                    <Route path=path!("/:page") view=RouteFallback />
                 </Routes>
             </Shell>
             <Toaster
                 close_label=Signal::derive(move || i18n.t("toast_close"))
                 on_action=Callback::new(move |action: String| {
                     // A failure's «Report»: the reports module opens its window with it.
-                    // A module's page (`/sync`, `/skins`) is a route of its own, not the fallback: two
-                    // quick visits of a fallback page left it on screen under the next page.
-                    <Route path=path!("/:page") view=RouteFallback />
                     if let Some(problem) = ui_kit::problem::reported_problem(&action) {
                         problems.request.set(Some(problem));
                     }
@@ -257,6 +261,7 @@ pub fn App() -> impl IntoView {
             <BrowserWaitDialog />
             <LaunchDialogs />
             <BuildDialogsHost />
+            <crate::profiles::add::AddAccountDialog />
             <crate::providers::held::SkippedHeldDialog />
         </Router>
     }

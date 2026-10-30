@@ -37,6 +37,8 @@ impl UiModule for SyncUi {
             icon: "sync",
             label: "sync_nav",
             view: || view! { <page::SyncPage /> }.into_any(),
+            // Last of all but Settings (owner, 2026-10-30).
+            before_settings: true,
         }]
     }
 

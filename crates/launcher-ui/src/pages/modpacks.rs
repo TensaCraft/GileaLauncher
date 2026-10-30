@@ -84,7 +84,7 @@ pub fn ModpacksPage() -> impl IntoView {
                 view! { <ProviderModpacks provider=provider sources=sources dropped=dropped /> }.into_any()
             }
             None => view! {
-                <EmptyState icon="webhook" title=Signal::derive(move || i18n.t("modpacks_no_providers")) />
+                <EmptyState icon="widgets" title=Signal::derive(move || i18n.t("modpacks_no_providers")) />
             }
             .into_any(),
         }

@@ -936,6 +936,7 @@
   "empty_builds_title": "No builds yet",
   "empty_builds_desc": "Create your first build or install a modpack from the catalog.",
   "create_build": "Create build",
+  "new_build": "New build",
   "empty_profiles_desc": "Add a Microsoft or offline account to play.",
   "setup_wizard_derived": "Folders that will be created",
   "setup_step_welcome": "Welcome",

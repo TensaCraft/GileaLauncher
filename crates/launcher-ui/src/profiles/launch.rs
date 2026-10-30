@@ -1,6 +1,5 @@
-//! Account pickers used when launching. The Play button opens
-//! `ProfileRequiredDialog` when there are no profiles and `LaunchProfileSelector` when
-//! `ask_profile_on_launch` is on.
+//! The account picker used when launching: the Play button opens `LaunchProfileSelector` when
+//! `ask_profile_on_launch` is on (with no profile at all it opens «Додати акаунт», `add`).
 
 use launcher_shared::{ProfileDto, sort_profiles};
 use leptos::prelude::*;
@@ -16,28 +15,6 @@ pub fn launch_rows(list: &[ProfileDto]) -> Vec<ProfileDto> {
     let mut rows = list.to_vec();
     sort_profiles(&mut rows);
     rows
-}
-
-#[component]
-pub fn ProfileRequiredDialog(open: RwSignal<bool>) -> impl IntoView {
-    let i18n = use_i18n();
-    let store = use_store();
-    let go = move |action: &'static str| {
-        open.set(false);
-        store.go(&format!("/profiles?add={action}"));
-    };
-    view! {
-        <Dialog open=open title=Signal::derive(move || i18n.t("profile_required_title")) icon="person_off">
-            <DialogFooter slot>
-                <Button variant=Variant::Ghost on_click=move |_| open.set(false)>{move || i18n.t("close")}</Button>
-                <Button icon="person_add" on_click=move |_| go("offline")>{move || i18n.t("offline_account")}</Button>
-                <Button variant=Variant::Primary icon="verified_user" on_click=move |_| go("microsoft")>
-                    {move || i18n.t("microsoft_account")}
-                </Button>
-            </DialogFooter>
-            <p style="margin:0">{move || i18n.t("profile_required_message")}</p>
-        </Dialog>
-    }
 }
 
 #[component]

@@ -5,7 +5,7 @@ use launcher_shared::Level;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{Button, EmptyState, InFlight, Variant, use_toasts};
+use ui_kit::{Button, EmptyState, Icon, InFlight, Variant, use_toasts};
 
 use super::card::{GroupCard, HowItWorks};
 use super::editor::EditorDialog;
@@ -83,13 +83,24 @@ pub fn SyncTab(key: String) -> impl IntoView {
         .into_any(),
         Some(list) => view! {
             <div class="sync-toolbar">
-                <Button icon="add" on_click=move |_| create()>{move || i18n.t("sync_create")}</Button>
                 <Button variant=Variant::Primary icon="sync" loading=syncing.running() on_click=move |_| sync_all()>
                     {move || i18n.t("sync_now")}
                 </Button>
             </div>
+            // The last row makes a group, as on the «Синхронізація» page.
             <div class="sync-list">
                 {list.into_iter().map(|view| view! { <GroupCard view=view builds=builds on_open=on_open on_edit=on_edit /> }).collect_view()}
+                <button
+                    type="button"
+                    class="list-row list-row--add"
+                    on:click=move |_| {
+                        ui_kit::sound::play_click();
+                        create();
+                    }
+                >
+                    <Icon name="add" />
+                    <span>{move || i18n.t("sync_new_group")}</span>
+                </button>
             </div>
         }
         .into_any(),

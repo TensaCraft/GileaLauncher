@@ -936,6 +936,7 @@
   "empty_builds_title": "Ще немає збірок",
   "empty_builds_desc": "Створіть першу збірку або встановіть модпак із каталогу.",
   "create_build": "Створити збірку",
+  "new_build": "Нова збірка",
   "empty_profiles_desc": "Додайте акаунт Microsoft або офлайн-акаунт, щоб грати.",
   "setup_wizard_derived": "Теки, що будуть створені",
   "setup_step_welcome": "Вітання",

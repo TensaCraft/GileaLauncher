@@ -18,6 +18,8 @@ pub struct ModulePage {
     /// Translation key of its sidebar label (and its header).
     pub label: &'static str,
     pub view: fn() -> AnyView,
+    /// Its item goes last of all but Settings (after Screenshots), not among the other modules'.
+    pub before_settings: bool,
 }
 
 /// A tab a module adds to a build's content, placed after tab `after` (or the nearest tab before
@@ -161,6 +163,10 @@ pub struct ModuleHost {
     pub sign_in: Callback<()>,
     /// Profile `key`'s head changed (its skin did): the app draws it again.
     pub avatar_changed: Callback<String>,
+    /// Opens «Додати акаунт» (its kinds), wherever the player is.
+    pub add_account: Callback<()>,
+    /// Whether the player has any profile at all.
+    pub has_profiles: Signal<bool>,
 }
 
 /// How many cards each module shows on Home right now: Home says it has no builds only when no

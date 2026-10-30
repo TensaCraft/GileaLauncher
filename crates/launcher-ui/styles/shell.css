@@ -237,7 +237,8 @@
 .profile__dot { width: 7px; height: 7px; margin: 0 3px; flex: none; border-radius: 50%; background: currentColor; }
 /* The buttons stay in one row pinned to the card's right edge, as tall as each other. */
 .profile__actions { margin-top: auto; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
-.profile__more { width: var(--h-sm); padding: 0; }
+/* A square of the buttons' height, never squeezed by its neighbours (a third button, a narrow card). */
+.profile__more { flex: none; width: var(--h-sm); padding: 0; justify-content: center; }
 .profile__pick { margin-right: auto; }
 /* A sign-in on another auth server: its fields one under another. */
 .sign-in { display: flex; flex-direction: column; gap: 12px; }
@@ -260,6 +261,11 @@
 
 .home { min-height: 100%; }
 .home__grid { display: grid; grid-template-columns: repeat(auto-fill, 150px); gap: 16px; }
+/* «Нова збірка», «Нова група»: a grid's last card and a list's last row, dashed as «Додати акаунт». */
+.card--add { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 0; border: 1px dashed var(--line-3); background: transparent; box-shadow: none; color: var(--text-2); font: 600 13px var(--f-ui); cursor: pointer; }
+.card--add:hover { color: var(--text); background: rgba(var(--accent-rgb), 0.06); }
+.list-row--add { width: 100%; min-height: 66px; justify-content: center; gap: 8px; border: 1px dashed var(--line-3); background: transparent; color: var(--text-2); font: 600 13px var(--f-ui); cursor: pointer; }
+.list-row--add:hover { color: var(--text); background: rgba(var(--accent-rgb), 0.06); }
 /* A section's bar, the section's width: its title folds it, its buttons sit at the right. */
 .fold-bar { display: flex; align-items: center; gap: 8px; min-height: 42px; margin: 0 0 10px; padding: 4px 6px 4px 14px; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--s-sec); }
 .fold-bar .fold-head { flex: 1; min-width: 0; align-self: stretch; margin: 0; }
@@ -567,7 +573,9 @@
 .sync-pick__start .icon { font-size: 16px; }
 .sync-pick__start.is-on { color: var(--primary-light); }
 .sync-pick__start.is-hidden { visibility: hidden; }
-.sync-tree { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--s-row); }
+/* A sync group's dialogs hold long lists (the folders, the builds): large, the tree as tall as the window lets it. */
+.dialog--sync { width: 960px; }
+.sync-tree { max-height: max(360px, calc(100vh - 340px)); overflow: auto; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--s-row); }
 .sync-tree > .hint { padding: 12px; }
 .sync-row { display: flex; align-items: center; gap: 8px; min-height: 36px; padding-right: 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .sync-row:last-child { border-bottom: 0; }
@@ -611,6 +619,8 @@
 .skins-stage__switch .icon { font-size: 18px; color: var(--text-3); }
 .skins-stage__model { width: 112px; flex: none; }
 .skins-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.skins-library { display: flex; flex-direction: column; gap: 12px; }
+.content-drop { flex: 1; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .skins-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(184px, 1fr)); gap: 10px; }
 .skins-card { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--s-row); cursor: pointer; transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
 .skins-card:hover { border-color: var(--line-3); }
@@ -619,8 +629,6 @@
 .skins-card__thumb { width: 64px; height: 128px; image-rendering: pixelated; }
 .skins-card__title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .skins-card__name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.skins-library { display: flex; flex-direction: column; gap: 12px; }
-.content-drop { flex: 1; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .skins-card__model { flex: none; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
 .skins-card__actions { display: flex; align-items: center; gap: 6px; margin-top: auto; }
 .skins-card__wear { flex: 1; min-width: 0; }

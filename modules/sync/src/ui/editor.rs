@@ -312,7 +312,7 @@ pub fn EditorDialog(
     });
 
     view! {
-        <Dialog open=open title=title subtitle=subtitle icon="sync" wide=true>
+        <Dialog open=open title=title subtitle=subtitle icon="sync" class="dialog--sync">
             <DialogFooter slot>
                 <Button variant=Variant::Ghost on_click=move |_| open.set(false)>{move || i18n.t("cancel")}</Button>
                 {move || (step.get() > 1).then(|| view! {

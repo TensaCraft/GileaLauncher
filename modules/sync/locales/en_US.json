@@ -31,6 +31,7 @@
     "sync_empty_desc": "A group keeps chosen files and folders (settings, a minimap, resource packs) the same across builds.",
     "sync_tab_empty": "This build is in no sync group",
     "sync_create": "Create a group",
+    "sync_new_group": "New group",
     "sync_editor_new": "New sync group",
     "sync_editor_edit": "Sync group",
     "sync_step": "Step {n} of 3: {what}",

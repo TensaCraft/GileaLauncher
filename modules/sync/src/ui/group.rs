@@ -46,7 +46,7 @@ pub fn GroupDialog(
     let title =
         Signal::derive(move || view.with(|v| v.as_ref().map(|v| v.group.name.clone()).unwrap_or_default()));
     view! {
-        <Dialog open=open title=title icon="sync" wide=true>
+        <Dialog open=open title=title icon="sync" class="dialog--sync">
             <DialogFooter slot>
                 <Button variant=Variant::Ghost on_click=move |_| open.set(false)>{move || i18n.t("close")}</Button>
             </DialogFooter>

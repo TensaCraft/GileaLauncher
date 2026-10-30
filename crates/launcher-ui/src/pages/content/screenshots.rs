@@ -128,9 +128,11 @@ pub fn ScreenshotsPanel(key: String) -> impl IntoView {
         <div class="create__bar">
             <div class="create__tools">
                 <IconAction icon="refresh" title=t("refresh") on_click=Callback::new(move |()| load()) />
-                <Button icon="folder_open" on_click=move |_| actions.open_dir(key.get_value())>
-                    {move || i18n.t("open_screenshots_folder")}
-                </Button>
+                <IconAction
+                    icon="folder_open"
+                    title=t("open_screenshots_folder")
+                    on_click=Callback::new(move |()| actions.open_dir(key.get_value()))
+                />
             </div>
         </div>
         {body}

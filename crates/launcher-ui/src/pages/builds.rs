@@ -32,9 +32,6 @@ pub fn BuildsPage() -> impl IntoView {
             <Button icon="construction" on_click=move |_| store.go("/builds/components")>
                 {move || i18n.t("minecraft_components_nav")}
             </Button>
-            <Button variant=Variant::Primary icon="add" on_click=move |_| store.go("/builds/new")>
-                {move || i18n.t("add_version")}
-            </Button>
         }
     };
     let empty = move || store.builds_loaded.get() && store.builds.with(Vec::is_empty);
@@ -82,6 +79,18 @@ pub fn BuildsPage() -> impl IntoView {
                             </Reorderable>
                         }
                     />
+                    // The last row makes a build, as on Home and «Профілі».
+                    <button
+                        type="button"
+                        class="list-row list-row--add"
+                        on:click=move |_| {
+                            ui_kit::sound::play_click();
+                            store.go("/builds/new");
+                        }
+                    >
+                        <Icon name="add" />
+                        <span>{move || i18n.t("new_build")}</span>
+                    </button>
                 </div>
             </Show>
         </div>

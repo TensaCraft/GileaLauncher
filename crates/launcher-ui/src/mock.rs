@@ -314,8 +314,9 @@ pub fn install() {
     #[cfg(feature = "mod-sync")]
     let sync = Rc::new(RefCell::new(crate::mock_sync::MockSync::new()));
     #[cfg(feature = "mod-skins")]
+    // No profiles: no official account for the skins page either.
     let skins = Rc::new(RefCell::new(crate::mock_skins::MockSkins::new(
-        query_value("skins").as_deref() == Some("none"),
+        query_value("skins").as_deref() == Some("none") || query_value("profiles").as_deref() == Some("none"),
     )));
     #[cfg(feature = "mod-diagnostics")]
     let diagnostics =
@@ -452,10 +453,10 @@ pub fn install() {
         ]),
         "pick_directory" => Ok(json!("D:\\Games\\Launcher")),
         "pick_file" => Ok(mock_pick_file(&args)),
-        #[cfg(feature = "mod-tensa")]
         "drop_stage" => {
             Ok(json!(format!(r"C:\cache\drops\mock\{}", args["name"].as_str().unwrap_or("file"))))
         }
+        #[cfg(feature = "mod-tensa")]
         cmd if cmd.starts_with("provider_") && args["provider"] == module_tensa::ID => {
             tensa.borrow_mut().handle_provider(cmd, &args)
         }
