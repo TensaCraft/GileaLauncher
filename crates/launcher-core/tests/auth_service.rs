@@ -464,6 +464,21 @@ async fn two_launches_at_once_renew_a_stale_session_once() {
     assert!(!profile.reauth_required);
 }
 
+/// A nickname taken on Ely.by since the sign-in: the renewed session names it, and the game
+/// starts under it (the account stays the one it was).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_renewed_session_brings_the_nickname_taken_since() {
+    let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = with_server(&fake, &ygg, dir.path());
+    svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
+    ygg.set(|k| k.renamed = Some("Alex_New".into()));
+    ygg.stale_all();
+    let identity = svc.launch_identity(Some(ELY_KEY)).await.unwrap();
+    assert_eq!(identity.username, "Alex_New");
+    let card = svc.snapshot().profiles.into_iter().find(|p| p.key == ELY_KEY).unwrap();
+    assert_eq!(card.name, "Alex_New");
+}
+
 /// Microsoft renews Microsoft accounts only: another server's token never goes there.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_microsoft_refresh_leaves_an_account_of_another_server_alone() {
@@ -506,6 +521,11 @@ async fn an_account_on_another_server_is_a_player_of_that_server() {
 struct Site {
     two_factor: bool,
     ended: Mutex<bool>,
+    banned: Mutex<bool>,
+    /// The nickname the player took on the site since signing in.
+    renamed: Mutex<Option<String>>,
+    /// A sign-out the site never answers.
+    silent_sign_out: bool,
     signed_out: Mutex<Vec<String>>,
 }
 
@@ -542,14 +562,24 @@ impl AccountProvider for Site {
             if *self.ended.lock().unwrap() {
                 return Err(launcher_shared::AppError::new(ErrorCode::ReauthRequired, "invalid_token"));
             }
-            Ok(ProviderAccount { id: SITE_ID.into(), name: "Builder".into(), token: token.into() })
+            if *self.banned.lock().unwrap() {
+                return Err(launcher_shared::AppError::new(ErrorCode::AuthDenied, "user_banned"));
+            }
+            let name = self.renamed.lock().unwrap().clone().unwrap_or_else(|| "Builder".into());
+            Ok(ProviderAccount { id: SITE_ID.into(), name, token: token.into() })
         })
     }
     fn sign_out<'a>(&'a self, token: &'a str) -> ProviderFuture<'a, ()> {
         Box::pin(async move {
+            if self.silent_sign_out {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
             self.signed_out.lock().unwrap().push(token.to_string());
             Ok(())
         })
+    }
+    fn skin_url(&self, name: &str) -> Option<String> {
+        Some(format!("https://site.example/skins/{name}.png"))
     }
 }
 
@@ -591,6 +621,56 @@ async fn a_site_account_launches_offline_style_once_the_site_vouches_for_it() {
     assert!(svc.snapshot().profiles.iter().find(|p| p.key == SITE_KEY).unwrap().reauth_required);
     svc.delete_signed_out(SITE_KEY).await.unwrap();
     assert_eq!(*site.signed_out.lock().unwrap(), ["site-token"]);
+}
+
+/// The site's word stands at each launch: a banned player does not play, a renamed one plays
+/// under the new nickname (the account stays the one it was).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_banned_player_does_not_launch_and_a_renamed_one_plays_under_the_new_nick() {
+    let (fake, dir) = (fake_ms::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = service(&fake, dir.path(), Arc::new(NoOpener));
+    let site = Arc::new(Site::default());
+    svc.register_provider(site.clone());
+    svc.sign_in_server("tensa", "Builder", "pw", None).await.unwrap();
+    *site.renamed.lock().unwrap() = Some("Architect".into());
+    let identity = svc.launch_identity(Some(SITE_KEY)).await.unwrap();
+    assert_eq!((identity.username.as_str(), identity.uuid.as_str()), ("Architect", SITE_ID));
+    let card = svc.snapshot().profiles.into_iter().find(|p| p.key == SITE_KEY).unwrap();
+    assert_eq!(card.name, "Architect", "the card follows");
+    *site.banned.lock().unwrap() = true;
+    let err = svc.launch_identity(Some(SITE_KEY)).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::AuthDenied);
+}
+
+/// A sign-out the server never answers does not hold the deletion: the account goes at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_that_does_not_answer_a_sign_out_does_not_hold_a_deletion() {
+    let (fake, dir) = (fake_ms::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = service(&fake, dir.path(), Arc::new(NoOpener));
+    svc.register_provider(Arc::new(Site { silent_sign_out: true, ..Site::default() }));
+    svc.sign_in_server("tensa", "Builder", "pw", None).await.unwrap();
+    let gone =
+        tokio::time::timeout(std::time::Duration::from_secs(10), svc.delete_signed_out(SITE_KEY)).await;
+    assert!(gone.expect("not held by the site").unwrap().profiles.is_empty());
+
+    let ygg = fake_ygg::start().await;
+    ygg.set(|k| k.silent_sign_out = true);
+    let (svc, _) = with_server(&fake, &ygg, tempfile::tempdir().unwrap().path());
+    svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
+    let gone = tokio::time::timeout(std::time::Duration::from_secs(10), svc.delete_signed_out(ELY_KEY)).await;
+    assert!(gone.expect("not held by Ely.by").unwrap().profiles.is_empty());
+}
+
+/// A site account wears the site's skin of its nickname, and nobody else's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_site_account_is_a_player_of_its_site() {
+    let (fake, dir) = (fake_ms::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = service(&fake, dir.path(), Arc::new(NoOpener));
+    svc.register_provider(Arc::new(Site::default()));
+    svc.sign_in_server("tensa", "Builder", "pw", None).await.unwrap();
+    let player = svc.player(SITE_KEY).unwrap();
+    assert_eq!(player.site, Some(Some("https://site.example/skins/Builder.png".to_string())));
+    assert_eq!(player.session, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]

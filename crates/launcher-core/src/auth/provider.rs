@@ -2,19 +2,32 @@
 //! session before a launch and ends it; the core keeps the account, sealed like the others, and
 //! launches it as an offline player with the name and UUID the site vouches for.
 
+use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
 use launcher_shared::AppResult;
 
+use super::Hidden;
+
 pub type ProviderFuture<'a, T> = Pin<Box<dyn Future<Output = AppResult<T>> + Send + 'a>>;
 
 /// Who the site says signed in: their game UUID, their nickname and the site's token.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ProviderAccount {
     pub id: String,
     pub name: String,
     pub token: String,
+}
+
+impl fmt::Debug for ProviderAccount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProviderAccount")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("token", &Hidden(true))
+            .finish()
+    }
 }
 
 pub trait AccountProvider: Send + Sync {

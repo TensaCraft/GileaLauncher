@@ -22,7 +22,7 @@ use crate::feedback::{EventSink, FeedbackService};
 use crate::skins::Player;
 
 /// Who plays: what the launch passes to Minecraft. Stays inside `launcher-core`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct LaunchIdentity {
     pub username: String,
     pub uuid: String,
@@ -32,6 +32,18 @@ pub struct LaunchIdentity {
     pub kind: AccountKind,
     /// An account on another auth server: the game reaches it through the authlib-injector agent.
     pub agent: Option<AgentServer>,
+}
+
+impl std::fmt::Debug for LaunchIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchIdentity")
+            .field("username", &self.username)
+            .field("uuid", &self.uuid)
+            .field("access_token", &super::Hidden(true))
+            .field("kind", &self.kind)
+            .field("agent", &self.agent)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The auth server the authlib-injector agent points the game at.
@@ -147,12 +159,17 @@ impl AuthService {
     /// `delete`, ending an account's session on its auth server first (best effort: a server out
     /// of reach does not keep the account).
     pub async fn delete_signed_out(&self, key: &str) -> AppResult<ProfilesSnapshot> {
+        // A server that does not answer only lets the token end on its own: the account goes anyway.
+        let within = self.cfg.timings.sign_out_within;
         if let Some(profile) = self.store.get(key).filter(|p| p.kind == AccountKind::Module)
             && let (Some(provider), Some(token)) =
                 (profile.server.as_deref().and_then(|id| self.provider(id)), &profile.access_token)
-            && let Err(e) = provider.sign_out(token).await
         {
-            tracing::debug!("The site did not take the sign-out of {key}: {}", e.detail);
+            match tokio::time::timeout(within, provider.sign_out(token)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::debug!("The site did not take the sign-out of {key}: {}", e.detail),
+                Err(_) => tracing::debug!("The site did not answer the sign-out of {key} in time"),
+            }
         }
         if let Some(profile) = self.store.get(key).filter(|p| p.kind == AccountKind::Yggdrasil)
             && let (Some(server), Some(access), Some(client)) = (
@@ -160,8 +177,14 @@ impl AuthService {
                 &profile.access_token,
                 &profile.refresh_token,
             )
+            && tokio::time::timeout(
+                within,
+                yggdrasil::invalidate(&self.http, &server.api_root, access, client),
+            )
+            .await
+            .is_err()
         {
-            yggdrasil::invalidate(&self.http, &server.api_root, access, client).await;
+            tracing::debug!("The auth server did not answer the sign-out of {key} in time");
         }
         self.delete(key)
     }
@@ -258,8 +281,23 @@ impl AuthService {
         Ok(saved.to_dto())
     }
 
-    /// A site account as a launch needs it: the site vouches for it now; one it ended asks for a
-    /// new sign-in; a site out of reach keeps the account (single player needs none).
+    /// `profile` under the UUID and nickname its server vouches for now (one taken there since the
+    /// sign-in); as it was when they are the same.
+    fn vouched(&self, profile: StoredProfile, id: &str, name: &str) -> AppResult<StoredProfile> {
+        if (id.is_empty() || profile.id == id) && (name.is_empty() || profile.name == name) {
+            return Ok(profile);
+        }
+        let id = if id.is_empty() { profile.id.clone() } else { id.to_string() };
+        let name = if name.is_empty() { profile.name.clone() } else { name.to_string() };
+        tracing::info!("The server of {} names its player {name} now", profile.key);
+        let saved = self.store.update_identity(&profile.key, &id, &name)?;
+        self.changed();
+        Ok(saved)
+    }
+
+    /// A site account as a launch needs it: the site vouches for it now (under the nickname it
+    /// has there now); one it ended asks for a new sign-in, one it refuses (a ban) does not play;
+    /// a site out of reach keeps the account (single player needs none).
     async fn site_identity(&self, profile: StoredProfile) -> AppResult<LaunchIdentity> {
         let identity = |profile: &StoredProfile| LaunchIdentity {
             username: profile.name.clone(),
@@ -276,11 +314,15 @@ impl AuthService {
                 .with_param("profile", &profile.name));
         };
         match provider.verify(&token).await {
-            Ok(_) => Ok(identity(&profile)),
+            Ok(account) => Ok(identity(&self.vouched(profile, &account.id, &account.name)?)),
             Err(e) if e.code == ErrorCode::ReauthRequired => {
                 tracing::warn!("The site of {module} ended the session of {}", profile.key);
                 self.store.mark_reauth(&profile.key, REASON_REFRESH_INVALID)?;
                 self.changed();
+                Err(e.with_param("profile", &profile.name))
+            }
+            Err(e) if e.code == ErrorCode::AuthDenied => {
+                tracing::warn!("The site of {module} refuses {}: {}", profile.key, e.detail);
                 Err(e.with_param("profile", &profile.name))
             }
             Err(e) => {
@@ -321,6 +363,10 @@ impl AuthService {
             Ok(renewed) => {
                 let saved = self.store.update_session(&profile.key, &renewed.access_token)?;
                 self.changed();
+                let saved = match &renewed.profile {
+                    Some(player) => self.vouched(saved, &player.id, &player.name)?,
+                    None => saved,
+                };
                 Ok((saved, agent))
             }
             Err(e) if e.code == ErrorCode::ReauthRequired => {

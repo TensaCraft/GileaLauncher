@@ -11,9 +11,9 @@ use launcher_shared::{
 };
 use serde_json::{Map, Value, json};
 
-use super::TOKEN_REFRESH_LEEWAY;
 use super::crypto::{ENC_PREFIX, TokenCipher};
 use super::offline::offline_uuid;
+use super::{Hidden, TOKEN_REFRESH_LEEWAY};
 use crate::storage::json::{JsonRead, backup_corrupt_file, read_json_object, write_json_file};
 
 pub const PROFILES_FILE: &str = "profiles.json";
@@ -41,7 +41,7 @@ const TOKEN_FIELDS: [&str; 2] = ["access_token", "refresh_token"];
 type Record = Map<String, Value>;
 
 /// A profile with its tokens decrypted. Never sent to the UI as is (see `to_dto`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct StoredProfile {
     pub key: String,
     pub id: String,
@@ -61,6 +61,22 @@ pub struct StoredProfile {
     decryption_failed: bool,
     /// The token key could not be read (for a moment): the tokens are out of reach, not lost.
     key_unavailable: bool,
+}
+
+impl std::fmt::Debug for StoredProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredProfile")
+            .field("key", &self.key)
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("kind", &self.kind)
+            .field("access_token", &Hidden::of(&self.access_token))
+            .field("refresh_token", &Hidden::of(&self.refresh_token))
+            .field("expires_at", &self.expires_at)
+            .field("server", &self.server)
+            .field("is_default", &self.is_default)
+            .finish_non_exhaustive()
+    }
 }
 
 impl StoredProfile {
@@ -124,7 +140,7 @@ impl StoredProfile {
 /// A profile to add; tokens in clear text, sealed on save. A `Yggdrasil` account names its auth
 /// server (id, name) and keeps its client token where Microsoft's keep the refresh token: both are
 /// what renews the session.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Default)]
 pub struct NewProfile {
     pub id: Option<String>,
     pub name: String,
@@ -134,6 +150,18 @@ pub struct NewProfile {
     pub expires_at: Option<i64>,
     pub auth_client_id: Option<String>,
     pub server: Option<ServerRef>,
+}
+
+impl std::fmt::Debug for NewProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NewProfile")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("access_token", &Hidden::of(&self.access_token))
+            .field("refresh_token", &Hidden::of(&self.refresh_token))
+            .field("server", &self.server)
+            .finish_non_exhaustive()
+    }
 }
 
 impl NewProfile {
@@ -411,6 +439,18 @@ impl ProfileStore {
     }
 
     /// A `Yggdrasil` account's renewed session: its new access token, the markers cleared.
+    /// The UUID and nickname the account's server vouches for now (a nickname taken there since
+    /// the sign-in); the key stays, so the account stays the one it was.
+    pub fn update_identity(&self, key: &str, id: &str, name: &str) -> AppResult<StoredProfile> {
+        self.mutate(|all| {
+            let record = all.get_mut(key).ok_or_else(|| not_found(key))?;
+            record.insert("id".to_string(), json!(id));
+            record.insert("name".to_string(), json!(name));
+            Ok(())
+        })?;
+        self.get(key).ok_or_else(|| not_found(key))
+    }
+
     pub fn update_session(&self, key: &str, access_token: &str) -> AppResult<StoredProfile> {
         let sealed = match self.cipher.encrypt(access_token) {
             Ok(sealed) => sealed,
@@ -560,6 +600,17 @@ mod tests {
 
     fn file(dir: &Path) -> String {
         fs::read_to_string(dir.join(PROFILES_FILE)).unwrap()
+    }
+
+    #[test]
+    fn a_profile_printed_for_a_log_shows_no_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let new = microsoft("Notch_UA");
+        let stored = ProfileStore::open(dir.path()).save("Notch_UA", new.clone(), true).unwrap();
+        for printed in [format!("{new:?}"), format!("{stored:?}")] {
+            assert!(printed.contains("Notch_UA"), "{printed}");
+            assert!(!printed.contains("mc-access") && !printed.contains("ms-refresh"), "{printed}");
+        }
     }
 
     /// A scanner or a sync tool held the file at start: it is no corrupt file, and the profiles it

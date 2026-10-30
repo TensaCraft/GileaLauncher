@@ -13,6 +13,7 @@ pub mod store;
 pub mod xbox;
 pub mod yggdrasil;
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -80,6 +81,8 @@ pub struct AuthTimings {
     pub browser_timeout: Duration,
     pub device_min_interval: Duration,
     pub slow_down_step: Duration,
+    /// How long a deletion waits for the account's server to take the sign-out.
+    pub sign_out_within: Duration,
 }
 
 impl Default for AuthTimings {
@@ -90,6 +93,7 @@ impl Default for AuthTimings {
             browser_timeout: Duration::from_secs(180),
             device_min_interval: Duration::from_secs(1),
             slow_down_step: Duration::from_secs(2),
+            sign_out_within: Duration::from_secs(5),
         }
     }
 }
@@ -103,7 +107,23 @@ impl AuthTimings {
             browser_timeout: Duration::from_secs(5),
             device_min_interval: Duration::from_millis(10),
             slow_down_step: Duration::from_millis(20),
+            sign_out_within: Duration::from_millis(300),
         }
+    }
+}
+
+/// A password or a token as `Debug` prints it: whether there is one, never what it is.
+pub(crate) struct Hidden(pub bool);
+
+impl Hidden {
+    pub(crate) fn of(secret: &Option<String>) -> Hidden {
+        Hidden(secret.is_some())
+    }
+}
+
+impl fmt::Debug for Hidden {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(if self.0 { "<hidden>" } else { "None" })
     }
 }
 
@@ -145,5 +165,50 @@ impl AuthConfig {
             state_dir: state_dir.to_path_buf(),
             servers: servers::presets(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::provider::ProviderAccount;
+    use super::service::LaunchIdentity;
+    use super::yggdrasil::{Credentials, Session};
+    use launcher_shared::AccountKind;
+
+    /// What a log could print of a sign-in, a session or a launch: never a password or a token.
+    #[test]
+    fn secrets_printed_for_a_log_stay_hidden() {
+        let credentials =
+            Credentials { login: "alex", password: "hunter2", code: Some("123456"), client_token: "c-1" };
+        let session = Session {
+            access_token: "token-1".into(),
+            client_token: "c-1".into(),
+            profile: None,
+            profiles: Vec::new(),
+        };
+        let account =
+            ProviderAccount { id: "id-1".into(), name: "Builder".into(), token: "site-token".into() };
+        let identity = LaunchIdentity {
+            username: "Builder".into(),
+            uuid: "id-1".into(),
+            access_token: "mc-access".into(),
+            xuid: None,
+            client_id: None,
+            kind: AccountKind::Microsoft,
+            agent: None,
+        };
+        let printed = [
+            format!("{credentials:?}"),
+            format!("{session:?}"),
+            format!("{account:?}"),
+            format!("{identity:?}"),
+        ];
+        for (text, secret) in printed.iter().zip(["hunter2", "token-1", "site-token", "mc-access"]) {
+            assert!(!text.contains(secret), "{text}");
+        }
+        assert!(
+            printed[0].contains("alex") && printed[2].contains("Builder") && printed[3].contains("Builder")
+        );
+        assert!(!printed[0].contains("123456"), "nor the second factor");
     }
 }

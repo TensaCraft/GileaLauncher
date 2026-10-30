@@ -31,6 +31,10 @@ pub struct Knobs {
     pub stale_tokens: Vec<String>,
     /// The profile wears no skin of its own.
     pub no_skin: bool,
+    /// The player took another nickname: sessions name the profile so from now on.
+    pub renamed: Option<String>,
+    /// A sign-out is never answered.
+    pub silent_sign_out: bool,
 }
 
 #[derive(Clone)]
@@ -178,8 +182,12 @@ fn session(s: &Shared, client_token: &str) -> Value {
     let mut issued = s.issued.lock().unwrap();
     *issued += 1;
     let token = format!("token-{issued}");
-    s.knobs.lock().unwrap().valid_tokens.push(token.clone());
-    let profile = json!({ "id": PROFILE_ID, "name": PROFILE_NAME });
+    let name = {
+        let mut knobs = s.knobs.lock().unwrap();
+        knobs.valid_tokens.push(token.clone());
+        knobs.renamed.clone().unwrap_or_else(|| PROFILE_NAME.to_string())
+    };
+    let profile = json!({ "id": PROFILE_ID, "name": name });
     json!({
         "accessToken": token,
         "clientToken": client_token,
@@ -242,6 +250,9 @@ async fn validate(State(s): State<Shared>, Json(body): Json<Value>) -> Response 
 
 async fn invalidate(State(s): State<Shared>, Json(body): Json<Value>) -> Response {
     record(&s, "authserver/invalidate", &body);
+    if s.knobs.lock().unwrap().silent_sign_out {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    }
     let token = body["accessToken"].as_str().unwrap_or_default().to_string();
     s.knobs.lock().unwrap().valid_tokens.retain(|t| t != &token);
     StatusCode::NO_CONTENT.into_response()

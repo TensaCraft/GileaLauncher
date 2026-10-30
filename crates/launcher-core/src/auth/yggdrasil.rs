@@ -2,10 +2,13 @@
 //! the API behind an address, signing in, and keeping the session alive. The game reaches the same
 //! server through the authlib-injector agent (`launch`).
 
+use std::fmt;
+
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde_json::{Value, json};
 use url::Url;
 
+use super::Hidden;
 use super::http::{AuthHttp, FlowError, Reply};
 
 /// An auth server found behind an address.
@@ -22,7 +25,7 @@ pub struct AuthServerInfo {
 
 /// What a sign-in sends. `code` is the second factor, sent after the password (`password:code`),
 /// as Ely.by asks.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Credentials<'a> {
     pub login: &'a str,
     pub password: &'a str,
@@ -37,13 +40,33 @@ pub struct GameProfile {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Session {
     pub access_token: String,
     pub client_token: String,
     /// The profile the session plays as; none until one of `profiles` is chosen.
     pub profile: Option<GameProfile>,
     pub profiles: Vec<GameProfile>,
+}
+
+impl fmt::Debug for Credentials<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Credentials")
+            .field("login", &self.login)
+            .field("password", &Hidden(true))
+            .field("code", &Hidden(self.code.is_some()))
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for Session {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Session")
+            .field("access_token", &Hidden(true))
+            .field("profile", &self.profile)
+            .field("profiles", &self.profiles)
+            .finish_non_exhaustive()
+    }
 }
 
 fn invalid_server(detail: impl Into<String>) -> AppError {

@@ -150,7 +150,10 @@ pub fn ProfilesPage() -> impl IntoView {
         let done = Callback::new(move |error: Option<AppError>| {
             signing.done();
             match error {
+                // Signed in: the password and code are not kept in the form.
                 None => {
+                    let _ = password.try_set(String::new());
+                    let _ = code.try_set(String::new());
                     let _ = add_open.try_set(false);
                 }
                 Some(e) => {
