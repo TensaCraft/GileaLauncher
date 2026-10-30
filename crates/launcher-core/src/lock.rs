@@ -220,6 +220,20 @@ impl Coordinator {
 mod tests {
     use super::*;
 
+    /// `coordinator`'s lease on `path` once its lock is free. A process another test starts at
+    /// this moment gets a copy of every open file until its program runs, the lock's among them:
+    /// a released lock comes free within moments, not at once.
+    fn acquired_soon(coordinator: &Coordinator, path: &Path, kind: &str) -> Lease {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match coordinator.try_acquire(path, kind) {
+                Ok(lease) => return lease,
+                Err(e) => assert!(std::time::Instant::now() < deadline, "the lock never came free: {e:?}"),
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn lock_files_live_next_to_the_resource() {
         let dir = tempfile::tempdir().unwrap();
@@ -270,7 +284,7 @@ mod tests {
         drop(instances.try_acquire(&other, "install").unwrap());
         drop(lease);
         assert_eq!(instances.active_kind(&game), None);
-        instances.try_acquire(&game, "install").unwrap();
+        acquired_soon(&instances, &game, "install");
     }
 
     #[test]
@@ -284,7 +298,7 @@ mod tests {
         let shared = Coordinator::shared();
         assert_eq!(shared.try_acquire(&mc, "java_runtime").unwrap_err().code, ErrorCode::SharedBusy);
         drop(foreign);
-        shared.try_acquire(&mc, "java_runtime").unwrap();
+        acquired_soon(&shared, &mc, "java_runtime");
     }
 
     #[test]
