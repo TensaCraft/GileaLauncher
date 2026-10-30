@@ -32,6 +32,10 @@ name = "api"
 required-features = ["backend"]
 
 [[test]]
+name = "site"
+required-features = ["backend"]
+
+[[test]]
 name = "plan"
 required-features = ["backend"]
 

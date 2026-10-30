@@ -6,6 +6,13 @@ use launcher_shared::provider::ProviderInfo;
 pub const ID: &str = "tensa";
 /// The client the server's builds name.
 pub const CLIENT: &str = "TensaCraft";
+/// The server's site, whose auth API signs players in («Сайт TensaCraft»): from the build profile
+/// (`[modules.tensa] site`). Empty: no such kind of account, nowhere. An extra kind only: server
+/// builds play with any account.
+pub const SITE: &str = match option_env!("LAUNCHER_MOD_TENSA_SITE") {
+    Some(site) => site,
+    None => "",
+};
 
 /// The server builds as a provider: modpacks (the catalog) for every build, and the mods the
 /// server allows (its whitelist) as «Необов'язкові» in its own builds' Mods tab.

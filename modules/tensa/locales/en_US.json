@@ -3,6 +3,8 @@
     "module_tensa_desc": "Catalog, installation and synchronization of TensaCraft server builds",
     "server_builds_unavailable": "Server unavailable",
     "tensa_settings_title": "Server builds",
+    "tensa_account": "TensaCraft site",
+    "tensa_account_desc": "The server's site account: its nick and skin in the game",
     "tensa_settings_desc": "The TensaCraft server builds on Home",
     "tensa_added_content_synced_away": "This is a server build: mods and other content added to the folders the server manages will be removed at the next sync. Mods the server allows are under Optional.",
     "tensa_optional_source": "Optional",

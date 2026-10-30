@@ -3,6 +3,8 @@
     "module_tensa_desc": "Каталог, встановлення та синхронізація збірок серверу TensaCraft",
     "server_builds_unavailable": "Сервер недоступний",
     "tensa_settings_title": "Серверні збірки",
+    "tensa_account": "Сайт TensaCraft",
+    "tensa_account_desc": "Акаунт сайту сервера: його нік і скін у грі",
     "tensa_settings_desc": "Збірки серверу TensaCraft на Головній",
     "tensa_added_content_synced_away": "Це збірка сервера: моди й інший вміст, додані в теки, якими керує сервер, зникнуть після наступної синхронізації. Дозволені сервером моди — у «Необов'язкових».",
     "tensa_optional_source": "Необов'язкові",
