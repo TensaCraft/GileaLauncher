@@ -105,10 +105,11 @@ pub async fn search(deps: &Deps, args: &SearchArgs) -> AppResult<SearchPage> {
     Ok(SearchPage { hits, total: matching.len() as u32, ..empty })
 }
 
-/// The plan of installing `found`.
-fn plan_of(found: &Found) -> PlanDto {
+/// The plan of installing `found`; `occupied`: a file not its own already has its name.
+fn plan_of(found: &Found, occupied: bool) -> PlanDto {
     let item = &found.item;
     let action = match found.state {
+        State::Missing if occupied => Action::Replace,
         State::Missing => Action::Install,
         State::Outdated => Action::Replace,
         State::Current => Action::Satisfied,
@@ -121,10 +122,9 @@ fn plan_of(found: &Found) -> PlanDto {
         filename: item.name.clone(),
         action,
         current: (action == Action::Replace)
-            .then(|| found.files.first().map(|f| file_name(f).to_string()))
-            .flatten(),
+            .then(|| found.files.first().map_or_else(|| item.name.clone(), |f| file_name(f).to_string())),
         url: item.page.clone(),
-        unrecognized: action == Action::Replace && found.by_name_only,
+        unrecognized: action == Action::Replace && (found.by_name_only || occupied),
     };
     // The item is the whole plan: no dependencies, nothing optional, nothing in the way.
     PlanDto {
@@ -152,7 +152,7 @@ pub async fn plan(deps: &Deps, args: &InstallArgs) -> AppResult<PlanDto> {
     let target = target(deps, &args.key).await?.ok_or_else(|| not_a_server_build(&args.key))?;
     let all = found(deps, &target, false).await?;
     let mine = all.iter().find(|f| f.item.id == args.project_id).ok_or_else(|| gone(&args.project_id))?;
-    Ok(plan_of(mine))
+    Ok(plan_of(mine, occupied(&target.game, mine)))
 }
 
 pub async fn install(deps: &Deps, args: &InstallArgs) -> AppResult<InstallAnswer> {
@@ -160,7 +160,7 @@ pub async fn install(deps: &Deps, args: &InstallArgs) -> AppResult<InstallAnswer
     let all = found(deps, &target, true).await?;
     let mine =
         all.into_iter().find(|f| f.item.id == args.project_id).ok_or_else(|| gone(&args.project_id))?;
-    let plan = plan_of(&mine);
+    let plan = plan_of(&mine, occupied(&target.game, &mine));
     let main = plan.main.clone().ok_or_else(|| gone(&args.project_id))?;
     let outcome = InstallOutcome {
         project_id: main.project_id.clone(),
@@ -203,6 +203,13 @@ pub async fn install(deps: &Deps, args: &InstallArgs) -> AppResult<InstallAnswer
             Err(e)
         }
     }
+}
+
+/// A file at `found`'s destination that is not its own (a mod put in by hand under the same
+/// name): installing replaces it, so the player confirms first.
+fn occupied(game: &Path, found: &Found) -> bool {
+    let dest = destination(found);
+    game.join(&dest).is_file() && !found.files.iter().any(|f| f.eq_ignore_ascii_case(&dest))
 }
 
 /// Where the item goes: its own name, turned off when the copy it replaces was.
@@ -325,4 +332,49 @@ pub async fn overview(deps: &Deps, args: &OverviewArgs) -> AppResult<Overview> {
         UpdateSummary { status, available, unchecked: 0 }
     });
     Ok(Overview { notes, updates })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn missing() -> Found {
+        Found {
+            item: Item {
+                id: "e4mc".into(),
+                title: "e4mc".into(),
+                kind: ContentKind::Mods,
+                name: "e4mc-6.2.3.jar".into(),
+                relative: "mods/e4mc-6.2.3.jar".into(),
+                url: "https://cdn.example/e4mc-6.2.3.jar".into(),
+                size: Some(10),
+                sha256: "ab".into(),
+                page: None,
+            },
+            files: Vec::new(),
+            state: State::Missing,
+            current: None,
+            disabled: false,
+            by_name_only: false,
+            noted: None,
+            by_name: Vec::new(),
+            pattern: None,
+        }
+    }
+
+    #[test]
+    fn a_foreign_file_of_the_same_name_is_replaced_only_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let found = missing();
+        let free = plan_of(&found, occupied(dir.path(), &found));
+        assert_eq!(free.main.unwrap().action, Action::Install);
+        fs::create_dir_all(dir.path().join("mods")).unwrap();
+        fs::write(dir.path().join("mods/e4mc-6.2.3.jar"), b"someone else's").unwrap();
+        let main = plan_of(&found, occupied(dir.path(), &found)).main.unwrap();
+        assert_eq!(
+            (main.action, main.unrecognized, main.current.as_deref()),
+            (Action::Replace, true, Some("e4mc-6.2.3.jar")),
+            "the player is asked before their file goes"
+        );
+    }
 }
