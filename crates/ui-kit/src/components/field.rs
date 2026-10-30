@@ -9,14 +9,25 @@ pub fn Field(
     #[prop(optional, into)] optional_note: MaybeProp<String>,
     #[prop(optional, into)] hint: MaybeProp<String>,
     #[prop(optional, into)] error: MaybeProp<String>,
+    /// A small control at the end of the label row (`LabelSwitch`): what the field lists.
+    #[prop(default = None)]
+    aside: Option<ViewFn>,
     children: Children,
 ) -> impl IntoView {
+    let label = view! {
+        <label class="label">
+            <span>{move || label.get()}</span>
+            {move || optional_note.get().map(|n| view! { <span class="label__opt">{n}</span> })}
+        </label>
+    };
+    // Beside the label, not in it: a click on the label's words must not work the control.
+    let head = match aside {
+        Some(aside) => view! { <div class="field__head">{label}{aside.run()}</div> }.into_any(),
+        None => label.into_any(),
+    };
     view! {
         <div class="field">
-            <label class="label">
-                <span>{move || label.get()}</span>
-                {move || optional_note.get().map(|n| view! { <span class="label__opt">{n}</span> })}
-            </label>
+            {head}
             {children()}
             {move || match error.get() {
                 Some(e) => view! { <div class="error"><Icon name="error_outline" />{e}</div> }.into_any(),

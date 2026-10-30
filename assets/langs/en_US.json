@@ -253,6 +253,7 @@
   "build_loader_older_warning": "{loader} {to} is older than {from}: mods made for the newer build may not load.",
   "build_version_confirm_title": "Change the version?",
   "version_component_include_unstable": "Show unstable loader builds",
+  "loader_unstable_short": "Beta",
   "loader_offer_leftover_mods": "The mods folder still holds mods from before (files: {count}). Vanilla Minecraft does not load them.",
   "loader_offer_mods_title": "To add mods, install a loader",
   "loader_offer_mods_desc": "The loader goes into this build for Minecraft {mc}. Worlds, settings and resource packs stay.",

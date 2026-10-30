@@ -37,5 +37,5 @@ pub use select::{Select, SelectOption};
 pub use slider::Slider;
 pub use tag::{Tag, TagTone};
 pub use toast::{ToastItem, Toaster, Toasts, provide_toasts, use_toasts};
-pub use toggle::{Checkbox, SegOption, Segmented, Switch};
+pub use toggle::{Checkbox, LabelSwitch, SegOption, Segmented, Switch};
 pub use tooltip::{Tooltip, TooltipPlacement};

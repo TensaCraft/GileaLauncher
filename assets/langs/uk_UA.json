@@ -253,6 +253,7 @@
   "build_loader_older_warning": "{loader} {to} старіший за {from}: моди, зроблені під новіший білд, можуть не завантажитися.",
   "build_version_confirm_title": "Змінити версію?",
   "version_component_include_unstable": "Показувати нестабільні білди лоадерів",
+  "loader_unstable_short": "Бета",
   "loader_offer_leftover_mods": "У теці mods лишилися моди з минулого (файлів: {count}). Ванільний Minecraft їх не завантажує.",
   "loader_offer_mods_title": "Щоб додавати моди, встановіть лоадер",
   "loader_offer_mods_desc": "Лоадер встановиться в цю збірку для Minecraft {mc}. Світи, налаштування й пакети ресурсів лишаться на місці.",

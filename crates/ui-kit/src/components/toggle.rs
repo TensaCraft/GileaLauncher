@@ -31,6 +31,40 @@ pub fn Switch(
     }
 }
 
+/// A small switch with its word, for a field's label row (`Field`'s `aside`): the word and the
+/// switch are one control.
+#[component]
+pub fn LabelSwitch(
+    checked: RwSignal<bool>,
+    #[prop(into)] label: Signal<String>,
+    /// What it does, in full, on hover.
+    #[prop(optional, into)]
+    tip: MaybeProp<String>,
+    #[prop(optional, into)] on_change: Option<Callback<bool>>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            role="switch"
+            class="label-switch"
+            aria-checked=move || checked.get().to_string()
+            data-tip=move || tip.get()
+            data-tip-side="top"
+            on:click=move |_| {
+                let next = !checked.get_untracked();
+                sound::play_click();
+                checked.set(next);
+                if let Some(cb) = on_change {
+                    cb.run(next);
+                }
+            }
+        >
+            <span>{move || label.get()}</span>
+            <span class="switch is-sm" class:is-on=move || checked.get()></span>
+        </button>
+    }
+}
+
 #[component]
 pub fn Checkbox(
     checked: RwSignal<bool>,

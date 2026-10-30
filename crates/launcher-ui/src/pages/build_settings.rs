@@ -12,7 +12,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    Button, Checkbox, CodeEditor, ConfirmDialog, Dialog, DialogFooter, Field, Icon, NavEntry, Section,
+    Button, CodeEditor, ConfirmDialog, Dialog, DialogFooter, Field, Icon, LabelSwitch, NavEntry, Section,
     SegOption, Segmented, Select, SelectOption, SettingRow, SettingsNav, Size, TextInput, Variant,
     card_image, ipc, use_toasts,
 };
@@ -422,24 +422,19 @@ fn LoaderDialog(
             </DialogFooter>
             <LoaderCards pick=pick mc=mc vanilla=true />
             <div class="build-loader__fields">
-                <Field label=t("version_component_minecraft_label")>
-                    <div class="wrap">
-                        <div class="grow"><Select options=mc_options value=mc /></div>
-                        <Checkbox
+                <Field
+                    label=t("version_component_minecraft_label")
+                    aside=Some(ViewFn::from(move || view! {
+                        <LabelSwitch
                             checked=snapshots
                             label=t("wizard_snapshots")
                             on_change=Callback::new(move |_: bool| load_versions())
                         />
-                    </div>
+                    }))
+                >
+                    <Select options=mc_options value=mc />
                 </Field>
-                <LoaderBuildField pick=pick mc=mc />
-                <Show when=move || pick.kind() != LoaderKind::Minecraft>
-                    <Checkbox
-                        checked=pick.unstable
-                        label=t("version_component_include_unstable")
-                        on_change=Callback::new(move |_: bool| pick.load())
-                    />
-                </Show>
+                <LoaderBuildField pick=pick mc=mc unstable=true />
             </div>
             {move || versions.with(|v| match v {
                 Some(Err(e)) => Some(view! {

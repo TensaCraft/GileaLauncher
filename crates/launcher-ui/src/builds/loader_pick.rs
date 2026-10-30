@@ -7,7 +7,7 @@ use launcher_shared::{BuildDto, CatalogVersion, LoaderBuild, LoaderKind};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::{I18nCtx, use_i18n};
-use ui_kit::{Button, ChoiceCards, ChoiceOption, Field, Icon, Select, SelectOption, Variant};
+use ui_kit::{Button, ChoiceCards, ChoiceOption, Field, Icon, LabelSwitch, Select, SelectOption, Variant};
 
 use super::catalog::loader_catalog;
 use super::{build_loader, build_minecraft, loader_icon};
@@ -382,8 +382,27 @@ pub fn LoaderCards(pick: LoaderPick, #[prop(into)] mc: Signal<String>, vanilla: 
 
 /// The picked loader's build for Minecraft `mc`; nothing for vanilla.
 #[component]
-pub fn LoaderBuildField(pick: LoaderPick, #[prop(into)] mc: Signal<String>) -> impl IntoView {
+pub fn LoaderBuildField(
+    pick: LoaderPick,
+    #[prop(into)] mc: Signal<String>,
+    /// A «Бета» switch in its label row that lists the loader's unstable builds too.
+    #[prop(optional)]
+    unstable: bool,
+) -> impl IntoView {
     let i18n = use_i18n();
+    let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
+    let aside = unstable.then(|| {
+        ViewFn::from(move || {
+            view! {
+                <LabelSwitch
+                    checked=pick.unstable
+                    label=t("loader_unstable_short")
+                    tip=t("version_component_include_unstable")
+                    on_change=Callback::new(move |_: bool| pick.load())
+                />
+            }
+        })
+    });
     let options = Signal::derive(move || {
         let (kind, mc) = (pick.kind(), mc.get());
         let beta = i18n.t("version_create_unstable_loader_badge");
@@ -392,7 +411,7 @@ pub fn LoaderBuildField(pick: LoaderPick, #[prop(into)] mc: Signal<String>) -> i
     });
     view! {
         <Show when=move || pick.kind() != LoaderKind::Minecraft>
-            <Field label=Signal::derive(move || i18n.t("minecraft_components_loader_build_label"))>
+            <Field label=t("minecraft_components_loader_build_label") aside=aside.clone()>
                 <Select options=options value=pick.build />
             </Field>
         </Show>

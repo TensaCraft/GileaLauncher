@@ -71,6 +71,12 @@
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .label { font-size: 12px; font-weight: 600; color: var(--text-2); display: flex; justify-content: space-between; gap: 8px; }
 .label__opt { font-weight: 500; color: var(--text-4); }
+/* A label row with a small control at its end (`Field`'s `aside`). */
+.field__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 18px; }
+.field__head .label { flex: 1; min-width: 0; }
+.label-switch { display: inline-flex; align-items: center; gap: 7px; flex: none; padding: 0; border: 0; background: none; cursor: pointer; font: 500 12px var(--f-ui); color: var(--text-3); transition: color var(--dur-fast); }
+.label-switch:hover, .label-switch[aria-checked="true"] { color: var(--text); }
+.label-switch:focus-visible { outline: none; box-shadow: var(--ring); border-radius: var(--r-xs); }
 .control {
   height: var(--h-md); display: flex; align-items: center; gap: 8px; padding: 0 11px; background: var(--s-input);
   border: 1px solid var(--line-ctl); border-radius: var(--r-sm); font-size: 13px; color: var(--text);
@@ -139,6 +145,10 @@
 }
 .switch.is-on { background: rgba(var(--accent-rgb), 0.28); border-color: rgba(var(--accent-rgb), 0.75); }
 .switch.is-on::after { left: 18px; background: var(--primary-hi); box-shadow: 0 0 10px rgba(var(--accent-hi-rgb), 0.65); }
+/* The small one of a label row: as tall as the label's words. */
+.switch.is-sm { display: inline-block; width: 28px; height: 16px; }
+.switch.is-sm::after { width: 10px; height: 10px; }
+.switch.is-sm.is-on::after { left: 14px; }
 .check {
   width: 17px; height: 17px; border-radius: 3px; border: 1px solid var(--line-3); background: var(--s-input);
   display: grid; place-items: center; flex: none; padding: 0;
