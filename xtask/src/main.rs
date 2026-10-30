@@ -2,6 +2,8 @@
 mod brand;
 mod cmd;
 #[cfg(test)]
+mod commands;
+#[cfg(test)]
 mod downloads;
 mod hooks;
 mod mock;
