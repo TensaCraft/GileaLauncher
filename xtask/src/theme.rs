@@ -195,7 +195,13 @@ pub fn mismatched_triplets(tokens: &str) -> Vec<String> {
     let hex_of = |name: &str| values.iter().find(|(n, _)| n == name).map(|(_, v)| v.to_ascii_lowercase());
     let mut found = Vec::new();
     for (name, triplet) in values.iter().filter(|(n, _)| n.ends_with("-rgb")) {
-        let Some(colour) = hex_of(name.trim_end_matches("-rgb")) else { continue };
+        // The accent's triplets are named after the accent, its colours after `--primary`.
+        let base = name.trim_end_matches("-rgb");
+        let colour_name = match base.strip_prefix("--accent") {
+            Some(rest) => format!("--primary{rest}"),
+            None => base.to_string(),
+        };
+        let Some(colour) = hex_of(&colour_name) else { continue };
         let Some(hex) = colour.strip_prefix('#').filter(|h| h.len() == 6) else { continue };
         let channels: Vec<String> = (0..3)
             .filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok())
@@ -278,6 +284,11 @@ mod tests {
             Vec::<String>::new()
         );
         assert_eq!(mismatched_triplets(".x { --ok: #45c27e; --ok-rgb: 69, 194, 127; }").len(), 1);
+        // The accent's triplets are named after the accent, its colours after `--primary`.
+        assert_eq!(
+            mismatched_triplets(".x { --primary-light: #7be3d2; --accent-light-rgb: 123, 227, 211; }").len(),
+            1
+        );
         let tokens = fs::read_to_string(root().join(TOKENS)).unwrap();
         assert_eq!(mismatched_triplets(&tokens), Vec::<String>::new());
     }

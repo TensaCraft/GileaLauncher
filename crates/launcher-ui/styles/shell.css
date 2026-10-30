@@ -383,7 +383,7 @@
 .build-settings__icon img { width: 64px; height: 64px; border-radius: var(--r-md); object-fit: cover; border: 1px solid var(--line); }
 .build-settings__server { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
 .grow { flex: 1 1 auto; min-width: 0; }
-.content-row__state .icon { color: var(--ok); }
+.content-row__state .icon { color: var(--primary); }
 .content-row.is-off .content-row__state .icon { color: var(--text-4); }
 .content-row.is-off .build-row__text { opacity: 0.6; }
 /* Build content: the tabs and the source switch share one glass bar, readable over the picture. */

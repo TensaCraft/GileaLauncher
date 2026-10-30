@@ -1,7 +1,9 @@
 //! The look's pickers: the UI font as tiles, each set in its own font, and the accent as round
 //! swatches with the player's own colour last.
 
-use launcher_shared::appearance::{ACCENT_PRESETS, DEFAULT_ACCENT, UiFont, font_stacks, normalize_accent};
+use launcher_shared::appearance::{
+    ACCENT_PRESETS, DEFAULT_ACCENT, UiFont, font_stacks, light_ink_reads, normalize_accent,
+};
 use leptos::prelude::*;
 
 use super::{Icon, IconAction, TextInput};
@@ -104,7 +106,12 @@ pub fn AccentSwatches(#[prop(into)] value: Signal<String>, on_pick: Callback<Str
             <label
                 class="swatch swatch--custom"
                 class:is-active=move || chosen_preset(&value.get()).is_none()
-                style=move || format!("--swatch: {}", value.get())
+                // Its mark in the ink that reads on the colour picked.
+                style=move || {
+                    let colour = value.get();
+                    let ink = if light_ink_reads(&colour) { "--light" } else { "--on-accent" };
+                    format!("--swatch: {colour}; --swatch-ink: var({ink})")
+                }
                 data-tip=move || i18n.t("appearance_accent_custom")
             >
                 <input

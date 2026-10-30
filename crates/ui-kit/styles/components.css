@@ -464,4 +464,5 @@
 .swatch--custom.is-active { background: var(--swatch); }
 .swatch--custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .swatch--custom .icon { font-size: 16px; color: var(--light); text-shadow: 0 1px 2px rgba(var(--shade-rgb), 0.6); pointer-events: none; }
+.swatch--custom.is-active .icon { color: var(--swatch-ink, var(--light)); text-shadow: none; }
 .swatches__hex { width: 150px; margin-left: 6px; }

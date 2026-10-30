@@ -1,7 +1,7 @@
 //! The chosen font and accent on the window: every variable on `<html>`, and a copy in the
 //! window's storage that `appearance-boot.js` puts back before the first frame of the next start.
 
-use launcher_shared::appearance::{UiFont, appearance_vars};
+use launcher_shared::appearance::{UiFont, appearance_vars, palette};
 use leptos::prelude::*;
 
 use crate::store::AppStore;
@@ -15,8 +15,38 @@ pub fn wanted(loaded: bool, font: UiFont, accent: &str) -> Option<Vec<(&'static 
     loaded.then(|| appearance_vars(font, accent))
 }
 
+/// What a copy stored by an earlier version lacks of the look (variables added since), derived
+/// from its accent: a first start after an update shows none of the default colours meanwhile.
+pub fn missing_from(stored: &[(String, String)]) -> Vec<(&'static str, String)> {
+    let Some((_, accent)) = stored.iter().find(|(name, _)| name == "--primary") else { return Vec::new() };
+    palette(accent).into_iter().filter(|(name, _)| !stored.iter().any(|(had, _)| had == name)).collect()
+}
+
+/// The variables of the look `appearance-boot.js` could not put back (its copy is older), until
+/// the settings arrive.
+fn complete_the_stored_copy(window: &web_sys::Window) {
+    let stored = window
+        .local_storage()
+        .ok()
+        .flatten()
+        .and_then(|storage| storage.get_item(STORAGE_KEY).ok().flatten())
+        .and_then(|json| serde_json::from_str::<Vec<(String, String)>>(&json).ok())
+        .unwrap_or_default();
+    let missing = missing_from(&stored);
+    if let Some(root) = window.document().and_then(|d| d.document_element())
+        && let Ok(root) = wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(root)
+    {
+        for (name, value) in &missing {
+            let _ = root.style().set_property(name, value);
+        }
+    }
+}
+
 /// Keeps `<html>` in the look the settings choose, from now on.
 pub fn follow_settings(store: AppStore) {
+    if let Some(window) = web_sys::window() {
+        complete_the_stored_copy(&window);
+    }
     // Only a new font or accent wakes it, not every other change of the settings.
     let look = Memo::new(move |_| {
         let loaded = store.settings_loaded.get();
@@ -69,6 +99,27 @@ mod tests {
             wanted(true, UiFont::Minecraft, "#9b6cf6"),
             Some(appearance_vars(UiFont::Minecraft, "#9b6cf6"))
         );
+    }
+
+    /// A copy stored by an earlier version lacks the variables added since: they are derived from
+    /// its accent at once, so a first start after an update shows no default teal.
+    #[test]
+    fn a_copy_from_an_earlier_version_is_completed_from_its_accent() {
+        let full = appearance_vars(UiFont::Minecraft, "#9b6cf6");
+        let older: Vec<(String, String)> = full
+            .iter()
+            .filter(|(name, _)| !matches!(*name, "--s-scrim-rgb" | "--text-3-rgb"))
+            .map(|(n, v)| (n.to_string(), v.clone()))
+            .collect();
+        let added = missing_from(&older);
+        let names: BTreeSet<&str> = added.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, BTreeSet::from(["--s-scrim-rgb", "--text-3-rgb"]));
+        for (name, value) in added {
+            assert_eq!(full.iter().find(|(n, _)| *n == name).map(|(_, v)| v), Some(&value), "{name}");
+        }
+        let current: Vec<(String, String)> = full.iter().map(|(n, v)| (n.to_string(), v.clone())).collect();
+        assert!(missing_from(&current).is_empty(), "a copy of this version is whole");
+        assert!(missing_from(&[]).is_empty(), "no copy: the defaults stand");
     }
 
     /// The boot file is asked for from the root, whatever page the window reloads on.

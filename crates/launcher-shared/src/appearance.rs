@@ -179,23 +179,34 @@ const LINES: [(&str, &str); 4] =
 /// in proportion.
 const GREY: f64 = 0.25;
 
-/// How far a colour reads on the darkest surface, `--s-app` (WCAG contrast).
-fn contrast_on_app(rgb: (u8, u8, u8)) -> f64 {
+/// WCAG contrast of two colours.
+fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
     let channel = |c: u8| {
         let c = f64::from(c) / 255.0;
         if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
     };
     let luminance = |(r, g, b): (u8, u8, u8)| 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-    let (a, b) = (luminance(rgb), luminance((11, 20, 18)));
+    let (a, b) = (luminance(a), luminance(b));
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
-/// The accent as the design uses it: a colour too dark to read on the dark surfaces (and to carry
-/// the primary button's dark ink) is lifted until it does; any other stays as chosen.
+/// The primary button's gradient ends this much darker than the accent (`--primary-bottom`).
+const BOTTOM_DARKER: f64 = 0.0375;
+
+/// The accent as the design uses it: a colour too dark to read on the darkest surface (`--s-app`)
+/// or to carry the primary button's dark ink as body text reads (4.5:1, all down the button's
+/// gradient) is lifted until it does; any other stays as chosen.
 fn readable(rgb: (u8, u8, u8)) -> ((u8, u8, u8), Hsl) {
     let mut colour = to_hsl(rgb);
     let mut lifted = rgb;
-    while contrast_on_app(lifted) < 3.2 && colour.l < 0.9 {
+    let share = if colour.s < GREY { colour.s / GREY } else { 1.0 };
+    // `--on-accent`: hsl(var(--tint-h) calc(var(--tint-s) * 84.6%) 7.6%).
+    let ink = to_rgb(Hsl { h: colour.h, s: 0.846 * share, l: 0.076 });
+    let reads = |c: Hsl| {
+        let bottom = to_rgb(Hsl { h: c.h, s: (c.s * 1.025).min(1.0), l: (c.l - BOTTOM_DARKER).max(0.0) });
+        contrast(to_rgb(c), (11, 20, 18)) >= 3.2 && contrast(bottom, ink) >= 4.5
+    };
+    while !reads(colour) && colour.l < 0.9 {
         colour.l = (colour.l + 0.02).min(0.9);
         lifted = to_rgb(colour);
     }
@@ -213,7 +224,7 @@ pub fn palette(accent: &str) -> Vec<(&'static str, String)> {
     let light = to_rgb(Hsl { h: a.h + 1.9, s: a.s * 0.824, l: 0.686 });
     // The primary button's gradient, and its top when hovered.
     let top = to_rgb(Hsl { h: a.h, s: (a.s * 0.92).min(1.0), l: (a.l + 0.059).min(a.l.max(0.9)) });
-    let bottom = to_rgb(Hsl { h: a.h, s: (a.s * 1.025).min(1.0), l: (a.l - 0.0375).max(0.0) });
+    let bottom = to_rgb(Hsl { h: a.h, s: (a.s * 1.025).min(1.0), l: (a.l - BOTTOM_DARKER).max(0.0) });
     let top_hover = to_rgb(Hsl { h: a.h, s: (a.s * 0.96).min(1.0), l: (a.l + 0.12).min(a.l.max(0.9)) });
     // A grey's hue does not matter: its share of colour (`colour`) is zero.
     let shift = a.h - base.h;
@@ -268,6 +279,13 @@ pub fn palette(accent: &str) -> Vec<(&'static str, String)> {
         vars.push(("--bg-tint", format!("hsl({:.0} {saturation:.0}% 50%)", a.h)));
     }
     vars
+}
+
+/// Whether a mark on `colour` (a swatch the user picked) reads better light than in the design's
+/// dark ink; an unreadable colour counts as light.
+pub fn light_ink_reads(colour: &str) -> bool {
+    let rgb = parse_hex(colour).unwrap_or((255, 255, 255));
+    contrast((255, 255, 255), rgb) > contrast((11, 20, 18), rgb)
 }
 
 /// The page's background (`--s-app`) under `accent`, as r, g, b: the window shows it before the
@@ -434,7 +452,7 @@ mod tests {
 
     #[test]
     fn a_dark_accent_is_lifted_until_it_reads() {
-        for accent in ["#000000", "#1e1e5a", "#0000ff", "#3a0000"] {
+        for accent in ["#000000", "#1e1e5a", "#0000ff", "#3a0000", "#000080", "#3b0a45"] {
             let p = map(palette(accent));
             let primary = rgb_of(&p["--primary"]);
             assert!(
@@ -446,13 +464,27 @@ mod tests {
             let tint: f64 = p["--tint-h"].parse().unwrap();
             let share: f64 = p["--tint-s"].parse().unwrap();
             let ink = to_rgb(Hsl { h: tint, s: 0.846 * share, l: 0.076 });
-            assert!(contrast(primary, ink) >= 3.0, "{accent}: the ink on {}", p["--primary"]);
+            // Text on the button reads as body text does (WCAG AA, 4.5:1) all down its gradient.
+            for stop in ["--primary", "--primary-top", "--primary-bottom"] {
+                assert!(contrast(rgb_of(&p[stop]), ink) >= 4.5, "{accent}: the ink on {stop} {}", p[stop]);
+            }
         }
         assert_eq!(
             map(palette(DEFAULT_ACCENT))["--primary"],
             DEFAULT_ACCENT,
             "a bright accent stays as chosen"
         );
+    }
+
+    /// A mark drawn on a colour the user picked: light on a dark one, dark on a light one.
+    #[test]
+    fn a_mark_on_a_picked_colour_takes_the_ink_that_reads() {
+        for dark in ["#000080", "#3a0000", "#1e1e5a", "#6d1f8a"] {
+            assert!(light_ink_reads(dark), "{dark}");
+        }
+        for light in ["#f2f2a0", "#ffffff", "#34cfe6", "#5bc236"] {
+            assert!(!light_ink_reads(light), "{light}");
+        }
     }
 
     /// The window's own background, under the page before it is drawn, is the page's.
@@ -485,6 +517,7 @@ mod tests {
         for p in ACCENT_PRESETS {
             assert_eq!(normalize_accent(p.hex).as_deref(), Some(p.hex), "{}", p.id);
             assert_eq!(p.label_key, format!("appearance_accent_{}", p.id));
+            assert_eq!(map(palette(p.hex))["--primary"], p.hex, "{}: a preset is shown as chosen", p.id);
         }
         assert_eq!((ACCENT_PRESETS[0].id, ACCENT_PRESETS[0].hex), ("default", DEFAULT_ACCENT));
     }
