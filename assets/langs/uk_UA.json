@@ -473,7 +473,7 @@
   "storage_rules_title": "Автоматичне очищення",
   "storage_rules_desc": "Раз на день, у фоні. Збірку, гра якої запущена, не чіпає.",
   "storage_rule_world_backups": "Бекапи світів",
-  "storage_rule_world_backups_desc": "Автоматичних бекапів на кожен світ зберігається: {keep}. Змінити це можна в розділі «Бекапи».",
+  "storage_rule_world_backups_desc": "Автоматичних бекапів на кожен світ зберігається: {keep}. Змінити це можна в розділі «Файли», блок «Бекапи світів».",
   "storage_rule_mod_backups": "Копії модів",
   "storage_rule_mod_backups_desc": "Одна копія на мод, і не старша за 30 днів.",
   "storage_rule_modpack_backups": "Копії модпаків",

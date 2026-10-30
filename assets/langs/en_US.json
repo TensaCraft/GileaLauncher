@@ -477,7 +477,7 @@
   "storage_rules_title": "Automatic cleaning",
   "storage_rules_desc": "Once a day, in the background. A build whose game runs is never touched.",
   "storage_rule_world_backups": "World backups",
-  "storage_rule_world_backups_desc": "Automatic backups kept per world: {keep}. Change it in the Backups section.",
+  "storage_rule_world_backups_desc": "Automatic backups kept per world: {keep}. Change it under Files, in World backups.",
   "storage_rule_mod_backups": "Mods' copies",
   "storage_rule_mod_backups_desc": "One copy per mod, and none older than 30 days.",
   "storage_rule_modpack_backups": "Modpacks' copies",

@@ -107,9 +107,16 @@ fn colours_in(css: &str) -> Vec<String> {
         .collect()
 }
 
-/// The inline styles of a line of the window's code that name a colour by value.
+/// What a line of code says inside its `"…"` strings, each apart.
+fn quoted(line: &str) -> String {
+    line.split('"').skip(1).step_by(2).collect::<Vec<_>>().join(" ")
+}
+
+/// The inline styles of a line of the window's code that name a colour by value: in code a colour
+/// sits inside a string.
 fn inline_colour(line: &str) -> bool {
-    line.contains("style") && names_a_colour(line)
+    let strings = quoted(line);
+    line.contains("style") && (has_hex(&strings) || has_function_or_name(&strings))
 }
 
 fn stylesheets(root: &Path) -> Vec<String> {
@@ -231,6 +238,26 @@ mod tests {
             ".x:hover { color: var(--text); }",
         ] {
             assert_eq!(colours_in(css), Vec::<String>::new(), "{css}");
+        }
+    }
+
+    /// In the window's code a colour sits inside a string: the guard reads the strings.
+    #[test]
+    fn the_guard_sees_a_colour_in_an_inline_style_of_the_code() {
+        for line in [
+            r#"<div style="color:#fff">"#,
+            r#"<span style=format!("background: rgba(0, 0, 0, .5); width:{w}px")>"#,
+            r#"let style = "border: 1px solid white";"#,
+        ] {
+            assert!(inline_colour(line), "{line}");
+        }
+        for line in [
+            r#"<div style="color: var(--text)">"#,
+            r#"<span style=format!("--swatch:{c}")>"#,
+            r#"<div class="white-space">"#,
+            r#"// the #fff of the old style"#,
+        ] {
+            assert!(!inline_colour(line), "{line}");
         }
     }
 
