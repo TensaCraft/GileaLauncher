@@ -1,5 +1,6 @@
 //! Build dialogs and the build context menu: Copy asks for the new name,
-//! Delete asks whether the folder goes too.
+//! Delete asks whether the folder and the modules' parts (world backups) go too, as the Delete tab
+//! does (`deletion`).
 
 use launcher_shared::BuildDto;
 use leptos::prelude::*;
@@ -11,6 +12,7 @@ use ui_kit::{
 };
 
 use super::actions::{BuildActions, use_build_actions};
+use super::deletion::{DeleteChoices, delete_build};
 use super::launch::{LaunchFlow, use_launch_flow};
 use super::{build_subtitle, check_new_name, unique_name};
 use crate::store::{AppStore, use_store};
@@ -77,7 +79,7 @@ pub struct BuildDialogs {
     copy_error: RwSignal<Option<String>>,
     delete_of: RwSignal<Option<BuildDto>>,
     delete_open: RwSignal<bool>,
-    delete_files: RwSignal<bool>,
+    delete_choices: DeleteChoices,
 }
 
 impl BuildDialogs {
@@ -92,9 +94,10 @@ impl BuildDialogs {
         self.copy_open.set(true);
     }
 
-    /// Opens Delete with "delete the folder" ticked.
+    /// Opens Delete with everything ticked (the folder, and the modules' parts once the host sets
+    /// them).
     pub fn delete(&self, build: BuildDto) {
-        self.delete_files.set(true);
+        self.delete_choices.files.set(true);
         self.delete_of.set(Some(build));
         self.delete_open.set(true);
     }
@@ -110,7 +113,7 @@ pub fn provide_build_dialogs() -> BuildDialogs {
         copy_error: RwSignal::new(None),
         delete_of: RwSignal::new(None),
         delete_open: RwSignal::new(false),
-        delete_files: RwSignal::new(true),
+        delete_choices: DeleteChoices::new(),
     };
     provide_context(dialogs);
     dialogs
@@ -166,10 +169,18 @@ pub fn BuildDialogsHost() -> impl IntoView {
         })
     };
     let delete_name = move || d.delete_of.with(|b| b.as_ref().map(|b| b.name.clone()).unwrap_or_default());
+    // Each opening offers the parts of the modules whose backend is there, all ticked.
+    let parts = crate::modules::use_module_parts();
+    Effect::new(move |_| {
+        if d.delete_open.get() {
+            d.delete_choices.reset(parts.get_untracked().delete_options);
+        }
+    });
+    let toasts = ui_kit::use_toasts();
     let confirm_delete = move || {
         if let Some(build) = d.delete_of.get_untracked() {
             d.delete_open.set(false);
-            actions.delete(build.key, d.delete_files.get_untracked());
+            delete_build(d.delete_choices, build.key, actions, toasts, i18n);
         }
     };
     view! {
@@ -209,8 +220,21 @@ pub fn BuildDialogsHost() -> impl IntoView {
                 </Button>
             </DialogFooter>
             <p style="margin:0">{move || i18n.t("version_delete_warning_desc")}</p>
-            <Checkbox checked=d.delete_files label=t("version_delete_directory") />
+            <Checkbox checked=d.delete_choices.files label=t("version_delete_directory") />
             <div class="hint">{move || i18n.t("version_delete_directory_desc")}</div>
+            {move || {
+                d.delete_choices
+                    .options
+                    .get()
+                    .into_iter()
+                    .map(|(option, on)| {
+                        view! {
+                            <Checkbox checked=on label=t(option.label) />
+                            <div class="hint">{move || i18n.t(option.desc)}</div>
+                        }
+                    })
+                    .collect_view()
+            }}
         </Dialog>
     }
 }

@@ -3,6 +3,7 @@
 
 pub mod actions;
 pub mod catalog;
+pub mod deletion;
 pub mod description;
 pub mod dialogs;
 pub mod gpu;

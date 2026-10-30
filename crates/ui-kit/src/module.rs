@@ -69,8 +69,9 @@ pub struct ModuleSettingsBlock {
     pub view: fn() -> AnyView,
 }
 
-/// A switch a module adds to deleting a build (off by default); when on, the module's `command`
-/// runs with `{"key": <build key>}` before the build goes.
+/// A switch a module adds to deleting a build, in the Delete tab and the Delete dialog alike (on by
+/// default, as the folder's); when on, the module's `command` runs with `{"key": <build key>}`
+/// before the build goes.
 #[derive(Debug, Clone, Copy)]
 pub struct DeleteOption {
     pub module: &'static str,
