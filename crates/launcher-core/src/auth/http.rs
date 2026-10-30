@@ -65,6 +65,16 @@ impl Reply {
     }
 }
 
+/// A GET whose address and headers matter (finding an auth server's API): where it ended after
+/// redirects, the `X-Authlib-Injector-API-Location` it named, and the body as text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawReply {
+    pub status: u16,
+    pub url: String,
+    pub api_location: Option<String>,
+    pub text: String,
+}
+
 pub struct AuthHttp {
     client: Client,
     backoff: Duration,
@@ -100,6 +110,25 @@ impl AuthHttp {
 
     pub async fn get_bearer(&self, context: &str, url: &str, token: &str) -> Result<Reply, FlowError> {
         self.send(context, || self.client.get(url).bearer_auth(token)).await
+    }
+
+    /// One GET, redirects followed, no retries.
+    pub async fn get_raw(&self, context: &str, url: &str) -> Result<RawReply, FlowError> {
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| FlowError::Failed(format!("{context} failed: {e}")))?;
+        let status = response.status().as_u16();
+        let url = response.url().to_string();
+        let api_location = response
+            .headers()
+            .get("x-authlib-injector-api-location")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let text = response.text().await.unwrap_or_default();
+        Ok(RawReply { status, url, api_location, text })
     }
 
     async fn send(&self, context: &str, build: impl Fn() -> RequestBuilder) -> Result<Reply, FlowError> {

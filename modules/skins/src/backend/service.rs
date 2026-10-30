@@ -499,6 +499,7 @@ mod tests {
             xuid: None,
             expires_at: Some(4_000_000_000),
             auth_client_id: None,
+            server: None,
         }
     }
 

@@ -86,7 +86,7 @@ fn update_error_codes_have_their_own_keys() {
     assert_eq!(ErrorCode::IntegrityMismatch.i18n_key(), "update_hash_mismatch");
     assert_eq!(ErrorCode::NoUpdateAsset.i18n_key(), "update_no_asset");
     assert_eq!(serde_json::to_value(ErrorCode::RateLimited).unwrap(), json!("rate_limited"));
-    assert_eq!(ErrorCode::ALL.len(), 56);
+    assert_eq!(ErrorCode::ALL.len(), 59);
     assert_eq!(
         (serde_json::to_value(ErrorCode::LowMemory).unwrap(), ErrorCode::LowMemory.i18n_key()),
         (json!("low_memory"), "version_low_memory")
@@ -129,6 +129,8 @@ fn profile_types_keep_their_wire_shape() {
         is_default: true,
         reauth_required: false,
         reauth_reason: None,
+        server: None,
+        server_name: None,
     };
     assert_eq!(
         serde_json::to_value(&dto).unwrap(),
@@ -163,6 +165,8 @@ fn profiles_sort_default_first_then_by_name() {
         is_default,
         reauth_required: false,
         reauth_reason: None,
+        server: None,
+        server_name: None,
     };
     let mut list = vec![p("zed", false), p("Mia", true), p("alex", false)];
     sort_profiles(&mut list);
@@ -681,4 +685,20 @@ fn hints_are_on_and_learned_one_at_a_time() {
             && !launcher_shared::hint_id_ok("A")
             && !launcher_shared::hint_id_ok(&"a".repeat(65))
     );
+}
+
+/// A sign-in on another auth server: a wrong login or password, a second factor asked for, and
+/// an address with no auth server behind it each say so; none is a launcher fault to report.
+#[test]
+fn third_party_sign_in_errors_have_their_own_keys() {
+    for (code, key, wire) in [
+        (ErrorCode::AuthCredentialsInvalid, "auth_credentials_invalid", "auth_credentials_invalid"),
+        (ErrorCode::AuthCodeRequired, "auth_code_required", "auth_code_required"),
+        (ErrorCode::AuthServerInvalid, "auth_server_invalid", "auth_server_invalid"),
+    ] {
+        assert_eq!(code.i18n_key(), key);
+        assert_eq!(serde_json::to_value(code).unwrap(), json!(wire));
+        assert!(ErrorCode::ALL.contains(&code));
+        assert!(!code.reportable(), "{code:?}");
+    }
 }

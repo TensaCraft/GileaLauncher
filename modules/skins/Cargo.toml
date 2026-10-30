@@ -17,7 +17,7 @@ backend = [
     "dep:percent-encoding",
     "dep:url",
 ]
-ui = ["dep:ui-kit", "dep:leptos", "dep:js-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys"]
+ui = ["dep:ui-kit", "dep:leptos", "dep:js-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys", "dep:percent-encoding"]
 
 [dependencies]
 launcher-shared.workspace = true
@@ -46,6 +46,7 @@ web-sys = { workspace = true, optional = true, features = [
     "HtmlCanvasElement",
     "HtmlElement",
     "HtmlScriptElement",
+    "Location",
     "Window",
 ] }
 

@@ -122,6 +122,8 @@ pub struct OptionsInput<'a> {
     pub java: PathBuf,
     pub config: &'a ConfigStore,
     pub limits: MemoryLimits,
+    /// The authlib-injector jar, for an account on another auth server (`identity.agent`).
+    pub agent_jar: Option<PathBuf>,
 }
 
 pub use launcher_shared::args::DEFAULT_GC_ARGUMENTS;
@@ -164,7 +166,7 @@ pub fn planned_heap_gb(build: &Build, config: &ConfigStore, limits: &MemoryLimit
 
 /// The launch options and GPU mode (the build's, else `gpu_mode_default`).
 pub fn launch_options(input: OptionsInput<'_>) -> (LaunchOptions, GpuMode) {
-    let OptionsInput { build, identity, mc_dir, component, java, config, limits } = input;
+    let OptionsInput { build, identity, mc_dir, component, java, config, limits, agent_jar } = input;
     let options = &build.options;
     let memory = sanitized_memory(build, config, &limits);
     if memory.changed {
@@ -174,6 +176,11 @@ pub fn launch_options(input: OptionsInput<'_>) -> (LaunchOptions, GpuMode) {
             memory_note(memory.max_gb, memory.removed_initial_heap)
         );
     }
+    let agent = identity
+        .agent
+        .as_ref()
+        .zip(agent_jar.as_deref())
+        .map(|(server, jar)| crate::auth::injector::agent_arguments(jar, server));
     let config_gpu = config.get_str(GPU_MODE_DEFAULT_KEY);
     let gpu = GpuMode::parse(options.get("gpuMode").and_then(Value::as_str).or(config_gpu.as_deref()));
     let opts = LaunchOptions {
@@ -181,14 +188,19 @@ pub fn launch_options(input: OptionsInput<'_>) -> (LaunchOptions, GpuMode) {
         username: identity.username.clone(),
         uuid: identity.uuid.clone(),
         access_token: identity.access_token.clone(),
-        user_type: "msa".into(),
+        // An account on another auth server plays as Mojang's accounts did: the agent's servers
+        // expect it.
+        user_type: if agent.is_some() { "mojang" } else { "msa" }.into(),
         xuid: identity.xuid.clone(),
         client_id: Some(identity.client_id.clone().unwrap_or_else(|| MS_CLIENT_ID.to_string())),
         game_dir: game_dir(build, mc_dir),
         natives_dir: mc_dir.join("versions").join(component).join("natives"),
         launcher_name: APP_NAME.to_string(),
         launcher_version: VERSION.to_string(),
-        jvm_arguments: with_default_collector(memory.arguments),
+        jvm_arguments: match &agent {
+            Some(args) => args.iter().cloned().chain(with_default_collector(memory.arguments)).collect(),
+            None => with_default_collector(memory.arguments),
+        },
         resolution: resolution(options),
         demo: truthy(options.get("demo")),
         server: server_address(options),
@@ -244,6 +256,7 @@ mod tests {
             xuid: None,
             client_id: None,
             kind: AccountKind::Offline,
+            agent: None,
         }
     }
 
@@ -335,6 +348,7 @@ mod tests {
             java: PathBuf::from("J"),
             config: &config,
             limits,
+            agent_jar: None,
         };
         let (opts, gpu) = launch_options(input);
         assert_eq!(opts.jvm_arguments, ["-Xmx6G", "-XX:+UseG1GC"]);
@@ -359,8 +373,36 @@ mod tests {
             java: PathBuf::from("J"),
             config: &config,
             limits,
+            agent_jar: None,
         };
         assert_eq!(launch_options(input).1, GpuMode::Auto);
+    }
+
+    #[test]
+    fn an_account_on_another_auth_server_starts_the_game_with_the_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = ConfigStore::open(dir.path().join("config.json"));
+        let limits = MemoryLimits::from_bytes(Some(16 * crate::java::memory::GIB), None);
+        let b = build(json!({"jvmArguments": ["-Xmx2G"]}));
+        let server = crate::auth::service::AgentServer {
+            api_root: "https://ely.by/api/".into(),
+            metadata: "{}".into(),
+        };
+        let ely = LaunchIdentity { agent: Some(server), kind: AccountKind::Yggdrasil, ..identity() };
+        let (opts, _) = launch_options(OptionsInput {
+            build: &b,
+            identity: &ely,
+            mc_dir: Path::new("MC"),
+            component: "1.21.1",
+            java: PathBuf::from("J"),
+            config: &config,
+            limits,
+            agent_jar: Some(PathBuf::from("agent.jar")),
+        });
+        assert_eq!(opts.user_type, "mojang");
+        assert_eq!(opts.jvm_arguments[0], "-javaagent:agent.jar=https://ely.by/api/");
+        assert!(opts.jvm_arguments[1].starts_with("-Dauthlibinjector.yggdrasil.prefetched="));
+        assert_eq!(opts.jvm_arguments[2], "-Xmx2G", "the agent first, then the build's own");
     }
 
     #[test]
@@ -377,6 +419,7 @@ mod tests {
                 java: PathBuf::from("J"),
                 config,
                 limits,
+                agent_jar: None,
             })
             .0
             .fullscreen

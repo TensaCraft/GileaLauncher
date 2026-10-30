@@ -67,10 +67,16 @@ pub enum ErrorCode {
     FileNameInvalid,
     /// Another file already has the name.
     FileNameTaken,
+    /// An auth server refused the login and password.
+    AuthCredentialsInvalid,
+    /// An auth server asks for the account's second-factor code.
+    AuthCodeRequired,
+    /// No auth server answers at the address given.
+    AuthServerInvalid,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 56] = [
+    pub const ALL: [ErrorCode; 59] = [
         ErrorCode::Internal,
         ErrorCode::Io,
         ErrorCode::InvalidInput,
@@ -127,6 +133,9 @@ impl ErrorCode {
         ErrorCode::LowMemory,
         ErrorCode::FileNameInvalid,
         ErrorCode::FileNameTaken,
+        ErrorCode::AuthCredentialsInvalid,
+        ErrorCode::AuthCodeRequired,
+        ErrorCode::AuthServerInvalid,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -187,6 +196,9 @@ impl ErrorCode {
             ErrorCode::LowMemory => "version_low_memory",
             ErrorCode::FileNameInvalid => "file_name_invalid",
             ErrorCode::FileNameTaken => "file_name_taken",
+            ErrorCode::AuthCredentialsInvalid => "auth_credentials_invalid",
+            ErrorCode::AuthCodeRequired => "auth_code_required",
+            ErrorCode::AuthServerInvalid => "auth_server_invalid",
         }
     }
 
@@ -267,6 +279,9 @@ impl ErrorCode {
             | RateLimited
             | AuthTimeout
             | AuthDenied
+            | AuthCredentialsInvalid
+            | AuthCodeRequired
+            | AuthServerInvalid
             | MinecraftServicesUnavailable
             | XboxAccountMissing
             | XboxChildAccount

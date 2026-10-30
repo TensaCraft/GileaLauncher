@@ -147,6 +147,7 @@ fn mock_profile(name: &str, kind: AccountKind, is_default: bool) -> ProfileDto {
     let id = match kind {
         AccountKind::Microsoft => "0123456789abcdef0123456789abcdef",
         AccountKind::Offline => "00000000-0000-0000-0000-000000000000",
+        AccountKind::Yggdrasil => "7c0d1a2b3c4d5e6f708192a3b4c5d6e7",
     };
     ProfileDto {
         key: name.into(),
@@ -156,6 +157,8 @@ fn mock_profile(name: &str, kind: AccountKind, is_default: bool) -> ProfileDto {
         is_default,
         reauth_required: false,
         reauth_reason: None,
+        server: None,
+        server_name: None,
     }
 }
 
@@ -623,6 +626,35 @@ pub fn install() {
             emit_profiles()?;
             to_value(mock_profile("Notch_UA", AccountKind::Microsoft, true))
         }
+        "auth_sign_in_server" => {
+            // The password `2fa` asks for a second factor, as Ely.by does for such accounts.
+            if args["password"] == "2fa" && args["code"].as_str().is_none_or(str::is_empty) {
+                return Err(AppError::new(
+                    ErrorCode::AuthCodeRequired,
+                    "Account protected with two factor auth.",
+                ));
+            }
+            if args["password"] == "wrong" {
+                return Err(AppError::new(ErrorCode::AuthCredentialsInvalid, "Invalid credentials."));
+            }
+            let server = args["server"].as_str().unwrap_or("elyby").to_string();
+            let name = "Alex_UA";
+            let mut profile = mock_profile(&format!("{server}:{name}"), AccountKind::Yggdrasil, true);
+            profile.name = name.into();
+            if server != "elyby" {
+                return Err(AppError::new(ErrorCode::NotFound, format!("no auth server {server}")));
+            }
+            profile.server_name = Some("Ely.by".into());
+            profile.server = Some(server);
+            {
+                let mut list = profiles.borrow_mut();
+                list.retain(|p| p.key != profile.key);
+                list.iter_mut().for_each(|p| p.is_default = false);
+                list.push(profile.clone());
+            }
+            emit_profiles()?;
+            to_value(profile)
+        }
         "auth_state" => to_value(if auth_mode == "device" {
             AuthState::DeviceCode {
                 user_code: "ABCD-1234".into(),
@@ -641,6 +673,10 @@ pub fn install() {
         "profile_avatar" => {
             let key = args["key"].as_str().unwrap_or("Steve");
             to_value(Some(format!("https://mc-heads.net/avatar/{key}/64")))
+        }
+        "profile_body" => {
+            let key = args["key"].as_str().unwrap_or("Steve");
+            to_value(Some(format!("https://mc-heads.net/player/{key}/128")))
         }
         other => builds
             .borrow_mut()

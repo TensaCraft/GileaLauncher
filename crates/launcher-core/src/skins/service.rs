@@ -638,6 +638,13 @@ impl SkinService {
         (!bytes.is_empty()).then(|| bytes.to_vec())
     }
 
+    /// `player`'s whole figure seen from the front (a PNG, 64×128 times the render's scale), on
+    /// their model; nothing while their skin cannot be had.
+    pub async fn front(&self, player: &Player) -> Option<Vec<u8>> {
+        let texture = self.texture(player).await?;
+        Some(render::front(&texture.png, texture.slim))
+    }
+
     /// Forgets what `player` was seen wearing (their skin changed), by UUID and by nickname: the
     /// next look asks Mojang.
     pub fn forget(&self, player: &Player) {

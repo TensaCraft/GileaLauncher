@@ -68,3 +68,24 @@ pub fn ProfileAvatar(
         </span>
     }
 }
+
+/// The profile's whole figure seen from the front, asked for each time the card shows; a person
+/// icon until it comes, or when the skin cannot be had.
+#[component]
+pub fn ProfileBody(#[prop(into)] profile_key: String) -> impl IntoView {
+    let src = RwSignal::new(None::<String>);
+    spawn_local(async move {
+        let args = KeyArgs { key: profile_key };
+        if let Ok(Some(body)) = ipc::invoke::<_, Option<String>>("profile_body", &args).await {
+            let _ = src.try_set(Some(body));
+        }
+    });
+    view! {
+        <div class="profile__body">
+            {move || match src.get() {
+                Some(body) => view! { <img src=body alt="" /> }.into_any(),
+                None => view! { <Icon name="person" /> }.into_any(),
+            }}
+        </div>
+    }
+}

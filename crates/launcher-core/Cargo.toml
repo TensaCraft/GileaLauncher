@@ -22,6 +22,7 @@ chrono.workspace = true
 uuid.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+url.workspace = true
 rustls.workspace = true
 sha2.workspace = true
 hex.workspace = true
@@ -57,7 +58,6 @@ libc.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus.workspace = true
-url.workspace = true
 open.workspace = true
 
 [target.'cfg(windows)'.dependencies]

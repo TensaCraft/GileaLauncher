@@ -43,6 +43,27 @@ impl ProfileActions {
         });
     }
 
+    /// Signs in on another auth server (`server`: `elyby` or an address); `done` gets the error,
+    /// `AuthCodeRequired` when the server asks for the second factor.
+    pub fn sign_in_server(&self, args: ServerSignIn, done: Callback<Option<AppError>>) {
+        let Self { toasts, i18n, .. } = *self;
+        spawn_local(async move {
+            match ipc::invoke::<_, ProfileDto>("auth_sign_in_server", &args).await {
+                Ok(profile) => {
+                    toasts.show(
+                        Level::Success,
+                        i18n.tp("auth_server_signed_in", &[("profile", profile.name)]),
+                        None,
+                    );
+                    done.try_run(None);
+                }
+                Err(e) => {
+                    done.try_run(Some(e));
+                }
+            }
+        });
+    }
+
     pub fn delete(&self, key: String) {
         let Self { store, toasts, i18n } = *self;
         spawn_local(async move {
@@ -92,6 +113,15 @@ impl ProfileActions {
             let _ = ipc::call::<()>("auth_cancel").await;
         });
     }
+}
+
+/// What a sign-in on another auth server sends.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ServerSignIn {
+    pub server: String,
+    pub login: String,
+    pub password: String,
+    pub code: Option<String>,
 }
 
 pub fn use_profile_actions() -> ProfileActions {

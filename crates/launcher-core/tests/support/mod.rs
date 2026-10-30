@@ -3,3 +3,4 @@ pub mod fake_mojang;
 pub mod fake_ms;
 pub mod fake_processors;
 pub mod fake_skins;
+pub mod fake_ygg;

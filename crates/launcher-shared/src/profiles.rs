@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 pub enum AccountKind {
     Offline,
     Microsoft,
+    /// On an auth server that speaks authlib-injector's API (Ely.by, a server of one's own).
+    Yggdrasil,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +23,11 @@ pub struct ProfileDto {
     pub reauth_required: bool,
     #[serde(default)]
     pub reauth_reason: Option<String>,
+    /// The auth server a `Yggdrasil` account is on: its id and its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

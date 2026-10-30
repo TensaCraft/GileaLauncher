@@ -299,6 +299,15 @@ async fn a_worn_skin_is_the_player_s_at_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_front_is_drawn_on_the_player_s_model() {
+    let fake = known().await;
+    let dir = tempfile::tempdir().unwrap();
+    let svc = service(config(&fake, dir.path()));
+    let front = svc.front(&Player::named("Alex")).await.unwrap();
+    assert_eq!(front, render::front(&normalised(&skin_png(5, true)), true));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn nobody_has_nothing() {
     let fake = known().await;
     let dir = tempfile::tempdir().unwrap();

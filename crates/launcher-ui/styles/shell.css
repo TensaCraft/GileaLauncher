@@ -219,16 +219,31 @@
 .update__notes-item { position: relative; padding-left: 14px; }
 .update__notes-item::before { content: ""; position: absolute; left: 3px; top: 0.7em; width: 4px; height: 4px; border-radius: 50%; background: var(--primary); }
 .profiles { min-height: 100%; }
-.profiles__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
-.profile { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px 14px; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--s-row); transition: border-color var(--dur) var(--ease); }
+.profiles__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+/* A card per account: the player's whole figure at the left, the account's lines and buttons at the right. */
+.profile { position: relative; display: flex; gap: 16px; padding: 12px; border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--s-row); transition: border-color var(--dur) var(--ease), background var(--dur-fast); }
 .profile:hover { border-color: var(--line-3); }
-.profile.is-active { border-color: var(--primary); box-shadow: inset 3px 0 0 var(--primary); }
-.profile__info { min-width: 0; }
-.profile__name { font: 600 16px/1.3 var(--f-ui); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.profile__kind { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12.5px; color: var(--text-3); }
-.profile__reauth { margin-top: 4px; font-size: 12px; color: var(--danger-text); }
-.profile__actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.profile.is-active { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.profile__body { width: 84px; height: 148px; flex: none; display: grid; place-items: center; border-radius: var(--r-sm); background: rgba(var(--shade-rgb), 0.22); color: var(--text-4); }
+.profile__body img { width: 64px; height: 128px; object-fit: contain; image-rendering: pixelated; }
+.profile__body .icon { font-size: 40px; }
+.profile__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; padding-top: 2px; }
+.profile__head { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 2px; }
+.profile__name { min-width: 0; font: 600 16px/1.3 var(--f-ui); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile__line { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-3); }
+.profile__line.is-ok { color: var(--ok-text); }
+.profile__line.is-warn { color: var(--warn-text); }
+.profile__dot { width: 7px; height: 7px; margin: 0 3px; flex: none; border-radius: 50%; background: currentColor; }
+/* The buttons stay in one row pinned to the card's right edge, as tall as each other. */
+.profile__actions { margin-top: auto; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.profile__more { width: var(--h-sm); padding: 0; }
+.profile__pick { margin-right: auto; }
+/* A sign-in on another auth server: its fields one under another. */
+.sign-in { display: flex; flex-direction: column; gap: 12px; }
 .profile__badge { padding: 4px 8px; border: 1px solid var(--line-3); border-radius: var(--r-xs); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--primary-hi); }
+/* The last card adds an account. */
+.profile--add { min-height: 174px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border-style: dashed; background: transparent; color: var(--text-3); font: 600 14px var(--f-ui); cursor: pointer; }
+.profile--add:hover { color: var(--text); background: rgba(var(--accent-rgb), 0.06); }
 .avatar { display: inline-grid; flex: none; place-items: center; overflow: hidden; border-radius: var(--r-sm); background: var(--s-input); color: var(--text-3); }
 .avatar img { width: 100%; height: 100%; image-rendering: pixelated; }
 .sidebar__user .avatar { border-radius: 4px; }

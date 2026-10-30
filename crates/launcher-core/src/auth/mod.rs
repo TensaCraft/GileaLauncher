@@ -2,12 +2,15 @@
 
 pub mod crypto;
 pub mod http;
+pub mod injector;
 pub mod msa;
 pub mod offline;
 pub mod page;
+pub mod servers;
 pub mod service;
 pub mod store;
 pub mod xbox;
+pub mod yggdrasil;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -126,8 +129,10 @@ pub struct AuthConfig {
     pub client_id: String,
     pub endpoints: AuthEndpoints,
     pub timings: AuthTimings,
-    /// Holds `profiles.json` and `profile-token.key`.
+    /// Holds `profiles.json`, `auth_servers.json` and `profile-token.key`.
     pub state_dir: PathBuf,
+    /// The auth servers known before they are asked for (Ely.by); tests point them at a fake.
+    pub servers: Vec<servers::Preset>,
 }
 
 impl AuthConfig {
@@ -137,6 +142,7 @@ impl AuthConfig {
             endpoints: AuthEndpoints::default(),
             timings: AuthTimings::default(),
             state_dir: state_dir.to_path_buf(),
+            servers: servers::presets(),
         }
     }
 }

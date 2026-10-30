@@ -1,5 +1,5 @@
-//! Accounts service: the profile list, Microsoft sign-in (browser, then a device code), token
-//! refresh and the identity a launch uses.
+//! Accounts service: the profile list, Microsoft sign-in (browser, then a device code), sign-in on
+//! other auth servers (authlib-injector's API), token refresh and the identity a launch uses.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -12,8 +12,9 @@ use super::http::{AuthHttp, FlowError};
 use super::msa::{self, MsTokens};
 use super::offline::validate_offline_name;
 use super::page::PageLook;
+use super::servers::{AuthServers, Origin};
 use super::store::{NewProfile, ProfileStore, REASON_REFRESH_INVALID, StoredProfile, TokenUpdate};
-use super::{AuthConfig, LAUNCH_SESSION_MARGIN, TOKEN_REFRESH_LEEWAY, UrlOpener, now_secs, xbox};
+use super::{AuthConfig, LAUNCH_SESSION_MARGIN, TOKEN_REFRESH_LEEWAY, UrlOpener, now_secs, xbox, yggdrasil};
 use crate::feedback::{EventSink, FeedbackService};
 use crate::skins::Player;
 
@@ -26,11 +27,22 @@ pub struct LaunchIdentity {
     pub xuid: Option<String>,
     pub client_id: Option<String>,
     pub kind: AccountKind,
+    /// An account on another auth server: the game reaches it through the authlib-injector agent.
+    pub agent: Option<AgentServer>,
+}
+
+/// The auth server the authlib-injector agent points the game at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentServer {
+    pub api_root: String,
+    /// Its metadata, handed to the agent so the game starts without asking the server.
+    pub metadata: String,
 }
 
 pub struct AuthService {
     cfg: AuthConfig,
     store: ProfileStore,
+    servers: AuthServers,
     http: AuthHttp,
     feedback: Arc<FeedbackService>,
     sink: Arc<dyn EventSink>,
@@ -73,9 +85,11 @@ impl AuthService {
     ) -> AppResult<Arc<Self>> {
         let http = AuthHttp::new(&cfg.timings)?;
         let store = ProfileStore::open(&cfg.state_dir);
+        let servers = AuthServers::open(&cfg.state_dir, cfg.servers.clone());
         Ok(Arc::new(AuthService {
             cfg,
             store,
+            servers,
             http,
             feedback,
             sink,
@@ -122,6 +136,102 @@ impl AuthService {
     pub fn delete(&self, key: &str) -> AppResult<ProfilesSnapshot> {
         self.store.delete(key)?;
         Ok(self.changed())
+    }
+
+    /// `delete`, ending an account's session on its auth server first (best effort: a server out
+    /// of reach does not keep the account).
+    pub async fn delete_signed_out(&self, key: &str) -> AppResult<ProfilesSnapshot> {
+        if let Some(profile) = self.store.get(key).filter(|p| p.kind == AccountKind::Yggdrasil)
+            && let (Some(server), Some(access), Some(client)) = (
+                profile.server.as_deref().and_then(|id| self.servers.get(id)),
+                &profile.access_token,
+                &profile.refresh_token,
+            )
+        {
+            yggdrasil::invalidate(&self.http, &server.api_root, access, client).await;
+        }
+        self.delete(key)
+    }
+
+    /// A module's auth server (`id`, at `address`), found now: the module may move it to another
+    /// address later, and its accounts stay.
+    pub async fn register_server(&self, id: &str, address: &str, module: &str) -> AppResult<()> {
+        self.servers.register(&self.http, id, address, Origin::Module(module.to_string())).await.map(|_| ())
+    }
+
+    /// Signs in on an auth server other than Microsoft's: `server` is a known one's id (Ely.by's
+    /// `elyby`, or one a module registered); the player never names an address. `AuthCodeRequired`
+    /// asks for the second factor; nothing is kept until the sign-in succeeds. The account becomes
+    /// the default; signing in again updates it.
+    pub async fn sign_in_server(
+        &self,
+        server: &str,
+        login: &str,
+        password: &str,
+        code: Option<&str>,
+    ) -> AppResult<ProfileDto> {
+        let found = self.servers.ensure(&self.http, server).await?;
+        let client_token = uuid::Uuid::new_v4().simple().to_string();
+        let credentials = yggdrasil::Credentials { login, password, code, client_token: &client_token };
+        let session = yggdrasil::authenticate(&self.http, &found.api_root, &credentials).await?;
+        let profile =
+            session.profile.clone().or_else(|| session.profiles.first().cloned()).ok_or_else(|| {
+                AppError::new(ErrorCode::AuthFailed, "the account has no game profile on this server")
+            })?;
+        let key = format!("{}:{}", found.id, profile.name);
+        let saved = self.store.save(
+            &key,
+            NewProfile {
+                id: Some(profile.id),
+                name: profile.name,
+                access_token: Some(session.access_token),
+                refresh_token: Some(session.client_token).filter(|t| !t.is_empty()).or(Some(client_token)),
+                server: Some((found.id.clone(), found.name.clone())),
+                ..NewProfile::default()
+            },
+            true,
+        )?;
+        tracing::info!("Profile {key} signed in on {}", found.api_root);
+        self.changed();
+        Ok(saved.to_dto())
+    }
+
+    /// A `Yggdrasil` account's session as a launch needs it: checked, renewed when it went stale,
+    /// marked for a new sign-in when it ended. A server out of reach keeps the session (single
+    /// player needs none).
+    async fn server_session(&self, profile: StoredProfile) -> AppResult<(StoredProfile, AgentServer)> {
+        let server_id = profile.server.clone().unwrap_or_default();
+        let server = self.servers.refreshed(&self.http, &server_id).await?;
+        let agent = AgentServer { api_root: server.api_root.clone(), metadata: server.metadata.clone() };
+        let (Some(access), Some(client)) = (profile.access_token.clone(), profile.refresh_token.clone())
+        else {
+            return Ok((profile, agent));
+        };
+        match yggdrasil::validate(&self.http, &server.api_root, &access, &client).await {
+            Ok(true) => return Ok((profile, agent)),
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!("The session of {} could not be checked: {}", profile.key, e.detail);
+                return Ok((profile, agent));
+            }
+        }
+        match yggdrasil::refresh(&self.http, &server.api_root, &access, &client).await {
+            Ok(renewed) => {
+                let saved = self.store.update_session(&profile.key, &renewed.access_token)?;
+                self.changed();
+                Ok((saved, agent))
+            }
+            Err(e) if e.code == ErrorCode::ReauthRequired => {
+                tracing::warn!("The session of {} ended on its server; a new sign-in is needed", profile.key);
+                self.store.mark_reauth(&profile.key, REASON_REFRESH_INVALID)?;
+                self.changed();
+                Err(e.with_param("profile", &profile.name))
+            }
+            Err(e) => {
+                tracing::warn!("The session of {} could not be renewed: {}", profile.key, e.detail);
+                Ok((profile, agent))
+            }
+        }
     }
 
     pub fn set_default(&self, key: &str) -> AppResult<ProfilesSnapshot> {
@@ -198,6 +308,7 @@ impl AuthService {
             xuid: session.xuid,
             expires_at: Some(session.expires_at),
             auth_client_id: Some(self.cfg.client_id.clone()),
+            server: None,
         };
         self.store.save(&session.name, profile, true)
     }
@@ -314,7 +425,7 @@ impl AuthService {
     /// Startup: refresh every Microsoft profile; one failure never stops the others.
     pub async fn refresh_all(&self) {
         for profile in self.store.list() {
-            if profile.is_offline() {
+            if profile.is_offline() || profile.kind == AccountKind::Yggdrasil {
                 continue;
             }
             if let Err(e) = self.refresh(&profile.key, false).await {
@@ -324,8 +435,10 @@ impl AuthService {
     }
 
     /// Whose skin profile `key` wears: its UUID and name (`skins::SkinService` finds the skin).
+    /// None for an account on another auth server: Mojang's skin of the same nick is someone
+    /// else's.
     pub fn player(&self, key: &str) -> Option<Player> {
-        let profile = self.store.get(key)?;
+        let profile = self.store.get(key).filter(|p| p.kind != AccountKind::Yggdrasil)?;
         Some(Player::new(&profile.id, &profile.name))
     }
 
@@ -335,6 +448,28 @@ impl AuthService {
             Some(key) => key.to_string(),
             None => self.store.default_profile().map(|p| p.key).ok_or_else(|| no_profile(""))?,
         };
+        let stored = self.store.get(&key).ok_or_else(|| no_profile(&key))?;
+        if stored.kind == AccountKind::Yggdrasil {
+            if let Some(reason) = stored.reauth_reason() {
+                return Err(
+                    AppError::new(ErrorCode::ReauthRequired, reason).with_param("profile", &stored.name)
+                );
+            }
+            let (profile, agent) = self.server_session(stored).await?;
+            let access_token = profile.access_token.clone().ok_or_else(|| {
+                AppError::new(ErrorCode::ReauthRequired, "no access token")
+                    .with_param("profile", &profile.name)
+            })?;
+            return Ok(LaunchIdentity {
+                username: profile.name,
+                uuid: profile.id,
+                access_token,
+                xuid: None,
+                client_id: None,
+                kind: profile.kind,
+                agent: Some(agent),
+            });
+        }
         let (profile, failure) = self.renewed(&key, false, LAUNCH_SESSION_MARGIN).await?;
         if let Some(reason) = profile.reauth_reason() {
             return Err(AppError::new(ErrorCode::ReauthRequired, reason).with_param("profile", &profile.name));
@@ -357,6 +492,7 @@ impl AuthService {
             xuid: profile.xuid,
             client_id: profile.auth_client_id,
             kind: profile.kind,
+            agent: None,
         })
     }
 }

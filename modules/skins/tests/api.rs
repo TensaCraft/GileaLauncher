@@ -68,6 +68,8 @@ fn profile(key: &str, kind: AccountKind, is_default: bool) -> ProfileDto {
         is_default,
         reauth_required: false,
         reauth_reason: None,
+        server: None,
+        server_name: None,
     }
 }
 

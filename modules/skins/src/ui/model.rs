@@ -17,6 +17,16 @@ pub fn kept_account(accounts: &[Account], current: &str) -> Option<String> {
     }
 }
 
+/// The account the address's query (`?account=<key>`, from the profiles page) asks to open.
+pub fn asked_account(search: &str) -> Option<String> {
+    search
+        .trim_start_matches('?')
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("account="))
+        .map(|raw| percent_encoding::percent_decode_str(raw).decode_utf8_lossy().into_owned())
+        .filter(|key| !key.is_empty())
+}
+
 /// The library card of the skin the account wears.
 pub fn worn_id(state: &AccountState) -> Option<String> {
     state.skin.as_ref().and_then(|s| s.library_id.clone())
@@ -81,6 +91,15 @@ pub fn matching(skins: &[LibrarySkin], query: &str) -> Vec<LibrarySkin> {
 mod tests {
     use super::*;
     use crate::dto::{Cape, CurrentSkin, SkinVariant};
+
+    #[test]
+    fn the_profiles_page_names_the_account_to_open() {
+        assert_eq!(asked_account("?account=Steve").as_deref(), Some("Steve"));
+        assert_eq!(asked_account("?tab=capes&account=ely.by%3AAlex").as_deref(), Some("ely.by:Alex"));
+        assert_eq!(asked_account("?account="), None);
+        assert_eq!(asked_account(""), None);
+        assert_eq!(asked_account("?accounts=Steve"), None);
+    }
 
     fn account(key: &str, is_default: bool) -> Account {
         Account { key: key.into(), name: key.into(), is_default, reauth_required: false }

@@ -211,12 +211,12 @@ pub fn account_choices(
     profiles: &[ProfileDto],
     current: &str,
     launcher: &str,
-    kind: impl Fn(AccountKind) -> String,
+    kind: impl Fn(&ProfileDto) -> String,
     gone: &str,
 ) -> Vec<SelectOption> {
     let mut choices = vec![SelectOption::new("", launcher)];
     choices.extend(
-        profiles.iter().map(|p| SelectOption::new(p.key.clone(), format!("{} ({})", p.name, kind(p.kind)))),
+        profiles.iter().map(|p| SelectOption::new(p.key.clone(), format!("{} ({})", p.name, kind(p)))),
     );
     if !current.is_empty() && !profiles.iter().any(|p| p.key == current) {
         choices.push(SelectOption::new(current, format!("{current} ({gone})")));
@@ -663,9 +663,10 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
     };
 
     let account_options = Signal::derive(move || {
-        let kind = |kind: AccountKind| match kind {
+        let kind = |p: &ProfileDto| match p.kind {
             AccountKind::Microsoft => i18n.t("microsoft"),
             AccountKind::Offline => i18n.t("offline_account"),
+            AccountKind::Yggdrasil => crate::profiles::kind_text(p, |k| i18n.t(k)),
         };
         store.profiles.with(|profiles| {
             profile.with(|current| {
@@ -947,9 +948,11 @@ mod tests {
             is_default: false,
             reauth_required: false,
             reauth_reason: None,
+            server: None,
+            server_name: None,
         };
         let profiles = [account("Alex", AccountKind::Microsoft), account("Steve", AccountKind::Offline)];
-        let kind = |k: AccountKind| format!("{k:?}");
+        let kind = |p: &ProfileDto| format!("{:?}", p.kind);
         let rows = |current: &str| -> Vec<(String, String)> {
             account_choices(&profiles, current, "Launcher", kind, "gone")
                 .into_iter()

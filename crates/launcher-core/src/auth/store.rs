@@ -18,6 +18,8 @@ use crate::storage::json::{JsonRead, backup_corrupt_file, read_json_object, writ
 
 pub const PROFILES_FILE: &str = "profiles.json";
 pub const OFFLINE_TOKEN: &str = "offline";
+/// `type` of an account on an authlib-injector auth server.
+pub const YGGDRASIL_TYPE: &str = "yggdrasil";
 pub const REASON_REAUTH: &str = "reauth_required";
 pub const REASON_DECRYPTION_FAILED: &str = "token_decryption_failed";
 pub const REASON_REFRESH_MISSING: &str = "refresh_token_missing";
@@ -39,6 +41,9 @@ pub struct StoredProfile {
     pub xuid: Option<String>,
     pub expires_at: Option<i64>,
     pub auth_client_id: Option<String>,
+    /// The auth server of a `Yggdrasil` account: its id and its name.
+    pub server: Option<String>,
+    pub server_name: Option<String>,
     pub is_default: bool,
     marked: bool,
     stored_reason: Option<String>,
@@ -99,12 +104,16 @@ impl StoredProfile {
             is_default: self.is_default,
             reauth_required: reason.is_some(),
             reauth_reason: reason,
+            server: self.server.clone(),
+            server_name: self.server_name.clone(),
         }
     }
 }
 
-/// A profile to add; tokens in clear text, sealed on save.
-#[derive(Debug, Clone, PartialEq)]
+/// A profile to add; tokens in clear text, sealed on save. A `Yggdrasil` account names its auth
+/// server (id, name) and keeps its client token where Microsoft's keep the refresh token: both are
+/// what renews the session.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct NewProfile {
     pub id: Option<String>,
     pub name: String,
@@ -113,6 +122,7 @@ pub struct NewProfile {
     pub xuid: Option<String>,
     pub expires_at: Option<i64>,
     pub auth_client_id: Option<String>,
+    pub server: Option<(String, String)>,
 }
 
 impl NewProfile {
@@ -125,6 +135,7 @@ impl NewProfile {
             xuid: None,
             expires_at: None,
             auth_client_id: None,
+            server: None,
         }
     }
 }
@@ -335,6 +346,11 @@ impl ProfileStore {
         if let Some(client) = &profile.auth_client_id {
             record.insert("auth_client_id".to_string(), json!(client));
         }
+        if let Some((server, server_name)) = &profile.server {
+            record.insert("type".to_string(), json!(YGGDRASIL_TYPE));
+            record.insert("server".to_string(), json!(server));
+            record.insert("server_name".to_string(), json!(server_name));
+        }
         let sealed =
             self.seal_tokens(&mut record, profile.access_token.as_deref(), profile.refresh_token.as_deref());
         self.mutate(|all| {
@@ -375,6 +391,25 @@ impl ProfileStore {
             record.insert("xuid".to_string(), json!(update.xuid));
             record.insert("expires_at".to_string(), json!(update.expires_at));
             record.insert("auth_client_id".to_string(), json!(update.auth_client_id));
+            record.remove("reauth_required");
+            record.remove("reauth_reason");
+            Ok(())
+        })?;
+        self.get(key).ok_or_else(|| not_found(key))
+    }
+
+    /// A `Yggdrasil` account's renewed session: its new access token, the markers cleared.
+    pub fn update_session(&self, key: &str, access_token: &str) -> AppResult<StoredProfile> {
+        let sealed = match self.cipher.encrypt(access_token) {
+            Ok(sealed) => sealed,
+            Err(e) => {
+                self.mark_reauth(key, REASON_ENCRYPTION_UNAVAILABLE)?;
+                return Err(e);
+            }
+        };
+        self.mutate(|all| {
+            let record = all.get_mut(key).ok_or_else(|| not_found(key))?;
+            record.insert("access_token".to_string(), json!(sealed));
             record.remove("reauth_required");
             record.remove("reauth_reason");
             Ok(())
@@ -459,10 +494,17 @@ impl ProfileStore {
         let offline = text("type").as_deref() == Some(OFFLINE_TOKEN)
             || access_token.as_deref() == Some(OFFLINE_TOKEN)
             || refresh_token.as_deref() == Some(OFFLINE_TOKEN);
+        let kind = if offline {
+            AccountKind::Offline
+        } else if text("type").as_deref() == Some(YGGDRASIL_TYPE) {
+            AccountKind::Yggdrasil
+        } else {
+            AccountKind::Microsoft
+        };
         StoredProfile {
             key: key.to_string(),
             id: text("id").unwrap_or_else(|| offline_uuid(&name)),
-            kind: if offline { AccountKind::Offline } else { AccountKind::Microsoft },
+            kind,
             access_token,
             refresh_token,
             xuid: text("xuid"),
@@ -470,6 +512,8 @@ impl ProfileStore {
                 .get("expires_at")
                 .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))),
             auth_client_id: text("auth_client_id"),
+            server: text("server"),
+            server_name: text("server_name"),
             is_default: is_default(record),
             marked: record.get("reauth_required").and_then(Value::as_bool).unwrap_or(false),
             stored_reason: text("reauth_reason"),
@@ -496,6 +540,7 @@ mod tests {
             xuid: Some("2535400000000001".into()),
             expires_at: Some(4_000_000_000),
             auth_client_id: Some("client".into()),
+            server: None,
         }
     }
 

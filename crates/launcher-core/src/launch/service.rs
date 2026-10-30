@@ -379,6 +379,14 @@ impl LaunchService {
             d.components.ensure(&component, spec.as_ref(), false, &progress)
         );
         let identity = identity?;
+        // An account on another auth server: the game reaches it through authlib-injector.
+        let agent_jar = match identity.agent {
+            Some(_) => Some(
+                crate::auth::injector::ensure_jar(&d.downloader, &d.mc_dir, &crate::auth::injector::pinned())
+                    .await?,
+            ),
+            None => None,
+        };
         let installed = installed.map_err(|e| {
             match e.code {
                 // Only a version that cannot be found or read is an integrity problem ("reinstall");
@@ -398,6 +406,7 @@ impl LaunchService {
             java: java.clone(),
             config: &d.config,
             limits: (d.memory)(),
+            agent_jar,
         };
         let (mut options, gpu) = launch_options(input);
         apply_join(&mut options, request.join.as_ref());

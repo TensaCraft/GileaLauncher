@@ -43,6 +43,9 @@ pub fn TextInput(
     /// The same heights as buttons (`Size::Md` by default).
     #[prop(optional)]
     size: Size,
+    /// A password: its characters hidden, and never offered for autofill.
+    #[prop(optional)]
+    secret: bool,
 ) -> impl IntoView {
     view! {
         <div
@@ -53,7 +56,8 @@ pub fn TextInput(
             {icon.map(|name| view! { <Icon name=name outlined=true /> })}
             <input
                 class="input"
-                type="text"
+                type=if secret { "password" } else { "text" }
+                autocomplete=if secret { "new-password" } else { "off" }
                 spellcheck="false"
                 autofocus=autofocus
                 placeholder=move || placeholder.get()

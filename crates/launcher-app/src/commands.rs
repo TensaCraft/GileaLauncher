@@ -403,9 +403,27 @@ pub fn profile_create_offline(state: State<'_, AppState>, name: String) -> AppRe
     state.core.auth.create_offline(&name)
 }
 
-#[tauri::command(async)]
-pub fn profile_delete(state: State<'_, AppState>, key: String) -> AppResult<ProfilesSnapshot> {
-    state.core.auth.delete(&key)
+/// Removes a profile; an account on another auth server ends its session there first.
+#[tauri::command]
+pub async fn profile_delete(state: State<'_, AppState>, key: String) -> AppResult<ProfilesSnapshot> {
+    state.core.auth.delete_signed_out(&key).await
+}
+
+/// Signs in on another auth server: `server` is a known one's id (`elyby`) or an address;
+/// `code` is the second factor, when the server asked for it.
+#[tauri::command]
+pub async fn auth_sign_in_server(
+    state: State<'_, AppState>,
+    server: String,
+    login: String,
+    password: String,
+    code: Option<String>,
+) -> AppResult<ProfileDto> {
+    state
+        .core
+        .auth
+        .sign_in_server(&server, &login, &password, code.as_deref().filter(|c| !c.trim().is_empty()))
+        .await
 }
 
 #[tauri::command(async)]
@@ -437,6 +455,15 @@ pub async fn profile_avatar(state: State<'_, AppState>, key: String) -> AppResul
     let Some(player) = state.core.auth.player(&key) else { return Ok(None) };
     let head = state.core.skins.head(&player, launcher_core::skins::AVATAR_SIZE).await;
     Ok(head.map(|avatar| avatar.to_src()))
+}
+
+/// `data:` URL of the profile's whole figure seen from the front, or nothing while its skin
+/// cannot be had.
+#[tauri::command]
+pub async fn profile_body(state: State<'_, AppState>, key: String) -> AppResult<Option<String>> {
+    let Some(player) = state.core.auth.player(&key) else { return Ok(None) };
+    let front = state.core.skins.front(&player).await;
+    Ok(front.map(|png| launcher_core::skins::render::data_url(&png)))
 }
 
 #[cfg(test)]

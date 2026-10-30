@@ -104,6 +104,8 @@ mod tests {
             is_default,
             reauth_required: false,
             reauth_reason: None,
+            server: None,
+            server_name: None,
         }
     }
 

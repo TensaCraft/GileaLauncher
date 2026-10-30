@@ -59,7 +59,9 @@ pub fn SkinsPage() -> impl IntoView {
     let host = use_module_host();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
     let accounts = RwSignal::new(None::<Vec<Account>>);
-    let account = RwSignal::new(String::new());
+    // The profiles page's «Змінити скін» names the account; otherwise the active one.
+    let search = web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default();
+    let account = RwSignal::new(super::model::asked_account(&search).unwrap_or_default());
     let tab = RwSignal::new("skins");
     let state = RwSignal::new(None::<Result<AccountState, AppError>>);
     let library = RwSignal::new(None::<Vec<LibrarySkin>>);

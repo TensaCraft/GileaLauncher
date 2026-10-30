@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use launcher_core::auth::crypto::TokenCipher;
 use launcher_core::auth::page::PageLook;
+use launcher_core::auth::servers::Preset;
 use launcher_core::auth::service::AuthService;
 use launcher_core::auth::store::{PROFILES_FILE, REASON_DECRYPTION_FAILED, REASON_REFRESH_INVALID};
 use launcher_core::auth::{AuthConfig, AuthTimings, NoOpener, UrlOpener};
@@ -15,6 +16,7 @@ use launcher_shared::{
 };
 use serde_json::{Map, Value, json};
 use support::fake_ms::{self, Browser, Fake, FakeBrowser, MC_ID, MC_NAME, USER_CODE, XUID};
+use support::fake_ygg::{self, FakeYgg};
 
 #[derive(Default)]
 struct Rec {
@@ -358,4 +360,112 @@ async fn deleting_and_choosing_the_default_profile() {
     assert_eq!(svc.set_default("nobody").unwrap_err().code, ErrorCode::NotFound);
     svc.delete("Alex").unwrap();
     assert_eq!(svc.launch_identity(None).await.unwrap_err().code, ErrorCode::NoProfile);
+}
+
+/// A service whose Ely.by preset is the local fake auth server.
+fn with_server(fake: &Fake, ygg: &FakeYgg, dir: &Path) -> (Arc<AuthService>, Arc<Rec>) {
+    let rec = Arc::new(Rec::default());
+    let mut cfg = AuthConfig::new("test-client", dir);
+    cfg.endpoints = fake.endpoints();
+    cfg.timings = AuthTimings::fast();
+    cfg.servers = vec![Preset { id: "elyby", name: "Ely.by".into(), address: ygg.base.clone() }];
+    let svc =
+        AuthService::new(cfg, FeedbackService::new(rec.clone()), rec.clone(), Arc::new(NoOpener)).unwrap();
+    (svc, rec)
+}
+
+const ELY_KEY: &str = "elyby:Alex_UA";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sign_in_on_another_server_adds_its_account() {
+    let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
+    let (svc, rec) = with_server(&fake, &ygg, dir.path());
+    let dto = svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
+    assert_eq!(dto.key, ELY_KEY, "the server and the name: the same nick elsewhere is another account");
+    assert_eq!((dto.name.as_str(), dto.id.as_str()), (fake_ygg::PROFILE_NAME, fake_ygg::PROFILE_ID));
+    assert_eq!(dto.kind, AccountKind::Yggdrasil);
+    assert_eq!(
+        (dto.server.as_deref(), dto.server_name.as_deref()),
+        (Some("elyby"), Some(fake_ygg::SERVER_NAME))
+    );
+    assert!(dto.is_default && !dto.reauth_required);
+    assert!(rec.profiles.lock().unwrap().last().unwrap().profiles.iter().any(|p| p.key == ELY_KEY));
+    let stored = std::fs::read_to_string(dir.path().join(PROFILES_FILE)).unwrap();
+    assert!(!stored.contains("token-1"), "the session is sealed like Microsoft's");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_factor_is_asked_for_and_nothing_is_kept_until_it_comes() {
+    let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
+    ygg.set(|k| k.two_factor = true);
+    let (svc, _) = with_server(&fake, &ygg, dir.path());
+    let asked = svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap_err();
+    assert_eq!(asked.code, ErrorCode::AuthCodeRequired);
+    assert!(svc.snapshot().profiles.is_empty());
+    let dto =
+        svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, Some(fake_ygg::TOTP)).await.unwrap();
+    assert_eq!(dto.key, ELY_KEY);
+}
+
+/// The player names no server: only Ely.by and the servers modules register (owner, 2026-10-30).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sign_in_goes_only_to_a_known_server_never_to_an_address() {
+    let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = with_server(&fake, &ygg, dir.path());
+    let err = svc.sign_in_server(&ygg.base, fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotFound);
+    assert!(ygg.posts("authserver/authenticate").is_empty(), "nothing was sent there");
+    svc.register_server("tensa", &ygg.base, "tensa").await.unwrap();
+    let dto = svc.sign_in_server("tensa", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
+    assert_eq!(dto.key, format!("tensa:{}", fake_ygg::PROFILE_NAME));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_launch_on_such_an_account_carries_the_agent_and_its_server() {
+    let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = with_server(&fake, &ygg, dir.path());
+    svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
+    let identity = svc.launch_identity(Some(ELY_KEY)).await.unwrap();
+    assert_eq!(identity.uuid, fake_ygg::PROFILE_ID, "no dashes, as the agent's servers expect");
+    let agent = identity.agent.unwrap();
+    assert_eq!(agent.api_root, ygg.api_root());
+    assert!(agent.metadata.contains(fake_ygg::SERVER_NAME), "prefetched for the game");
+    assert_eq!(ygg.posts("authserver/validate").len(), 1, "the session is checked before a launch");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_session_is_renewed_before_a_launch_and_an_ended_one_asks_for_the_password() {
+    let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = with_server(&fake, &ygg, dir.path());
+    svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
+    ygg.stale_all();
+    let renewed = svc.launch_identity(Some(ELY_KEY)).await.unwrap();
+    assert_eq!(renewed.access_token, "token-2");
+    ygg.end_all();
+    let err = svc.launch_identity(Some(ELY_KEY)).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::ReauthRequired);
+    let profile = svc.snapshot().profiles.into_iter().find(|p| p.key == ELY_KEY).unwrap();
+    assert!(profile.reauth_required, "the card asks for a new sign-in");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_such_an_account_ends_its_session_on_the_server() {
+    let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = with_server(&fake, &ygg, dir.path());
+    svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
+    svc.delete_signed_out(ELY_KEY).await.unwrap();
+    assert!(svc.snapshot().profiles.is_empty());
+    assert_eq!(ygg.posts("authserver/invalidate").len(), 1);
+}
+
+/// Mojang's skin of the same nick is someone else's: an account on another server shows none
+/// until its own server's skins are read.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_account_on_another_server_borrows_no_mojang_skin() {
+    let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = with_server(&fake, &ygg, dir.path());
+    svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
+    assert_eq!(svc.player(ELY_KEY), None);
+    svc.create_offline("Steve").unwrap();
+    assert!(svc.player("Steve").is_some());
 }
