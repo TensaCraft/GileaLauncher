@@ -17,10 +17,11 @@ use ui_kit::{
     card_image, ipc, use_toasts,
 };
 
+use crate::builds::actions::use_build_actions;
 use crate::builds::description::{DescriptionField, description_problem};
 use crate::builds::gpu::GpuChoice;
 use crate::builds::loader_pick::{
-    LoaderBuildField, LoaderCards, LoaderPick, change_warning, loader_mark, loader_value,
+    LoaderBuildField, LoaderCards, LoaderPick, OwnPick, loader_mark, pick_warnings,
 };
 use crate::builds::ram::RamSetting;
 use crate::builds::{build_loader, build_minecraft, ram_slider};
@@ -282,8 +283,9 @@ struct CatalogArgs {
 }
 
 /// "Change the loader": the wizard's cards, the loader's build and the Minecraft version, starting
-/// from the build's own. A change that leaves the build's mods behind asks first; "Install" runs
-/// as an operation and `on_done` gets the new settings.
+/// from the build's own and never leaving it by themselves. A change that risks the build's mods
+/// or worlds (another loader, mods left from one before, another Minecraft, an older loader build)
+/// asks first; "Install" runs as an operation and `on_done` gets the new settings.
 #[component]
 fn LoaderDialog(
     open: RwSignal<bool>,
@@ -293,6 +295,7 @@ fn LoaderDialog(
     let i18n = use_i18n();
     let store = use_store();
     let toasts = use_toasts();
+    let actions = use_build_actions();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
     let current = {
         let key = build_key.clone();
@@ -313,17 +316,19 @@ fn LoaderDialog(
             let _ = versions.try_set(Some(answer.map_err(|e| i18n.error(&e))));
         });
     };
-    // Opened: the build's own loader, its build and its Minecraft; the lists asked afresh.
+    // Opened: the build's own loader, its build and its Minecraft, kept until the player picks
+    // another; the lists asked afresh, and the build (the mods its folder holds) too.
     Effect::new(move |was_open: Option<bool>| {
         let is_open = open.get();
         if is_open && was_open != Some(true) {
             if let Some(build) = current.get_untracked() {
-                pick.loader.set(loader_value(build_loader(&build)));
-                pick.build.set(build.loader_version.clone().unwrap_or_default());
-                mc.set(build_minecraft(&build));
+                let own = OwnPick::of(&build);
+                mc.set(own.mc.clone());
+                pick.start_on(own);
             }
             pick.load();
             load_versions();
+            actions.refresh();
         }
         is_open
     });
@@ -334,10 +339,31 @@ fn LoaderDialog(
             _ => minecraft_options(&[], &chosen, &snapshot),
         })
     });
-    // What the change risks for the build's mods, in the language.
-    let warning = Memo::new(move |_| {
-        let from = current.with(|b| b.as_ref().map(build_loader))?;
-        change_warning(from, pick.kind()).map(|(key, words)| i18n.tp(key, &words))
+    // What the change risks for the build's mods and worlds, in the language.
+    let warnings = Memo::new(move |_| {
+        let Some((from, leftover)) = current.with(|b| b.as_ref().map(|b| (OwnPick::of(b), b.leftover_mods)))
+        else {
+            return Vec::new();
+        };
+        let kind = pick.kind();
+        let build = if kind == LoaderKind::Minecraft { String::new() } else { pick.build.get() };
+        let to = OwnPick { kind, mc: mc.get(), build };
+        let offered = pick.catalogs.with(|all| {
+            all.get(&kind).and_then(|c| c.as_ref().ok()).map(|c| c.builds_for(&to.mc)).unwrap_or_default()
+        });
+        versions.with(|v| {
+            let listed = v.as_ref().and_then(|r| r.as_ref().ok()).map(Vec::as_slice).unwrap_or_default();
+            pick_warnings(&from, &to, leftover, listed, &offered)
+                .into_iter()
+                .map(|(key, words)| i18n.tp(key, &words))
+                .collect::<Vec<_>>()
+        })
+    });
+    let warning = Memo::new(move |_| warnings.with(|w| (!w.is_empty()).then(|| w.join(" "))));
+    // Another loader asks to change the loader; the rest, to change the version.
+    let confirm_title = Signal::derive(move || {
+        let other = current.with(|b| b.as_ref().is_some_and(|b| build_loader(b) != pick.kind()));
+        i18n.t(if other { "build_loader_confirm_title" } else { "build_version_confirm_title" })
     });
     let ready = move || {
         let (kind, chosen, build) = (pick.kind(), mc.get(), pick.build.get());
@@ -407,6 +433,13 @@ fn LoaderDialog(
                     </div>
                 </Field>
                 <LoaderBuildField pick=pick mc=mc />
+                <Show when=move || pick.kind() != LoaderKind::Minecraft>
+                    <Checkbox
+                        checked=pick.unstable
+                        label=t("version_component_include_unstable")
+                        on_change=Callback::new(move |_: bool| pick.load())
+                    />
+                </Show>
             </div>
             {move || versions.with(|v| match v {
                 Some(Err(e)) => Some(view! {
@@ -426,7 +459,7 @@ fn LoaderDialog(
         </Dialog>
         <ConfirmDialog
             open=confirm
-            title=t("build_loader_confirm_title")
+            title=confirm_title
             message=Signal::derive(move || warning.get().unwrap_or_default())
             confirm_label=t("build_loader_confirm")
             cancel_label=t("cancel")

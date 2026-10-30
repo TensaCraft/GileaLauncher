@@ -73,7 +73,7 @@ pub fn Basics(wizard: Wizard, name_problem: Memo<Option<&'static str>>) -> impl 
     let loader_builds = Signal::derive(move || {
         let (version, kind) = wizard.state.with(|s| (s.mc.clone(), s.loader));
         let beta = i18n.t("version_create_unstable_loader_badge");
-        wizard.catalogs.with(|all| build_options(kind, &version, all, &beta))
+        wizard.catalogs.with(|all| build_options(kind, &version, all, &beta, None))
     });
     let on_build = Callback::new(move |picked: String| wizard.state.update(|s| s.loader_version = picked));
     let is_loader = move || wizard.state.with(|s| s.loader != LoaderKind::Minecraft);

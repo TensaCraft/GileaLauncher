@@ -222,6 +222,12 @@ impl MockBuilds {
         };
         let mut settings = self.settings(key)?;
         let build = self.builds.iter_mut().find(|b| b.key == key).expect("settings found it");
+        // Back on vanilla, a build remembers the loader it had, as the core's record does.
+        build.last_loader = match crate::builds::build_loader(build) {
+            _ if kind != LoaderKind::Minecraft => None,
+            LoaderKind::Minecraft => build.last_loader,
+            was => Some(was),
+        };
         build.loader = Some(id.clone());
         build.version = Some(mc.to_string());
         build.client = Some(kind.display_name().to_string());
@@ -775,6 +781,8 @@ mod tests {
         assert_eq!((now.client.as_deref(), now.version), (Some("Fabric"), Some(mc.clone())));
         let back = m.set_loader(&build.key, LoaderKind::Minecraft, None).unwrap();
         assert_eq!(back.component, Some(mc));
+        let now = m.snapshot().builds.into_iter().find(|b| b.key == build.key).unwrap();
+        assert_eq!(now.last_loader, Some(LoaderKind::Fabric), "it remembers its loader");
         assert_eq!(
             m.set_loader("ghost", LoaderKind::Fabric, Some("0.16.9")).unwrap_err().code,
             ErrorCode::VersionNotFound
