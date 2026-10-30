@@ -112,7 +112,7 @@ fn BuildRow(item: BuildDto, update_pack: Callback<(ProviderInfo, ModpackBuild)>)
         let key = pack.key.clone();
         Some(view! {
             <IconAction
-                icon="upgrade"
+                icon="downloading"
                 tone=ActionTone::Ok
                 title=Signal::derive(move || i18n.tp("modpack_update_to", &[("version", version.clone())]))
                 loading=Signal::derive(move || updates().updating(&key))

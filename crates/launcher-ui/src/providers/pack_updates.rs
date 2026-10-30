@@ -196,12 +196,12 @@ pub fn PackUpdateDialog(
         i18n.tp("modpack_update_title", &[("name", name)])
     });
     view! {
-        <Dialog open=open title=title subtitle=t("modpack_update_note") icon="upgrade">
+        <Dialog open=open title=title subtitle=t("modpack_update_note") icon="downloading">
             <DialogFooter slot>
                 <Button variant=Variant::Ghost on_click=move |_| open.set(false)>{move || i18n.t("cancel")}</Button>
                 <Button
                     variant=Variant::Primary
-                    icon="upgrade"
+                    icon="downloading"
                     disabled=Signal::derive(move || !ready())
                     on_click=move |_| update()
                 >

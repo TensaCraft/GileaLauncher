@@ -185,7 +185,7 @@ pub fn ProviderRowActions(
                     };
                     view! {
                         <IconAction
-                            icon="upgrade"
+                            icon="downloading"
                             tone=ActionTone::Ok
                             title=Signal::derive(move || i18n.t(update_texts(kind).action))
                             loading=busy
