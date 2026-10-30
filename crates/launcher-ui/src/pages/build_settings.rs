@@ -1,25 +1,29 @@
-//! Build settings, a tab of the build's content page: General (name, component,
+//! Build settings, a tab of the build's content page: General (name, loader,
 //! icon, quick-join server), Runtime (Java, GPU, memory) and JVM arguments, saved together.
 
 use launcher_shared::args;
 use launcher_shared::{
-    AccountKind, AppError, BuildSettingsDto, BuildSettingsUpdate, ComponentDto, ComponentsSnapshot,
-    ErrorCode, JavaList, Level, LoaderKind, MemoryInfo, ProfileDto,
+    AccountKind, AppError, BuildDto, BuildSettingsDto, BuildSettingsUpdate, CatalogVersion, ErrorCode,
+    JavaList, Level, LoaderKind, MemoryInfo, ProfileDto,
 };
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    Button, Checkbox, CodeEditor, Dialog, DialogFooter, Field, Icon, NavEntry, Section, SegOption, Segmented,
-    Select, SelectOption, SettingRow, SettingsNav, Size, TextInput, Variant, card_image, ipc, use_toasts,
+    Button, Checkbox, CodeEditor, ConfirmDialog, Dialog, DialogFooter, Field, Icon, NavEntry, Section,
+    SegOption, Segmented, Select, SelectOption, SettingRow, SettingsNav, Size, TextInput, Variant,
+    card_image, ipc, use_toasts,
 };
 
-use crate::builds::catalog::{CreateRow, build_choices, load_rows};
 use crate::builds::description::{DescriptionField, description_problem};
 use crate::builds::gpu::GpuChoice;
+use crate::builds::loader_pick::{
+    LoaderBuildField, LoaderCards, LoaderPick, change_warning, loader_mark, loader_value,
+};
 use crate::builds::ram::RamSetting;
-use crate::builds::{LatestRequest, ram_slider};
+use crate::builds::{build_loader, build_minecraft, ram_slider};
 use crate::pages::settings::java::gpu_choice;
+use crate::pages::wizard::state::loader_available;
 use crate::shell::use_header;
 use crate::store::use_store;
 
@@ -49,26 +53,6 @@ pub fn java_choices(
     options
 }
 
-/// Installed components ("Minecraft 1.21.1", "Fabric 1.21.1 (0.16.9)", else the id), with the
-/// build's own first when it is not installed (anymore).
-pub fn component_choices(components: &[ComponentDto], current: Option<&str>) -> Vec<SelectOption> {
-    let mut options: Vec<SelectOption> = components
-        .iter()
-        .map(|c| {
-            let label = match (c.loader, &c.minecraft, &c.loader_version) {
-                (Some(LoaderKind::Minecraft), Some(mc), _) => format!("Minecraft {mc}"),
-                (Some(kind), Some(mc), Some(lv)) => format!("{} {mc} ({lv})", kind.display_name()),
-                _ => c.id.clone(),
-            };
-            SelectOption::new(c.id.clone(), label)
-        })
-        .collect();
-    if let Some(id) = current.filter(|id| !id.is_empty() && !options.iter().any(|o| o.value == *id)) {
-        options.insert(0, SelectOption::new(id, id));
-    }
-    options
-}
-
 /// The arguments after a preset: `keep` leaves them, `none` clears them, `performance` puts G1GC.
 pub fn apply_preset(preset: &str, current: &str) -> String {
     match preset {
@@ -94,7 +78,6 @@ pub fn arguments_of(text: &str) -> Vec<String> {
 #[derive(Clone, Copy)]
 pub struct SettingsForm {
     pub name: RwSignal<String>,
-    pub component: RwSignal<String>,
     pub java: RwSignal<String>,
     pub gpu: RwSignal<String>,
     pub auto_ram: RwSignal<bool>,
@@ -129,7 +112,6 @@ impl SettingsForm {
     pub fn new() -> SettingsForm {
         SettingsForm {
             name: RwSignal::new(String::new()),
-            component: RwSignal::new(String::new()),
             java: RwSignal::new(AUTO_JAVA.to_string()),
             gpu: RwSignal::new("dgpu".to_string()),
             auto_ram: RwSignal::new(true),
@@ -173,18 +155,18 @@ impl SettingsForm {
         let _ = self.fullscreen.try_set(screen.to_string());
     }
 
-    /// After "Install and use": the new component and the Java the install gave it; everything
-    /// else keeps what the user typed.
+    /// After a change of loader: the Java the install gave the build; everything else keeps what
+    /// the user typed.
     pub fn take_component(&self, s: &BuildSettingsDto) {
-        let _ = self.component.try_set(s.component.clone().unwrap_or_default());
         let _ = self.java.try_set(s.java_path.clone().unwrap_or_else(|| AUTO_JAVA.to_string()));
     }
 
-    /// What "Save" sends; automatic memory sends no limit.
+    /// What "Save" sends; automatic memory sends no limit. The loader is not among it: it changes
+    /// by its own operation only, so a page opened before never puts the old one back.
     pub fn update(&self) -> BuildSettingsUpdate {
         BuildSettingsUpdate {
             name: self.name.get_untracked(),
-            component: Some(self.component.get_untracked()).filter(|c| !c.is_empty()),
+            component: None,
             java_path: Some(self.java.get_untracked()).filter(|j| j != AUTO_JAVA),
             gpu_mode: self.gpu.get_untracked(),
             max_ram_gb: (!self.auto_ram.get_untracked())
@@ -241,73 +223,40 @@ pub fn icon_pick(result: Result<Option<String>, AppError>) -> IconPick {
     }
 }
 
-/// The loader a build runs, from its client and component (the original's `_current_loader_id`).
-pub fn current_loader(client: Option<&str>, component: Option<&str>) -> &'static str {
-    let text = format!("{}{}", client.unwrap_or_default(), component.unwrap_or_default())
-        .to_lowercase()
-        .replace(' ', "");
-    if text.contains("neoforge") {
-        return "neoforge";
-    }
-    ["fabric", "forge", "quilt", "minecraft"].into_iter().find(|id| text.contains(id)).unwrap_or("minecraft")
+/// The settings' line of a build's loader: "Fabric 0.16.9" (`vanilla`, the language's words, for
+/// plain Minecraft) and "Minecraft 1.21.1" under it.
+pub fn loader_line(build: &BuildDto, vanilla: &str) -> (String, String) {
+    let lv = build.loader_version.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let name = match (build_loader(build), lv) {
+        (LoaderKind::Minecraft, _) => vanilla.to_string(),
+        (kind, Some(lv)) => format!("{} {lv}", kind.display_name()),
+        (kind, None) => kind.display_name().to_string(),
+    };
+    let mc = build_minecraft(build);
+    (name, if mc.is_empty() { mc } else { format!("Minecraft {mc}") })
 }
 
-/// The build's own Minecraft version when the list has it, else the first (newest).
-pub fn preferred_mc(rows: &[CreateRow], current: Option<&str>) -> String {
-    current
-        .filter(|mc| rows.iter().any(|row| row.mc == *mc))
-        .map(str::to_string)
-        .or_else(|| rows.first().map(|row| row.mc.clone()))
-        .unwrap_or_default()
-}
-
-/// The build's own loader build when `row` offers it, else the row's default.
-pub fn preferred_build(row: Option<&CreateRow>, current: Option<&str>) -> String {
-    let Some(row) = row else { return String::new() };
-    current
-        .filter(|lv| row.builds.iter().any(|b| b.version == *lv))
-        .map(str::to_string)
-        .or_else(|| row.default_version.clone())
-        .or_else(|| row.builds.first().map(|b| b.version.clone()))
-        .unwrap_or_default()
-}
-
-/// The loaders the change dialog offers.
-pub fn loader_choices() -> Vec<SelectOption> {
-    [LoaderKind::Minecraft, LoaderKind::Fabric, LoaderKind::Quilt, LoaderKind::Forge, LoaderKind::NeoForge]
-        .into_iter()
-        .map(|kind| SelectOption::new(kind_value(kind), kind.display_name()))
-        .collect()
-}
-
-fn kind_value(kind: LoaderKind) -> &'static str {
-    match kind {
-        LoaderKind::Minecraft => "minecraft",
-        LoaderKind::Fabric => "fabric",
-        LoaderKind::Quilt => "quilt",
-        LoaderKind::Forge => "forge",
-        LoaderKind::NeoForge => "neoforge",
-    }
-}
-
-fn kind_of(value: &str) -> LoaderKind {
-    match value {
-        "fabric" => LoaderKind::Fabric,
-        "quilt" => LoaderKind::Quilt,
-        "forge" => LoaderKind::Forge,
-        "neoforge" => LoaderKind::NeoForge,
-        _ => LoaderKind::Minecraft,
-    }
-}
-
-/// The Minecraft versions of the loaded rows; `snapshot` (the language's word) marks snapshots.
-pub fn minecraft_choices(rows: &[CreateRow], snapshot: &str) -> Vec<SelectOption> {
-    rows.iter()
-        .map(|row| {
-            let label = if row.snapshot { format!("{} ({snapshot})", row.mc) } else { row.mc.clone() };
-            SelectOption::new(row.mc.clone(), label)
+/// Minecraft's versions for the dialog (`snapshot`, the language's word, marks snapshots), the
+/// build's own first when the list does not have it.
+pub fn minecraft_options(versions: &[CatalogVersion], current: &str, snapshot: &str) -> Vec<SelectOption> {
+    let mut options: Vec<SelectOption> = versions
+        .iter()
+        .map(|v| {
+            let label = if v.kind == "snapshot" { format!("{} ({snapshot})", v.id) } else { v.id.clone() };
+            SelectOption::new(v.id.clone(), label)
         })
-        .collect()
+        .collect();
+    if !current.is_empty() && !options.iter().any(|o| o.value == current) {
+        options.insert(0, SelectOption::new(current, current));
+    }
+    options
+}
+
+/// The pick is what the build has: installing it would change nothing.
+pub fn same_pick(build: &BuildDto, kind: LoaderKind, mc: &str, loader_version: &str) -> bool {
+    build_loader(build) == kind
+        && build_minecraft(build) == mc
+        && (kind == LoaderKind::Minecraft || build.loader_version.as_deref() == Some(loader_version))
 }
 
 #[derive(serde::Serialize)]
@@ -319,11 +268,16 @@ struct ChangeArgs {
     loader_version: Option<String>,
 }
 
-/// "Change the game's build" (the original's `VersionComponentModal`): loader, Minecraft version and
-/// loader build, starting from the build's own; "Install and use" runs as an operation and
-/// `on_done` gets the new settings.
+#[derive(serde::Serialize)]
+struct CatalogArgs {
+    snapshots: bool,
+}
+
+/// "Change the loader": the wizard's cards, the loader's build and the Minecraft version, starting
+/// from the build's own. A change that leaves the build's mods behind asks first; "Install" runs
+/// as an operation and `on_done` gets the new settings.
 #[component]
-fn ChangeComponentDialog(
+fn LoaderDialog(
     open: RwSignal<bool>,
     build_key: String,
     on_done: Callback<BuildSettingsDto>,
@@ -332,92 +286,64 @@ fn ChangeComponentDialog(
     let store = use_store();
     let toasts = use_toasts();
     let t = move |key: &'static str| Signal::derive(move || i18n.t(key));
-    let loader = RwSignal::new("minecraft".to_string());
-    // The build's Minecraft version and loader build, preferred wherever the lists have them.
-    let wanted = StoredValue::new((None::<String>, None::<String>));
-    let unstable = RwSignal::new(false);
-    let rows = RwSignal::new(None::<Result<Vec<CreateRow>, String>>);
+    let current = {
+        let key = build_key.clone();
+        Memo::new(move |_| store.builds.with(|b| b.iter().find(|b| b.key == key).cloned()))
+    };
+    let pick = LoaderPick::new(LoaderKind::Minecraft);
     let mc = RwSignal::new(String::new());
-    let build = RwSignal::new(String::new());
-    let latest = StoredValue::new_local(LatestRequest::new());
-    let load = move || {
-        let Some(request) = latest.try_with_value(|l| l.begin()) else { return };
-        rows.set(None);
-        let (kind, show_unstable) = (kind_of(&loader.get_untracked()), unstable.get_untracked());
+    let snapshots = RwSignal::new(false);
+    let versions = RwSignal::new(None::<Result<Vec<CatalogVersion>, String>>);
+    let confirm = RwSignal::new(false);
+    let busy = Memo::new(move |_| store.ops.with(|o| o.busy));
+    let load_versions = move || {
+        let _ = versions.try_set(None);
+        let snapshots = snapshots.get_untracked();
         spawn_local(async move {
-            let result = load_rows(kind, show_unstable).await;
-            if latest.try_with_value(|l| l.is_current(request)).unwrap_or(false) {
-                if let Ok(list) = &result {
-                    let (want_mc, want_lv) = wanted.get_value();
-                    let chosen = preferred_mc(list, want_mc.as_deref());
-                    let row = list.iter().find(|row| row.mc == chosen);
-                    let _ = build.try_set(preferred_build(row, want_lv.as_deref()));
-                    let _ = mc.try_set(chosen);
-                }
-                let _ = rows.try_set(Some(result.map_err(|e| i18n.error(&e))));
-            }
+            let answer =
+                ipc::invoke::<_, Vec<CatalogVersion>>("catalog_minecraft", &CatalogArgs { snapshots }).await;
+            let _ = versions.try_set(Some(answer.map_err(|e| i18n.error(&e))));
         });
     };
-    let start_key = build_key.clone();
+    // Opened: the build's own loader, its build and its Minecraft; the lists asked afresh.
     Effect::new(move |was_open: Option<bool>| {
         let is_open = open.get();
         if is_open && was_open != Some(true) {
-            let current = store.builds.with_untracked(|b| b.iter().find(|b| b.key == start_key).cloned());
-            if let Some(current) = current {
-                wanted.set_value((current.version.clone(), current.loader_version.clone()));
-                loader.set(current_loader(current.client.as_deref(), current.loader.as_deref()).to_string());
+            if let Some(build) = current.get_untracked() {
+                pick.loader.set(loader_value(build_loader(&build)));
+                pick.build.set(build.loader_version.clone().unwrap_or_default());
+                mc.set(build_minecraft(&build));
             }
+            pick.load();
+            load_versions();
         }
         is_open
     });
-    Effect::new(move |_| {
-        if open.get() {
-            loader.track();
-            unstable.track();
-            load();
-        }
-    });
-    let selected_row = move || {
-        let chosen = mc.get();
-        rows.with(|r| {
-            r.as_ref()
-                .and_then(|r| r.as_ref().ok())
-                .and_then(|list| list.iter().find(|row| row.mc == chosen).cloned())
-        })
-    };
     let mc_options = Signal::derive(move || {
-        rows.with(|r| {
-            r.as_ref()
-                .and_then(|r| r.as_ref().ok())
-                .map(|list| minecraft_choices(list, &i18n.t("version_create_snapshot_badge")))
-                .unwrap_or_default()
+        let (chosen, snapshot) = (mc.get(), i18n.t("version_create_snapshot_badge"));
+        versions.with(|v| match v {
+            Some(Ok(list)) => minecraft_options(list, &chosen, &snapshot),
+            _ => minecraft_options(&[], &chosen, &snapshot),
         })
     });
-    let build_options = Signal::derive(move || {
-        build_choices(selected_row().as_ref(), &i18n.t("version_create_unstable_loader_badge"))
+    // What the change risks for the build's mods, in the language.
+    let warning = Memo::new(move |_| {
+        let from = current.with(|b| b.as_ref().map(build_loader))?;
+        change_warning(from, pick.kind()).map(|(key, words)| i18n.tp(key, &words))
     });
-    let on_mc = Callback::new(move |_: String| {
-        build.set(preferred_build(selected_row().as_ref(), wanted.get_value().1.as_deref()));
-    });
-    let status = move || match rows.get() {
-        None => i18n.t("version_component_loading"),
-        Some(Err(message)) => i18n.tp("version_component_load_failed", &[("error", message)]),
-        Some(Ok(list)) if list.is_empty() => i18n.t("version_component_no_versions"),
-        Some(Ok(_)) => i18n.t("version_component_ready"),
+    let ready = move || {
+        let (kind, chosen, build) = (pick.kind(), mc.get(), pick.build.get());
+        let available = pick.catalogs.with(|all| loader_available(kind, &chosen, all));
+        let changes = current.with(|b| b.as_ref().is_some_and(|b| !same_pick(b, kind, &chosen, &build)));
+        !chosen.is_empty() && available && (kind == LoaderKind::Minecraft || !build.is_empty()) && changes
     };
-    let ready = move || rows.with(|r| matches!(r, Some(Ok(list)) if !list.is_empty()));
-    let submit = move || {
-        let kind = kind_of(&loader.get_untracked());
-        let chosen = mc.get_untracked();
-        if chosen.is_empty() {
-            toasts.show(Level::Error, i18n.t("version_component_selection_required"), None);
-            return;
-        }
+    let submit = Callback::new(move |()| {
+        let kind = pick.kind();
         let args = ChangeArgs {
             key: build_key.clone(),
             loader: kind,
-            mc: chosen,
-            loader_version: (kind != LoaderKind::Minecraft).then(|| build.get_untracked()),
+            mc: mc.get_untracked(),
+            loader_version: (kind != LoaderKind::Minecraft).then(|| pick.build.get_untracked()),
         };
         open.set(false);
         spawn_local(async move {
@@ -432,36 +358,72 @@ fn ChangeComponentDialog(
                 ),
             }
         });
+    });
+    let install = move || {
+        if warning.with_untracked(Option::is_some) {
+            confirm.set(true);
+        } else {
+            submit.run(());
+        }
     };
-    let submit = StoredValue::new(submit);
 
     view! {
-        <Dialog open=open title=t("version_component_title") subtitle=t("version_component_description") icon="swap_horiz">
+        <Dialog
+            open=open
+            title=t("build_loader_dialog_title")
+            subtitle=t("build_loader_dialog_desc")
+            icon="swap_horiz"
+            class="dialog--loader"
+        >
             <DialogFooter slot>
                 <Button variant=Variant::Ghost on_click=move |_| open.set(false)>{move || i18n.t("cancel")}</Button>
                 <Button
                     variant=Variant::Primary
                     icon="download"
-                    disabled=Signal::derive(move || !ready())
-                    on_click=move |_| submit.with_value(|s| s())
+                    disabled=Signal::derive(move || busy.get() || !ready())
+                    on_click=move |_| install()
                 >
-                    {move || i18n.t("version_component_install_action")}
+                    {move || i18n.t("minecraft_components_install_action")}
                 </Button>
             </DialogFooter>
-            <Field label=t("version_component_loader_label")>
-                <Select options=Signal::derive(loader_choices) value=loader />
-            </Field>
-            <Field label=t("version_component_minecraft_label")>
-                <Select options=mc_options value=mc on_change=on_mc />
-            </Field>
-            <Show when=move || loader.get() != "minecraft">
-                <Field label=t("minecraft_components_loader_build_label")>
-                    <Select options=build_options value=build />
+            <LoaderCards pick=pick mc=mc vanilla=true />
+            <div class="build-loader__fields">
+                <Field label=t("version_component_minecraft_label")>
+                    <div class="wrap">
+                        <div class="grow"><Select options=mc_options value=mc /></div>
+                        <Checkbox
+                            checked=snapshots
+                            label=t("wizard_snapshots")
+                            on_change=Callback::new(move |_: bool| load_versions())
+                        />
+                    </div>
                 </Field>
-            </Show>
-            <Checkbox checked=unstable label=t("version_component_include_unstable") />
-            <div class="hint">{status}</div>
+                <LoaderBuildField pick=pick mc=mc />
+            </div>
+            {move || versions.with(|v| match v {
+                Some(Err(e)) => Some(view! {
+                    <div class="wizard__status is-error">
+                        <Icon name="error_outline" />
+                        <span class="grow">{e.clone()}</span>
+                    </div>
+                }),
+                _ => None,
+            })}
+            {move || warning.get().map(|text| view! {
+                <div class="wizard__status is-warn">
+                    <Icon name="warning_amber" />
+                    <span class="grow">{text}</span>
+                </div>
+            })}
         </Dialog>
+        <ConfirmDialog
+            open=confirm
+            title=t("build_loader_confirm_title")
+            message=Signal::derive(move || warning.get().unwrap_or_default())
+            confirm_label=t("build_loader_confirm")
+            cancel_label=t("cancel")
+            on_confirm=submit
+        />
     }
 }
 
@@ -497,7 +459,6 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
     let form = SettingsForm::new();
     let SettingsForm {
         name,
-        component,
         java,
         gpu,
         auto_ram,
@@ -526,7 +487,7 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
     let change_open = RwSignal::new(false);
     let memory = RwSignal::new(None::<MemoryInfo>);
     let javas = RwSignal::new(JavaList::default());
-    let components = RwSignal::new(Vec::<ComponentDto>::new());
+    let build = Memo::new(move |_| store.builds.with(|b| b.iter().find(|b| b.key == key()).cloned()));
 
     // Saved settings on the page. An answer after the page is gone changes nothing: the header is
     // the app's, and another page shows it by then.
@@ -562,9 +523,26 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
         if let Ok(list) = ipc::call::<JavaList>("java_list").await {
             let _ = javas.try_set(list);
         }
-        if let Ok(snapshot) = ipc::call::<ComponentsSnapshot>("components_list").await {
-            let _ = components.try_set(snapshot.components);
+    });
+    // A new loader (from this page's dialog, the build's mods, a modpack's update): the page takes
+    // the Java its install gave, and keeps the rest.
+    let take_loader = move |settings: BuildSettingsDto| {
+        form.take_component(&settings);
+        let _ = loaded.try_set(Some(Ok(settings)));
+    };
+    Effect::new(move |seen: Option<Option<String>>| {
+        let component = build.with(|b| b.as_ref().and_then(|b| b.loader.clone()));
+        if seen.is_some_and(|before| before != component) {
+            let key = key();
+            spawn_local(async move {
+                if let Ok(settings) =
+                    ipc::invoke::<_, BuildSettingsDto>("build_settings_get", &KeyArgs { key }).await
+                {
+                    take_loader(settings);
+                }
+            });
         }
+        component
     });
 
     let save = move || {
@@ -621,10 +599,6 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                 &i18n.t("java_saved_custom_path"),
             )
         })
-    });
-    let component_options = Signal::derive(move || {
-        let current = component.get();
-        components.with(|list| component_choices(list, Some(&current)))
     });
     let effective_java = move || {
         let chosen = java.get();
@@ -686,15 +660,22 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                     <TextInput value=name invalid=Signal::derive(move || name_error.get().is_some()) />
                 </Field>
                 <DescriptionField value=description />
-                <Field label=t("loaders_label")>
-                    <div class="wrap">
-                        <div class="grow">
-                            <Select options=component_options value=component />
-                        </div>
-                        <Button icon="swap_horiz" on_click=move |_| change_open.set(true)>
-                            {move || i18n.t("version_component_change_action")}
-                        </Button>
-                    </div>
+                <Field label=t("build_loader_label")>
+                    {move || build.get().map(|b| {
+                        let (name, sub) = loader_line(&b, &i18n.t("build_loader_vanilla"));
+                        view! {
+                            <div class="list-row build-row build-loader">
+                                <div class="build-row__icon"><Icon name=loader_mark(build_loader(&b)) /></div>
+                                <div class="build-row__text">
+                                    <div class="build-row__name">{name}</div>
+                                    <div class="build-row__sub">{sub}</div>
+                                </div>
+                                <Button icon="swap_horiz" on_click=move |_| change_open.set(true)>
+                                    {move || i18n.t("build_loader_change")}
+                                </Button>
+                            </div>
+                        }
+                    })}
                 </Field>
                 <Field label=t("build_account_label") hint=t("build_account_hint")>
                     <Select options=account_options value=profile />
@@ -806,26 +787,14 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                 }}
             </div>
         </div>
-        <ChangeComponentDialog
-            open=change_open
-            build_key=key()
-            on_done=Callback::new(move |settings: BuildSettingsDto| {
-                form.take_component(&settings);
-                let _ = loaded.try_set(Some(Ok(settings)));
-                spawn_local(async move {
-                    if let Ok(snapshot) = ipc::call::<ComponentsSnapshot>("components_list").await {
-                        let _ = components.try_set(snapshot.components);
-                    }
-                });
-            })
-        />
+        <LoaderDialog open=change_open build_key=key() on_done=Callback::new(take_loader) />
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use launcher_shared::JavaEntry;
+    use launcher_shared::{CatalogVersion, JavaEntry};
 
     #[test]
     fn build_settings_sections_follow_the_original() {
@@ -856,40 +825,6 @@ mod tests {
     }
 
     #[test]
-    fn components_are_named_like_the_catalog() {
-        let component =
-            |id: &str, loader: Option<LoaderKind>, mc: Option<&str>, lv: Option<&str>| ComponentDto {
-                id: id.into(),
-                loader,
-                minecraft: mc.map(str::to_string),
-                loader_version: lv.map(str::to_string),
-                size: 0,
-                modified_ms: None,
-                used_by: Vec::new(),
-                base_for: Vec::new(),
-            };
-        let list = [
-            component("1.21.1", Some(LoaderKind::Minecraft), Some("1.21.1"), None),
-            component(
-                "fabric-loader-0.16.9-1.21.1",
-                Some(LoaderKind::Fabric),
-                Some("1.21.1"),
-                Some("0.16.9"),
-            ),
-            component("custom", None, Some("1.21.1"), None),
-        ];
-        let labels: Vec<String> =
-            component_choices(&list, Some("1.21.1")).into_iter().map(|o| o.label).collect();
-        assert_eq!(labels, ["Minecraft 1.21.1", "Fabric 1.21.1 (0.16.9)", "custom"]);
-        let gone = component_choices(&list, Some("neoforge-21.1.77"));
-        assert_eq!(
-            (gone[0].value.as_str(), gone.len()),
-            ("neoforge-21.1.77", 4),
-            "the build's own component stays listed"
-        );
-    }
-
-    #[test]
     fn presets_ports_and_argument_lines() {
         assert_eq!(apply_preset("keep", "-Dx=1"), "-Dx=1");
         assert_eq!(apply_preset("none", "-Dx=1"), "");
@@ -907,24 +842,21 @@ mod tests {
         assert_eq!(arguments_of("-Dx=1\n\n  -XX:+UseG1GC  \n"), ["-Dx=1", "-XX:+UseG1GC"]);
     }
 
+    fn release(id: &str, kind: &str) -> CatalogVersion {
+        CatalogVersion { id: id.into(), kind: kind.into(), release_time: None }
+    }
+
     #[test]
-    fn the_change_dialog_offers_loaders_versions_and_builds() {
-        let values: Vec<String> = loader_choices().into_iter().map(|o| o.value).collect();
-        assert_eq!(values, ["minecraft", "fabric", "quilt", "forge", "neoforge"]);
-        let rows = crate::builds::catalog::rows_from_minecraft(vec![
-            launcher_shared::CatalogVersion {
-                id: "1.21.1".into(),
-                kind: "release".into(),
-                release_time: None,
-            },
-            launcher_shared::CatalogVersion {
-                id: "24w33a".into(),
-                kind: "snapshot".into(),
-                release_time: None,
-            },
-        ]);
-        let labels: Vec<String> = minecraft_choices(&rows, "Снапшот").into_iter().map(|o| o.label).collect();
-        assert_eq!(labels, ["1.21.1", "24w33a (Снапшот)"]);
+    fn the_dialog_lists_minecraft_with_the_build_s_own() {
+        let versions = [release("1.21.1", "release"), release("24w33a", "snapshot")];
+        let shown = |current: &str| -> Vec<(String, String)> {
+            minecraft_options(&versions, current, "Снапшот").into_iter().map(|o| (o.value, o.label)).collect()
+        };
+        let pair = |v: &str, l: &str| (v.to_string(), l.to_string());
+        assert_eq!(shown("1.21.1"), [pair("1.21.1", "1.21.1"), pair("24w33a", "24w33a (Снапшот)")]);
+        assert_eq!(shown("1.12.2")[0], pair("1.12.2", "1.12.2"), "the build's own, not listed");
+        assert_eq!(shown("1.12.2").len(), 3);
+        assert!(minecraft_options(&[], "", "Снапшот").is_empty());
         let args = ChangeArgs {
             key: "aero".into(),
             loader: LoaderKind::Fabric,
@@ -935,6 +867,50 @@ mod tests {
             serde_json::to_value(args).unwrap(),
             serde_json::json!({"key": "aero", "loader": "fabric", "mc": "1.21.1", "loaderVersion": "0.16.9"})
         );
+    }
+
+    fn build_of(client: &str, component: &str, lv: Option<&str>) -> BuildDto {
+        BuildDto {
+            key: "aero".into(),
+            version_id: "aero".into(),
+            name: "Aero".into(),
+            version: Some("1.21.1".into()),
+            loader: Some(component.into()),
+            client: Some(client.into()),
+            loader_version: lv.map(str::to_string),
+            game_dir: String::new(),
+            image: None,
+            description: String::new(),
+            running: false,
+            profile: None,
+        }
+    }
+
+    #[test]
+    fn the_loader_row_names_the_loader_its_version_and_minecraft() {
+        let line = |b: &BuildDto| loader_line(b, "Ваніль");
+        let pair = |name: &str, sub: &str| (name.to_string(), sub.to_string());
+        let fabric = build_of("Fabric", "fabric-loader-0.16.9-1.21.1", Some("0.16.9"));
+        assert_eq!(line(&fabric), pair("Fabric 0.16.9", "Minecraft 1.21.1"));
+        assert_eq!(line(&build_of("Minecraft", "1.21.1", None)), pair("Ваніль", "Minecraft 1.21.1"));
+        assert_eq!(
+            line(&build_of("TensaCraft", "neoforge-21.1.77", Some("21.1.77"))).0,
+            "NeoForge 21.1.77",
+            "a server's build names the loader it runs"
+        );
+        assert_eq!(line(&build_of("Forge", "1.20.1-forge-47.4.10", None)).0, "Forge");
+    }
+
+    #[test]
+    fn installing_what_the_build_has_changes_nothing() {
+        let fabric = build_of("Fabric", "fabric-loader-0.16.9-1.21.1", Some("0.16.9"));
+        assert!(same_pick(&fabric, LoaderKind::Fabric, "1.21.1", "0.16.9"));
+        assert!(!same_pick(&fabric, LoaderKind::Fabric, "1.21.1", "0.16.10"));
+        assert!(!same_pick(&fabric, LoaderKind::Fabric, "1.21.4", "0.16.9"));
+        assert!(!same_pick(&fabric, LoaderKind::Minecraft, "1.21.1", ""));
+        let vanilla = build_of("Minecraft", "1.21.1", None);
+        assert!(same_pick(&vanilla, LoaderKind::Minecraft, "1.21.1", "0.16.9"), "vanilla has no build");
+        assert!(!same_pick(&vanilla, LoaderKind::Quilt, "1.21.1", "0.27.1"));
     }
 
     #[test]
@@ -1021,7 +997,7 @@ mod tests {
             let update = form.update();
             assert_eq!((update.name.as_str(), update.max_ram_gb), ("Renamed", Some(4)));
             assert_eq!(update.jvm_arguments, ["-Dx=1"]);
-            assert_eq!(update.component.as_deref(), Some("fabric-loader-0.16.9-1.21.1"));
+            assert_eq!(update.component, None, "the loader changes by its own operation, never by Save");
             assert_eq!(update.java_path, None, "the new component's own Java");
         });
     }
@@ -1042,41 +1018,6 @@ mod tests {
 a/b=ALL-UNNAMED"
             );
         });
-    }
-
-    #[test]
-    fn the_change_dialog_starts_from_the_build() {
-        assert_eq!(current_loader(Some("Fabric"), Some("fabric-loader-0.16.9-1.21.1")), "fabric");
-        assert_eq!(current_loader(Some("NeoForge"), Some("neoforge-21.1.77")), "neoforge");
-        assert_eq!(current_loader(Some("Forge"), Some("1.20.1-forge-47.4.10")), "forge");
-        assert_eq!(current_loader(Some("Quilt"), None), "quilt");
-        assert_eq!(current_loader(Some("Minecraft"), Some("1.21.1")), "minecraft");
-        assert_eq!(current_loader(None, None), "minecraft");
-        let build =
-            |version: &str, stable: bool| launcher_shared::LoaderBuild { version: version.into(), stable };
-        let rows = crate::builds::catalog::rows_from_loader(
-            LoaderKind::Fabric,
-            launcher_shared::LoaderCatalog::pack(vec![
-                launcher_shared::LoaderOption {
-                    mc: "1.21.4".into(),
-                    snapshot: false,
-                    builds: vec![build("0.16.10", true)],
-                    default_version: "0.16.10".into(),
-                },
-                launcher_shared::LoaderOption {
-                    mc: "1.20.1".into(),
-                    snapshot: false,
-                    builds: vec![build("0.16.10", true), build("0.16.9", true)],
-                    default_version: "0.16.10".into(),
-                },
-            ]),
-        );
-        assert_eq!(preferred_mc(&rows, Some("1.20.1")), "1.20.1", "the build's own Minecraft version");
-        assert_eq!(preferred_mc(&rows, Some("1.12.2")), "1.21.4", "else the newest");
-        assert_eq!(preferred_mc(&[], Some("1.20.1")), "");
-        assert_eq!(preferred_build(rows.get(1), Some("0.16.9")), "0.16.9", "the build's own loader build");
-        assert_eq!(preferred_build(rows.get(1), Some("9.9.9")), "0.16.10", "else the default");
-        assert_eq!(preferred_build(None, Some("0.16.9")), "");
     }
 
     #[test]

@@ -642,6 +642,17 @@ pub fn install() {
             let key = args["key"].as_str().unwrap_or("Steve");
             to_value(Some(format!("https://mc-heads.net/avatar/{key}/64")))
         }
+        // The content follows the build's new loader.
+        "build_set_loader" | "build_change_component" => {
+            let answer = builds.borrow_mut().handle(cmd, &args).unwrap_or(Ok(Value::Null));
+            let key = args["key"].as_str().unwrap_or_default();
+            let client =
+                builds.borrow().snapshot().builds.into_iter().find(|b| b.key == key).and_then(|b| b.client);
+            if let Some(client) = client {
+                content.borrow_mut().set_client(key, &client);
+            }
+            answer
+        }
         other => builds
             .borrow_mut()
             .handle(other, &args)

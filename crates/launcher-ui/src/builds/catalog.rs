@@ -110,6 +110,11 @@ struct CatalogArgs {
     snapshots: bool,
 }
 
+/// `kind`'s builds by Minecraft version (unstable ones too when asked).
+pub async fn loader_catalog(kind: LoaderKind, unstable: bool) -> Result<LoaderCatalog, AppError> {
+    ipc::invoke("catalog_loader", &LoaderCatalogArgs { loader: kind, unstable }).await
+}
+
 /// The catalog rows of `kind`: Minecraft from Mojang's list, loaders from their own.
 pub async fn load_rows(kind: LoaderKind, unstable: bool) -> Result<Vec<CreateRow>, AppError> {
     match kind {
@@ -118,11 +123,7 @@ pub async fn load_rows(kind: LoaderKind, unstable: bool) -> Result<Vec<CreateRow
                 .await
                 .map(rows_from_minecraft)
         }
-        kind => {
-            ipc::invoke::<_, LoaderCatalog>("catalog_loader", &LoaderCatalogArgs { loader: kind, unstable })
-                .await
-                .map(|list| rows_from_loader(kind, list))
-        }
+        kind => loader_catalog(kind, unstable).await.map(|list| rows_from_loader(kind, list)),
     }
 }
 
