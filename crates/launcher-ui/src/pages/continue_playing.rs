@@ -15,6 +15,7 @@ use ui_kit::{
     Button, Dialog, DialogFooter, Icon, IconAction, Select, SelectOption, SettingRow, Size, Variant,
 };
 
+use crate::builds::actions::use_build_actions;
 use crate::builds::dialogs::use_build_menu;
 use crate::builds::launch::use_launch_flow;
 use crate::builds::{build_subtitle, loader_icon};
@@ -201,6 +202,7 @@ fn RecentRow(dto: BuildDto, recent: RecentBuild) -> impl IntoView {
     let store = use_store();
     let flow = use_launch_flow();
     let build_menu = use_build_menu();
+    let actions = use_build_actions();
     let key = build.key.clone();
     let starting = Signal::derive(move || store.launching.with(|s| s.contains(&key)));
     // A server that does not answer still takes «Грати», which steps back to a plain button.
@@ -228,10 +230,12 @@ fn RecentRow(dto: BuildDto, recent: RecentBuild) -> impl IntoView {
             None => i18n.t("play"),
         })
     };
-    let (for_play, for_build, for_menu) = (build.clone(), build.clone(), build.clone());
+    let (for_play, for_build, for_menu, for_stop) =
+        (build.clone(), build.clone(), build.clone(), build.key.clone());
     let join = activity.as_ref().map(Activity::join);
     let play = Callback::new(move |()| flow.start_into(for_play.clone(), join.clone()));
     let build_only = Callback::new(move |()| flow.start(for_build.clone()));
+    let stop = Callback::new(move |()| actions.stop(for_stop.clone()));
     let on_menu = move |ev: MouseEvent| {
         ev.prevent_default();
         ev.stop_propagation();
@@ -270,15 +274,25 @@ fn RecentRow(dto: BuildDto, recent: RecentBuild) -> impl IntoView {
             </div>
             {tile}
             <div class="recent-row__actions">
+                // A running build stops from here (Stop takes Play's place, as everywhere).
                 {move || {
+                    if running {
+                        return view! {
+                            <Button variant=Variant::Danger icon="stop" on_click=stop>
+                                {move || i18n.t("version_stop")}
+                            </Button>
+                        }
+                        .into_any();
+                    }
                     let variant = if silent.get() { Variant::Secondary } else { Variant::Primary };
                     view! {
                         <Button variant=variant icon="play_arrow" loading=starting title=play_tip on_click=play>
                             {move || i18n.t("play")}
                         </Button>
                     }
+                    .into_any()
                 }}
-                {has_activity.then(|| view! {
+                {(has_activity && !running).then(|| view! {
                     <Button
                         size=Size::Md
                         icon="view_in_ar"

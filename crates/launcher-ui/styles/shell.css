@@ -280,7 +280,7 @@
 .recent-row__build { width: 168px; flex: none; min-width: 0; }
 .recent-row__when { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 11.5px; color: var(--text-4); }
 .recent-row__actions { display: flex; align-items: center; gap: 6px; flex: none; }
-/* «Грати» as wide whether it is the primary or (a server that does not answer) the plain one. */
+/* «Грати» as wide whether it is the primary, (a server that does not answer) the plain one or Stop. */
 .recent-row__actions > .btn:first-child { min-width: 100px; justify-content: center; }
 .recent-tile { flex: 1; min-width: 0; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: var(--r-md); background: var(--s-input); border: 1px solid var(--line); }
 .recent-tile.is-empty { justify-content: center; }
