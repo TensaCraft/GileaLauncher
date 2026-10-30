@@ -48,6 +48,18 @@ pub struct ModuleSection {
     pub view: fn() -> AnyView,
 }
 
+/// A kind of account a module adds to «Додати акаунт» (its site's sign-in): the login and password
+/// form goes to the core's sign-in with `id` as the server.
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleAccountKind {
+    pub module: &'static str,
+    pub id: &'static str,
+    /// Translation keys of its card.
+    pub label: &'static str,
+    pub icon: &'static str,
+    pub desc: &'static str,
+}
+
 /// A block a module puts inside a section of the launcher's settings (`inside`: the section's id),
 /// under the section's own blocks; it has no menu item of its own.
 #[derive(Debug, Clone, Copy)]
@@ -233,6 +245,11 @@ pub trait UiModule: 'static {
 
     /// Blocks inside sections of the launcher's settings.
     fn settings_blocks(&self) -> Vec<ModuleSettingsBlock> {
+        Vec::new()
+    }
+
+    /// Kinds of account in «Додати акаунт».
+    fn account_kinds(&self) -> Vec<ModuleAccountKind> {
         Vec::new()
     }
 

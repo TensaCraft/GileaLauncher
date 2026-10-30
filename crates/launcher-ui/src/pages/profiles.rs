@@ -13,6 +13,7 @@ use ui_kit::{
     InFlight, MenuEntry, Size, TextInput, Variant, use_context_menu, use_toasts,
 };
 
+use crate::modules::use_module_parts;
 use crate::profiles::actions::{ServerSignIn, use_profile_actions};
 use crate::profiles::avatar::ProfileBody;
 use crate::profiles::kind_text;
@@ -20,7 +21,8 @@ use crate::shell::sidebar::{ModulePages, backend_modules};
 use crate::shell::{PageHeader, copy_text};
 use crate::store::use_store;
 
-/// The kinds of account the add dialog offers: value, label key, icon, description key.
+/// The kinds of account the add dialog offers: value, label key, icon, description key; the
+/// modules' follow (`UiModule::account_kinds`).
 pub const ACCOUNT_KINDS: [(&str, &str, &str, &str); 3] = [
     ("microsoft", "microsoft_account", "verified_user", "account_microsoft_desc"),
     ("offline", "offline_account", "person", "account_offline_desc"),
@@ -74,6 +76,13 @@ pub fn ProfilesPage() -> impl IntoView {
         })
     });
 
+    // Every kind on offer: the core's, then the modules' whose backend runs.
+    let parts = use_module_parts();
+    let all_kinds = Signal::derive(move || {
+        let mut kinds: Vec<(&'static str, &'static str, &'static str, &'static str)> = ACCOUNT_KINDS.to_vec();
+        parts.with(|p| kinds.extend(p.account_kinds.iter().map(|k| (k.id, k.label, k.icon, k.desc))));
+        kinds
+    });
     let open_add = move || {
         kind_choice.set(String::new());
         add_step.set(None);
@@ -99,8 +108,13 @@ pub fn ProfilesPage() -> impl IntoView {
             actions.sign_in();
         }
         "offline" => to_offline(),
-        "elyby" => to_server("elyby"),
-        _ => {}
+        other => {
+            if let Some(&(kind, ..)) =
+                all_kinds.with_untracked(|k| k.iter().find(|k| k.0 == other).copied()).as_ref()
+            {
+                to_server(kind);
+            }
+        }
     });
     // One profile at a time: a second Enter or click while it is made does nothing.
     let creating = InFlight::new();
@@ -151,7 +165,7 @@ pub fn ProfilesPage() -> impl IntoView {
     };
     // An auth server's account whose session ended: its server's sign-in form again.
     let sign_in_again = Callback::new(move |server: String| {
-        if let Some(&(kind, ..)) = ACCOUNT_KINDS.iter().find(|k| k.0 == server) {
+        if let Some((kind, ..)) = all_kinds.with_untracked(|k| k.iter().find(|k| k.0 == server).copied()) {
             to_server(kind);
             add_open.set(true);
         }
@@ -192,9 +206,10 @@ pub fn ProfilesPage() -> impl IntoView {
 
     let kinds = Signal::derive(move || {
         let busy = signing_in();
-        ACCOUNT_KINDS
-            .iter()
-            .map(|&(value, label, icon, desc)| {
+        all_kinds
+            .get()
+            .into_iter()
+            .map(|(value, label, icon, desc)| {
                 ChoiceOption::new(value, i18n.t(label), icon)
                     .with_desc(i18n.t(desc))
                     .with_disabled(value == "microsoft" && busy)
@@ -204,6 +219,10 @@ pub fn ProfilesPage() -> impl IntoView {
     let dialog_title = Signal::derive(move || match add_step.get() {
         Some("offline") => i18n.t("create_offline_profile"),
         Some("elyby") => i18n.t("add_elyby_title"),
+        Some(other) if other != "offline" => all_kinds.with(|k| {
+            let label = k.iter().find(|k| k.0 == other).map_or(other, |k| k.1);
+            i18n.tp("add_site_title", &[("name", i18n.t(label))])
+        }),
         _ => i18n.t("add_account_title"),
     });
 
@@ -298,7 +317,13 @@ pub fn ProfilesPage() -> impl IntoView {
                     .into_any()
                 }
                 _ => view! {
-                    <ChoiceCards options=kinds value=kind_choice on_change=chosen label=t("add_account_title") />
+                    <ChoiceCards
+                        options=kinds
+                        value=kind_choice
+                        on_change=chosen
+                        columns={if all_kinds.with(Vec::len) > 3 { 2 } else { 3 }}
+                        label=t("add_account_title")
+                    />
                 }
                 .into_any(),
             }}
@@ -334,7 +359,7 @@ fn ProfileCard(
     let menu = use_context_menu();
     let signing_in = move || store.auth.get() != AuthState::Idle;
     let microsoft = profile.kind == AccountKind::Microsoft;
-    let server = profile.kind == AccountKind::Yggdrasil;
+    let server = matches!(profile.kind, AccountKind::Yggdrasil | AccountKind::Module);
     let shown = profile.clone();
     let server_id = profile.server.clone().unwrap_or_default();
     let is_default = profile.is_default;

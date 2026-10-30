@@ -13,13 +13,15 @@ pub fn kind_key(kind: AccountKind) -> &'static str {
         AccountKind::Microsoft => "microsoft_account",
         AccountKind::Offline => "offline_account",
         AccountKind::Yggdrasil => "auth_server_account",
+        AccountKind::Module => "site_account",
     }
 }
 
-/// What an account's kind line says: an account on another auth server names its server.
+/// What an account's kind line says: an account on another auth server, or a module's site,
+/// names it.
 pub fn kind_text(profile: &ProfileDto, t: impl Fn(&str) -> String) -> String {
     match (profile.kind, &profile.server_name) {
-        (AccountKind::Yggdrasil, Some(name)) => name.clone(),
+        (AccountKind::Yggdrasil | AccountKind::Module, Some(name)) => name.clone(),
         (kind, _) => t(kind_key(kind)),
     }
 }
@@ -62,6 +64,7 @@ mod tests {
         assert_eq!(kind_key(AccountKind::Microsoft), "microsoft_account");
         assert_eq!(kind_key(AccountKind::Offline), "offline_account");
         assert_eq!(kind_key(AccountKind::Yggdrasil), "auth_server_account");
+        assert_eq!(kind_key(AccountKind::Module), "site_account");
         assert_eq!(kind_line("Offline Account".into(), None), "Offline Account");
         assert_eq!(
             kind_line("Microsoft Account".into(), Some("Default".into())),

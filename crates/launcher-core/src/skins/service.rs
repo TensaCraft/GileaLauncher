@@ -82,13 +82,27 @@ pub struct Player {
     /// The session server of the auth server the player is on, when it is not Mojang's: their
     /// skin is there, and nobody else is asked (the same nick elsewhere is someone else).
     pub session: Option<String>,
+    /// A player of a module's site: their skin is at this address, if the site keeps one; nobody
+    /// else is asked either.
+    pub site: Option<Option<String>>,
 }
 
 impl Player {
     /// A player known by UUID and nickname; a blank one is none.
     pub fn new(id: &str, name: &str) -> Player {
         let given = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
-        Player { id: given(id), name: given(name), session: None }
+        Player { id: given(id), name: given(name), session: None, site: None }
+    }
+
+    /// A player of a module's site, whose skin is at `skin` (`None`: the site keeps none).
+    pub fn with_skin(id: &str, name: &str, skin: Option<String>) -> Player {
+        Player { site: Some(skin), ..Player::new(id, name) }
+    }
+
+    /// Mojang's players are asked about at Mojang and the hosts that know them; the others only
+    /// where they are.
+    fn mojang(&self) -> bool {
+        self.session.is_none() && self.site.is_none()
     }
 
     /// A player on another auth server, whose session server (`…/sessionserver/`) has their skin.
@@ -119,9 +133,10 @@ impl Player {
             (None, Some(name)) => format!("name:{}", name.to_lowercase()),
             (None, None) => return None,
         };
-        Some(match &self.session {
-            Some(session) => format!("at:{}:{own}", digest(session)),
-            None => own,
+        Some(match (&self.session, &self.site) {
+            (Some(session), _) => format!("at:{}:{own}", digest(session)),
+            (None, Some(_)) => format!("site:{own}"),
+            (None, None) => own,
         })
     }
 
@@ -398,7 +413,7 @@ impl SkinService {
         }
         let url = Self::address(&self.cfg.endpoints.mojang_api, &["users", "profiles", "minecraft", name])?;
         let id = self.ask(url).await?.and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_string));
-        Player { id, name: None, session: None }
+        Player { id, name: None, session: None, site: None }
             .uuid()
             .ok_or_else(|| nothing(NO_PLAYER, format!("no player {name}")))
     }
@@ -536,6 +551,22 @@ impl SkinService {
         {
             return Some(texture);
         }
+        if let Some(site) = &player.site {
+            let Some(url) = site else { return None };
+            let origin = Origin::new(|u| matches!(u.scheme(), "http" | "https"));
+            return match self.fetch_from_host(url, origin).await {
+                Ok((file, png, hash)) => {
+                    let slim = render::guess_slim(&png);
+                    let until = Self::until(self.cfg.fallback_ttl);
+                    self.remember(&key, Seen { file, slim, official: false, until });
+                    Some(SkinTexture { png, slim, official: false, hash })
+                }
+                Err(e) => {
+                    tracing::debug!("The skin of {key} on its site is out of reach: {}", e.detail);
+                    known.and_then(|seen| self.texture_of(&seen))
+                }
+            };
+        }
         if let Some(session) = player.session.as_deref() {
             return match self.server_skin(session, player).await {
                 Ok(Some((file, png, hash, slim))) => {
@@ -635,7 +666,7 @@ impl SkinService {
         if let Some(texture) = self.texture(player).await {
             return Some(Avatar::Png(render::head(&texture.png, size)));
         }
-        if player.session.is_some() {
+        if !player.mojang() {
             // The head hosts know Mojang's players: theirs of the same nick is someone else.
             return None;
         }

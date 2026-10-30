@@ -6,6 +6,7 @@ pub mod injector;
 pub mod msa;
 pub mod offline;
 pub mod page;
+pub mod provider;
 pub mod servers;
 pub mod service;
 pub mod store;

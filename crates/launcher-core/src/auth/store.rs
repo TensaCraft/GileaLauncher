@@ -20,6 +20,17 @@ pub const PROFILES_FILE: &str = "profiles.json";
 pub const OFFLINE_TOKEN: &str = "offline";
 /// `type` of an account on an authlib-injector auth server.
 pub const YGGDRASIL_TYPE: &str = "yggdrasil";
+/// `type` of an account a module's site signed in.
+pub const MODULE_TYPE: &str = "module";
+
+/// The server an account is on (or the module whose site it is), as its record names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerRef {
+    pub id: String,
+    pub name: String,
+    /// `Yggdrasil` or `Module`.
+    pub kind: AccountKind,
+}
 pub const REASON_REAUTH: &str = "reauth_required";
 pub const REASON_DECRYPTION_FAILED: &str = "token_decryption_failed";
 pub const REASON_REFRESH_MISSING: &str = "refresh_token_missing";
@@ -122,7 +133,7 @@ pub struct NewProfile {
     pub xuid: Option<String>,
     pub expires_at: Option<i64>,
     pub auth_client_id: Option<String>,
-    pub server: Option<(String, String)>,
+    pub server: Option<ServerRef>,
 }
 
 impl NewProfile {
@@ -346,10 +357,11 @@ impl ProfileStore {
         if let Some(client) = &profile.auth_client_id {
             record.insert("auth_client_id".to_string(), json!(client));
         }
-        if let Some((server, server_name)) = &profile.server {
-            record.insert("type".to_string(), json!(YGGDRASIL_TYPE));
-            record.insert("server".to_string(), json!(server));
-            record.insert("server_name".to_string(), json!(server_name));
+        if let Some(server) = &profile.server {
+            let kind = if server.kind == AccountKind::Module { MODULE_TYPE } else { YGGDRASIL_TYPE };
+            record.insert("type".to_string(), json!(kind));
+            record.insert("server".to_string(), json!(server.id));
+            record.insert("server_name".to_string(), json!(server.name));
         }
         let sealed =
             self.seal_tokens(&mut record, profile.access_token.as_deref(), profile.refresh_token.as_deref());
@@ -498,6 +510,8 @@ impl ProfileStore {
             AccountKind::Offline
         } else if text("type").as_deref() == Some(YGGDRASIL_TYPE) {
             AccountKind::Yggdrasil
+        } else if text("type").as_deref() == Some(MODULE_TYPE) {
+            AccountKind::Module
         } else {
             AccountKind::Microsoft
         };

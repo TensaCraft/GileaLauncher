@@ -12,8 +12,11 @@ use super::http::{AuthHttp, FlowError};
 use super::msa::{self, MsTokens};
 use super::offline::validate_offline_name;
 use super::page::PageLook;
+use super::provider::AccountProvider;
 use super::servers::{AuthServers, Origin};
-use super::store::{NewProfile, ProfileStore, REASON_REFRESH_INVALID, StoredProfile, TokenUpdate};
+use super::store::{
+    NewProfile, OFFLINE_TOKEN, ProfileStore, REASON_REFRESH_INVALID, ServerRef, StoredProfile, TokenUpdate,
+};
 use super::{AuthConfig, LAUNCH_SESSION_MARGIN, TOKEN_REFRESH_LEEWAY, UrlOpener, now_secs, xbox, yggdrasil};
 use crate::feedback::{EventSink, FeedbackService};
 use crate::skins::Player;
@@ -43,6 +46,8 @@ pub struct AuthService {
     cfg: AuthConfig,
     store: ProfileStore,
     servers: AuthServers,
+    /// The modules' site sign-ins, by id.
+    providers: Mutex<Vec<Arc<dyn AccountProvider>>>,
     http: AuthHttp,
     feedback: Arc<FeedbackService>,
     sink: Arc<dyn EventSink>,
@@ -90,6 +95,7 @@ impl AuthService {
             cfg,
             store,
             servers,
+            providers: Mutex::new(Vec::new()),
             http,
             feedback,
             sink,
@@ -141,6 +147,13 @@ impl AuthService {
     /// `delete`, ending an account's session on its auth server first (best effort: a server out
     /// of reach does not keep the account).
     pub async fn delete_signed_out(&self, key: &str) -> AppResult<ProfilesSnapshot> {
+        if let Some(profile) = self.store.get(key).filter(|p| p.kind == AccountKind::Module)
+            && let (Some(provider), Some(token)) =
+                (profile.server.as_deref().and_then(|id| self.provider(id)), &profile.access_token)
+            && let Err(e) = provider.sign_out(token).await
+        {
+            tracing::debug!("The site did not take the sign-out of {key}: {}", e.detail);
+        }
         if let Some(profile) = self.store.get(key).filter(|p| p.kind == AccountKind::Yggdrasil)
             && let (Some(server), Some(access), Some(client)) = (
                 profile.server.as_deref().and_then(|id| self.servers.get(id)),
@@ -151,6 +164,17 @@ impl AuthService {
             yggdrasil::invalidate(&self.http, &server.api_root, access, client).await;
         }
         self.delete(key)
+    }
+
+    /// A module's site sign-in: its accounts can be added and launched from now on.
+    pub fn register_provider(&self, provider: Arc<dyn AccountProvider>) {
+        let mut all = lock(&self.providers);
+        all.retain(|p| p.id() != provider.id());
+        all.push(provider);
+    }
+
+    fn provider(&self, id: &str) -> Option<Arc<dyn AccountProvider>> {
+        lock(&self.providers).iter().find(|p| p.id() == id).cloned()
     }
 
     /// A module's auth server (`id`, at `address`), found now: the module may move it to another
@@ -170,6 +194,9 @@ impl AuthService {
         password: &str,
         code: Option<&str>,
     ) -> AppResult<ProfileDto> {
+        if let Some(provider) = self.provider(server) {
+            return self.sign_in_provider(provider, login, password, code).await;
+        }
         let found = self.servers.ensure(&self.http, server).await?;
         let client_token = uuid::Uuid::new_v4().simple().to_string();
         let credentials = yggdrasil::Credentials { login, password, code, client_token: &client_token };
@@ -186,7 +213,11 @@ impl AuthService {
                 name: profile.name,
                 access_token: Some(session.access_token),
                 refresh_token: Some(session.client_token).filter(|t| !t.is_empty()).or(Some(client_token)),
-                server: Some((found.id.clone(), found.name.clone())),
+                server: Some(ServerRef {
+                    id: found.id.clone(),
+                    name: found.name.clone(),
+                    kind: AccountKind::Yggdrasil,
+                }),
                 ..NewProfile::default()
             },
             true,
@@ -194,6 +225,69 @@ impl AuthService {
         tracing::info!("Profile {key} signed in on {}", found.api_root);
         self.changed();
         Ok(saved.to_dto())
+    }
+
+    /// Signs in on a module's site; the account becomes the default, signing in again updates it.
+    async fn sign_in_provider(
+        &self,
+        provider: Arc<dyn AccountProvider>,
+        login: &str,
+        password: &str,
+        code: Option<&str>,
+    ) -> AppResult<ProfileDto> {
+        let account = provider.sign_in(login, password, code).await?;
+        let key = format!("{}:{}", provider.id(), account.name);
+        let saved = self.store.save(
+            &key,
+            NewProfile {
+                id: Some(account.id),
+                name: account.name,
+                access_token: Some(account.token.clone()),
+                refresh_token: Some(account.token),
+                server: Some(ServerRef {
+                    id: provider.id().to_string(),
+                    name: provider.name(),
+                    kind: AccountKind::Module,
+                }),
+                ..NewProfile::default()
+            },
+            true,
+        )?;
+        tracing::info!("Profile {key} signed in on the site of module {}", provider.id());
+        self.changed();
+        Ok(saved.to_dto())
+    }
+
+    /// A site account as a launch needs it: the site vouches for it now; one it ended asks for a
+    /// new sign-in; a site out of reach keeps the account (single player needs none).
+    async fn site_identity(&self, profile: StoredProfile) -> AppResult<LaunchIdentity> {
+        let identity = |profile: &StoredProfile| LaunchIdentity {
+            username: profile.name.clone(),
+            uuid: profile.id.clone(),
+            access_token: OFFLINE_TOKEN.to_string(),
+            xuid: None,
+            client_id: None,
+            kind: AccountKind::Module,
+            agent: None,
+        };
+        let module = profile.server.clone().unwrap_or_default();
+        let (Some(provider), Some(token)) = (self.provider(&module), profile.access_token.clone()) else {
+            return Err(AppError::new(ErrorCode::ReauthRequired, format!("no sign-in of module {module}"))
+                .with_param("profile", &profile.name));
+        };
+        match provider.verify(&token).await {
+            Ok(_) => Ok(identity(&profile)),
+            Err(e) if e.code == ErrorCode::ReauthRequired => {
+                tracing::warn!("The site of {module} ended the session of {}", profile.key);
+                self.store.mark_reauth(&profile.key, REASON_REFRESH_INVALID)?;
+                self.changed();
+                Err(e.with_param("profile", &profile.name))
+            }
+            Err(e) => {
+                tracing::warn!("The site of {module} could not vouch for {}: {}", profile.key, e.detail);
+                Ok(identity(&profile))
+            }
+        }
     }
 
     /// A `Yggdrasil` account's session as a launch needs it: checked, renewed when it went stale,
@@ -425,7 +519,7 @@ impl AuthService {
     /// Startup: refresh every Microsoft profile; one failure never stops the others.
     pub async fn refresh_all(&self) {
         for profile in self.store.list() {
-            if profile.is_offline() || profile.kind == AccountKind::Yggdrasil {
+            if profile.is_offline() || matches!(profile.kind, AccountKind::Yggdrasil | AccountKind::Module) {
                 continue;
             }
             if let Err(e) = self.refresh(&profile.key, false).await {
@@ -438,6 +532,10 @@ impl AuthService {
     /// an account on another auth server wears that server's.
     pub fn player(&self, key: &str) -> Option<Player> {
         let profile = self.store.get(key)?;
+        if profile.kind == AccountKind::Module {
+            let url = self.provider(profile.server.as_deref()?)?.skin_url(&profile.name);
+            return Some(Player::with_skin(&profile.id, &profile.name, url));
+        }
         if profile.kind == AccountKind::Yggdrasil {
             let server = self.servers.get(profile.server.as_deref()?)?;
             return Some(Player::on_server(
@@ -456,6 +554,14 @@ impl AuthService {
             None => self.store.default_profile().map(|p| p.key).ok_or_else(|| no_profile(""))?,
         };
         let stored = self.store.get(&key).ok_or_else(|| no_profile(&key))?;
+        if stored.kind == AccountKind::Module {
+            if let Some(reason) = stored.reauth_reason() {
+                return Err(
+                    AppError::new(ErrorCode::ReauthRequired, reason).with_param("profile", &stored.name)
+                );
+            }
+            return self.site_identity(stored).await;
+        }
         if stored.kind == AccountKind::Yggdrasil {
             if let Some(reason) = stored.reauth_reason() {
                 return Err(

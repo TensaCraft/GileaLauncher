@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use launcher_core::auth::crypto::TokenCipher;
 use launcher_core::auth::page::PageLook;
+use launcher_core::auth::provider::{AccountProvider, ProviderAccount, ProviderFuture};
 use launcher_core::auth::servers::Preset;
 use launcher_core::auth::service::AuthService;
 use launcher_core::auth::store::{PROFILES_FILE, REASON_DECRYPTION_FAILED, REASON_REFRESH_INVALID};
@@ -469,4 +470,105 @@ async fn an_account_on_another_server_is_a_player_of_that_server() {
     assert_eq!(player.session.as_deref(), Some(ygg.session().as_str()));
     svc.create_offline("Steve").unwrap();
     assert_eq!(svc.player("Steve").unwrap().session, None, "Mojang's");
+}
+
+/// A module's site sign-in, as a test sees it: one account, an optional second factor, a token
+/// it may end.
+#[derive(Default)]
+struct Site {
+    two_factor: bool,
+    ended: Mutex<bool>,
+    signed_out: Mutex<Vec<String>>,
+}
+
+const SITE_ID: &str = "2ca6c1be-e03b-32d5-a995-86a64e1a3b2a";
+
+impl AccountProvider for Site {
+    fn id(&self) -> &'static str {
+        "tensa"
+    }
+    fn name(&self) -> String {
+        "Сайт".into()
+    }
+    fn sign_in<'a>(
+        &'a self,
+        login: &'a str,
+        password: &'a str,
+        code: Option<&'a str>,
+    ) -> ProviderFuture<'a, ProviderAccount> {
+        Box::pin(async move {
+            if login != "Builder" || password != "pw" {
+                return Err(launcher_shared::AppError::new(
+                    ErrorCode::AuthCredentialsInvalid,
+                    "invalid_credentials",
+                ));
+            }
+            if self.two_factor && code.is_none() {
+                return Err(launcher_shared::AppError::new(ErrorCode::AuthCodeRequired, "2fa"));
+            }
+            Ok(ProviderAccount { id: SITE_ID.into(), name: "Builder".into(), token: "site-token".into() })
+        })
+    }
+    fn verify<'a>(&'a self, token: &'a str) -> ProviderFuture<'a, ProviderAccount> {
+        Box::pin(async move {
+            if *self.ended.lock().unwrap() {
+                return Err(launcher_shared::AppError::new(ErrorCode::ReauthRequired, "invalid_token"));
+            }
+            Ok(ProviderAccount { id: SITE_ID.into(), name: "Builder".into(), token: token.into() })
+        })
+    }
+    fn sign_out<'a>(&'a self, token: &'a str) -> ProviderFuture<'a, ()> {
+        Box::pin(async move {
+            self.signed_out.lock().unwrap().push(token.to_string());
+            Ok(())
+        })
+    }
+}
+
+const SITE_KEY: &str = "tensa:Builder";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_module_s_site_signs_its_players_in() {
+    let (fake, dir) = (fake_ms::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = service(&fake, dir.path(), Arc::new(NoOpener));
+    svc.register_provider(Arc::new(Site { two_factor: true, ..Site::default() }));
+    let asked = svc.sign_in_server("tensa", "Builder", "pw", None).await.unwrap_err();
+    assert_eq!(asked.code, ErrorCode::AuthCodeRequired);
+    let wrong = svc.sign_in_server("tensa", "Builder", "nope", Some("1")).await.unwrap_err();
+    assert_eq!(wrong.code, ErrorCode::AuthCredentialsInvalid);
+    let dto = svc.sign_in_server("tensa", "Builder", "pw", Some("123456")).await.unwrap();
+    assert_eq!((dto.key.as_str(), dto.name.as_str(), dto.id.as_str()), (SITE_KEY, "Builder", SITE_ID));
+    assert_eq!(dto.kind, AccountKind::Module);
+    assert_eq!((dto.server.as_deref(), dto.server_name.as_deref()), (Some("tensa"), Some("Сайт")));
+    let stored = std::fs::read_to_string(dir.path().join(PROFILES_FILE)).unwrap();
+    assert!(!stored.contains("site-token"), "sealed like the others");
+}
+
+/// The owner's choice «А»: the site vouches for who plays, the game starts as an offline player
+/// of that name and UUID.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_site_account_launches_offline_style_once_the_site_vouches_for_it() {
+    let (fake, dir) = (fake_ms::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = service(&fake, dir.path(), Arc::new(NoOpener));
+    let site = Arc::new(Site::default());
+    svc.register_provider(site.clone());
+    svc.sign_in_server("tensa", "Builder", "pw", None).await.unwrap();
+    let identity = svc.launch_identity(Some(SITE_KEY)).await.unwrap();
+    assert_eq!((identity.username.as_str(), identity.uuid.as_str()), ("Builder", SITE_ID));
+    assert_eq!(identity.access_token, "offline");
+    assert!(identity.agent.is_none());
+    *site.ended.lock().unwrap() = true;
+    let err = svc.launch_identity(Some(SITE_KEY)).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::ReauthRequired, "a sign-in elsewhere ended the token");
+    assert!(svc.snapshot().profiles.iter().find(|p| p.key == SITE_KEY).unwrap().reauth_required);
+    svc.delete_signed_out(SITE_KEY).await.unwrap();
+    assert_eq!(*site.signed_out.lock().unwrap(), ["site-token"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_its_module_a_site_account_cannot_sign_in() {
+    let (fake, dir) = (fake_ms::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = service(&fake, dir.path(), Arc::new(NoOpener));
+    let err = svc.sign_in_server("tensa", "Builder", "pw", None).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotFound);
 }

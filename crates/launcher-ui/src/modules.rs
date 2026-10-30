@@ -3,9 +3,9 @@
 use launcher_shared::{AppInfo, BuildDto};
 use leptos::prelude::*;
 use ui_kit::module::{
-    DeleteOption, ModuleAlertAction, ModuleBuildAction, ModuleBuildBadge, ModuleContentNotice,
-    ModuleHomeCards, ModuleOverlay, ModuleSection, ModuleSettingsBlock, ModuleSupportAction, ModuleTab,
-    UiModule,
+    DeleteOption, ModuleAccountKind, ModuleAlertAction, ModuleBuildAction, ModuleBuildBadge,
+    ModuleContentNotice, ModuleHomeCards, ModuleOverlay, ModuleSection, ModuleSettingsBlock,
+    ModuleSupportAction, ModuleTab, UiModule,
 };
 
 use crate::shell::sidebar::backend_modules;
@@ -17,6 +17,7 @@ pub struct ModuleParts {
     pub tabs: Vec<ModuleTab>,
     pub sections: Vec<ModuleSection>,
     pub blocks: Vec<ModuleSettingsBlock>,
+    pub account_kinds: Vec<ModuleAccountKind>,
     pub delete_options: Vec<DeleteOption>,
     pub overlays: Vec<ModuleOverlay>,
     pub home_cards: Vec<ModuleHomeCards>,
@@ -33,6 +34,7 @@ impl ModuleParts {
             tabs: modules.iter().flat_map(|m| m.content_tabs()).collect(),
             sections: modules.iter().flat_map(|m| m.settings_sections()).collect(),
             blocks: modules.iter().flat_map(|m| m.settings_blocks()).collect(),
+            account_kinds: modules.iter().flat_map(|m| m.account_kinds()).collect(),
             delete_options: modules.iter().flat_map(|m| m.delete_options()).collect(),
             overlays: modules.iter().flat_map(|m| m.overlays()).collect(),
             home_cards: modules.iter().flat_map(|m| m.home_cards()).collect(),
@@ -56,6 +58,7 @@ impl ModuleParts {
             tabs: self.tabs.iter().copied().filter(|t| has(t.module)).collect(),
             sections: self.sections.iter().copied().filter(|s| has(s.module)).collect(),
             blocks: self.blocks.iter().copied().filter(|b| has(b.module)).collect(),
+            account_kinds: self.account_kinds.iter().copied().filter(|k| has(k.module)).collect(),
             delete_options: self.delete_options.iter().copied().filter(|o| has(o.module)).collect(),
             overlays: self.overlays.iter().copied().filter(|o| has(o.module)).collect(),
             home_cards: self.home_cards.iter().copied().filter(|c| has(c.module)).collect(),

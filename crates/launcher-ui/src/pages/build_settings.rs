@@ -666,7 +666,7 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
         let kind = |p: &ProfileDto| match p.kind {
             AccountKind::Microsoft => i18n.t("microsoft"),
             AccountKind::Offline => i18n.t("offline_account"),
-            AccountKind::Yggdrasil => crate::profiles::kind_text(p, |k| i18n.t(k)),
+            AccountKind::Yggdrasil | AccountKind::Module => crate::profiles::kind_text(p, |k| i18n.t(k)),
         };
         store.profiles.with(|profiles| {
             profile.with(|current| {

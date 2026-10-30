@@ -146,7 +146,7 @@ pub fn mock_log_view() -> LogView {
 fn mock_profile(name: &str, kind: AccountKind, is_default: bool) -> ProfileDto {
     let id = match kind {
         AccountKind::Microsoft => "0123456789abcdef0123456789abcdef",
-        AccountKind::Offline => "00000000-0000-0000-0000-000000000000",
+        AccountKind::Offline | AccountKind::Module => "00000000-0000-0000-0000-000000000000",
         AccountKind::Yggdrasil => "7c0d1a2b3c4d5e6f708192a3b4c5d6e7",
     };
     ProfileDto {
@@ -641,10 +641,13 @@ pub fn install() {
             let name = "Alex_UA";
             let mut profile = mock_profile(&format!("{server}:{name}"), AccountKind::Yggdrasil, true);
             profile.name = name.into();
-            if server != "elyby" {
-                return Err(AppError::new(ErrorCode::NotFound, format!("no auth server {server}")));
-            }
-            profile.server_name = Some("Ely.by".into());
+            let (kind, server_name) = match server.as_str() {
+                "elyby" => (AccountKind::Yggdrasil, "Ely.by"),
+                "tensa" => (AccountKind::Module, "TensaCraft"),
+                _ => return Err(AppError::new(ErrorCode::NotFound, format!("no auth server {server}"))),
+            };
+            profile.kind = kind;
+            profile.server_name = Some(server_name.into());
             profile.server = Some(server);
             {
                 let mut list = profiles.borrow_mut();
