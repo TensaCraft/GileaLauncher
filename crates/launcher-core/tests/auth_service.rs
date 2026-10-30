@@ -458,14 +458,15 @@ async fn deleting_such_an_account_ends_its_session_on_the_server() {
     assert_eq!(ygg.posts("authserver/invalidate").len(), 1);
 }
 
-/// Mojang's skin of the same nick is someone else's: an account on another server shows none
-/// until its own server's skins are read.
+/// Mojang's skin of the same nick is someone else's: an account on another server wears its
+/// own server's skin.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_account_on_another_server_borrows_no_mojang_skin() {
+async fn an_account_on_another_server_is_a_player_of_that_server() {
     let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
     let (svc, _) = with_server(&fake, &ygg, dir.path());
     svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
-    assert_eq!(svc.player(ELY_KEY), None);
+    let player = svc.player(ELY_KEY).unwrap();
+    assert_eq!(player.session.as_deref(), Some(ygg.session().as_str()));
     svc.create_offline("Steve").unwrap();
-    assert!(svc.player("Steve").is_some());
+    assert_eq!(svc.player("Steve").unwrap().session, None, "Mojang's");
 }

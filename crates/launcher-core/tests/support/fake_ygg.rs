@@ -29,10 +29,13 @@ pub struct Knobs {
     pub valid_tokens: Vec<String>,
     /// Tokens no longer valid that a refresh still renews.
     pub stale_tokens: Vec<String>,
+    /// The profile wears no skin of its own.
+    pub no_skin: bool,
 }
 
 #[derive(Clone)]
 struct Shared {
+    base: String,
     knobs: Arc<Mutex<Knobs>>,
     log: Arc<Mutex<Vec<(String, Value)>>>,
     issued: Arc<Mutex<u32>>,
@@ -54,6 +57,11 @@ impl FakeYgg {
     /// The API root the site root points at.
     pub fn api_root(&self) -> String {
         format!("{}/api/yggdrasil/", self.base)
+    }
+
+    /// Its session server, where a profile's textures are.
+    pub fn session(&self) -> String {
+        format!("{}sessionserver/", self.api_root())
     }
 
     pub fn set(&self, change: impl FnOnce(&mut Knobs)) {
@@ -84,6 +92,7 @@ pub async fn start() -> FakeYgg {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let shared = Shared {
+        base: base.clone(),
         knobs: Arc::new(Mutex::new(Knobs::default())),
         log: Arc::new(Mutex::new(Vec::new())),
         issued: Arc::new(Mutex::new(0)),
@@ -96,11 +105,38 @@ pub async fn start() -> FakeYgg {
         .route("/api/yggdrasil/authserver/refresh", post(refresh))
         .route("/api/yggdrasil/authserver/validate", post(validate))
         .route("/api/yggdrasil/authserver/invalidate", post(invalidate))
+        .route("/api/yggdrasil/sessionserver/session/minecraft/profile/{id}", get(profile))
+        .route("/textures/{name}", get(texture))
         .with_state(shared.clone());
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     FakeYgg { base, shared, task }
+}
+
+/// The profile with its textures, as the session server gives it (the skin on this server, slim).
+async fn profile(State(s): State<Shared>, axum::extract::Path(id): axum::extract::Path<String>) -> Response {
+    use base64::Engine;
+    if id != PROFILE_ID {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    let textures = if s.knobs.lock().unwrap().no_skin {
+        json!({})
+    } else {
+        json!({ "SKIN": { "url": format!("{}/textures/alex", s.base), "metadata": { "model": "slim" } } })
+    };
+    let value =
+        json!({ "timestamp": 0, "profileId": PROFILE_ID, "profileName": PROFILE_NAME, "textures": textures });
+    let encoded = base64::engine::general_purpose::STANDARD.encode(value.to_string());
+    Json(json!({ "id": PROFILE_ID, "name": PROFILE_NAME, "properties": [{ "name": "textures", "value": encoded }] }))
+        .into_response()
+}
+
+async fn texture(axum::extract::Path(name): axum::extract::Path<String>) -> Response {
+    if name != "alex" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    ([("content-type", "image/png")], super::fake_skins::skin_png(33, true)).into_response()
 }
 
 async fn site(State(s): State<Shared>) -> Response {

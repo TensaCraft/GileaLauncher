@@ -79,13 +79,21 @@ impl Avatar {
 pub struct Player {
     pub id: Option<String>,
     pub name: Option<String>,
+    /// The session server of the auth server the player is on, when it is not Mojang's: their
+    /// skin is there, and nobody else is asked (the same nick elsewhere is someone else).
+    pub session: Option<String>,
 }
 
 impl Player {
     /// A player known by UUID and nickname; a blank one is none.
     pub fn new(id: &str, name: &str) -> Player {
         let given = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
-        Player { id: given(id), name: given(name) }
+        Player { id: given(id), name: given(name), session: None }
+    }
+
+    /// A player on another auth server, whose session server (`…/sessionserver/`) has their skin.
+    pub fn on_server(id: &str, name: &str, session: &str) -> Player {
+        Player { session: Some(session.to_string()), ..Player::new(id, name) }
     }
 
     /// A player known by nickname only.
@@ -103,13 +111,18 @@ impl Player {
         self.name.as_deref().map(str::trim).filter(|n| !n.is_empty())
     }
 
-    /// What the player's texture is kept under: the UUID, else the nickname.
+    /// What the player's texture is kept under: the UUID, else the nickname; a player of another
+    /// server under that server too.
     fn key(&self) -> Option<String> {
-        match (self.uuid(), self.nickname()) {
-            (Some(uuid), _) => Some(format!("id:{uuid}")),
-            (None, Some(name)) => Some(format!("name:{}", name.to_lowercase())),
-            (None, None) => None,
-        }
+        let own = match (self.uuid(), self.nickname()) {
+            (Some(uuid), _) => format!("id:{uuid}"),
+            (None, Some(name)) => format!("name:{}", name.to_lowercase()),
+            (None, None) => return None,
+        };
+        Some(match &self.session {
+            Some(session) => format!("at:{}:{own}", digest(session)),
+            None => own,
+        })
     }
 
     /// What third-party hosts are asked for: the UUID, else the nickname.
@@ -385,7 +398,9 @@ impl SkinService {
         }
         let url = Self::address(&self.cfg.endpoints.mojang_api, &["users", "profiles", "minecraft", name])?;
         let id = self.ask(url).await?.and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_string));
-        Player { id, name: None }.uuid().ok_or_else(|| nothing(NO_PLAYER, format!("no player {name}")))
+        Player { id, name: None, session: None }
+            .uuid()
+            .ok_or_else(|| nothing(NO_PLAYER, format!("no player {name}")))
     }
 
     /// The skin Mojang names for `player`: its address and model.
@@ -521,6 +536,20 @@ impl SkinService {
         {
             return Some(texture);
         }
+        if let Some(session) = player.session.as_deref() {
+            return match self.server_skin(session, player).await {
+                Ok(Some((file, png, hash, slim))) => {
+                    let until = Self::until(self.cfg.official_ttl);
+                    self.remember(&key, Seen { file, slim, official: false, until });
+                    Some(SkinTexture { png, slim, official: false, hash })
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::debug!("The skin of {key} on its server is out of reach: {}", e.detail);
+                    known.and_then(|seen| self.texture_of(&seen))
+                }
+            };
+        }
         // A third-party skin holds a day when Mojang said there is none, an hour when it failed.
         let ttl = match self.look_up(player).await {
             Ok((url, slim)) => match self.fetch_texture(&url).await {
@@ -548,6 +577,21 @@ impl SkinService {
             return Some(SkinTexture { png, slim, official: false, hash });
         }
         known.and_then(|seen| self.texture_of(&seen))
+    }
+
+    /// The skin `player`'s own session server names (`None`: they wear none there), fetched from
+    /// wherever it says (such servers keep skins on their own hosts, often over plain http).
+    async fn server_skin(
+        &self,
+        session: &str,
+        player: &Player,
+    ) -> AppResult<Option<(String, Vec<u8>, String, bool)>> {
+        let Some(uuid) = player.uuid() else { return Ok(None) };
+        let url = Self::address(session, &["session", "minecraft", "profile", &uuid])?;
+        let Some((skin, slim)) = self.ask(url).await?.as_ref().and_then(skin_of) else { return Ok(None) };
+        let origin = Origin::new(|u| matches!(u.scheme(), "http" | "https"));
+        let (file, png, hash) = self.fetch_from_host(&skin, origin).await?;
+        Ok(Some((file, png, hash, slim)))
     }
 
     /// `player`'s skin as Mojang names it, asked now: `NotFound` with `reason` = `no_player` or
@@ -590,6 +634,10 @@ impl SkinService {
     pub async fn head(&self, player: &Player, size: u32) -> Option<Avatar> {
         if let Some(texture) = self.texture(player).await {
             return Some(Avatar::Png(render::head(&texture.png, size)));
+        }
+        if player.session.is_some() {
+            // The head hosts know Mojang's players: theirs of the same nick is someone else.
+            return None;
         }
         self.head_from_hosts(&player.identifier()?, size).await
     }

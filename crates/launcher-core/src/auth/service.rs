@@ -434,11 +434,18 @@ impl AuthService {
         }
     }
 
-    /// Whose skin profile `key` wears: its UUID and name (`skins::SkinService` finds the skin).
-    /// None for an account on another auth server: Mojang's skin of the same nick is someone
-    /// else's.
+    /// Whose skin profile `key` wears: its UUID and name (`skins::SkinService` finds the skin);
+    /// an account on another auth server wears that server's.
     pub fn player(&self, key: &str) -> Option<Player> {
-        let profile = self.store.get(key).filter(|p| p.kind != AccountKind::Yggdrasil)?;
+        let profile = self.store.get(key)?;
+        if profile.kind == AccountKind::Yggdrasil {
+            let server = self.servers.get(profile.server.as_deref()?)?;
+            return Some(Player::on_server(
+                &profile.id,
+                &profile.name,
+                &format!("{}sessionserver/", server.api_root),
+            ));
+        }
         Some(Player::new(&profile.id, &profile.name))
     }
 

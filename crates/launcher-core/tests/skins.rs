@@ -316,3 +316,33 @@ async fn nobody_has_nothing() {
     assert_eq!(svc.head(&Player::new("  ", " "), 64).await, None);
     assert!(fake.all_requests().is_empty());
 }
+
+/// An account on another auth server wears that server's skin: its session server says which,
+/// and no Mojang lookup or nickname host is asked (the same nick there is someone else).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_player_on_another_server_wears_that_server_s_skin() {
+    let fake = known().await;
+    let ygg = support::fake_ygg::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let svc = service(config(&fake, dir.path()));
+    let player = Player::on_server(support::fake_ygg::PROFILE_ID, "Alex", &ygg.session());
+    let texture = svc.texture(&player).await.unwrap();
+    assert_eq!(texture.png, normalised(&support::fake_skins::skin_png(33, true)));
+    assert!(texture.slim && !texture.official);
+    assert!(fake.all_requests().is_empty(), "neither Mojang nor a nickname host was asked");
+    assert!(svc.head(&player, 32).await.is_some());
+    assert!(svc.front(&player).await.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_player_without_a_skin_on_their_server_shows_none_rather_than_a_stranger_s() {
+    let fake = known().await;
+    let ygg = support::fake_ygg::start().await;
+    ygg.set(|k| k.no_skin = true);
+    let dir = tempfile::tempdir().unwrap();
+    let svc = service(config(&fake, dir.path()));
+    let player = Player::on_server(support::fake_ygg::PROFILE_ID, "Alex", &ygg.session());
+    assert_eq!(svc.texture(&player).await, None);
+    assert!(svc.head(&player, 32).await.is_none());
+    assert!(fake.all_requests().is_empty(), "Mojang's Alex is someone else");
+}
