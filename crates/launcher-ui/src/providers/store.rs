@@ -86,6 +86,22 @@ impl Store {
             .with(|m| m.get(&tab(provider, key, kind)).is_some_and(|k| k.projects.contains(project_id)))
     }
 
+    /// The files of project `project_id` the provider's overview of the tab knows, in its order.
+    pub fn files_of(&self, provider: &str, key: &str, kind: ContentKind, project_id: &str) -> Vec<String> {
+        self.overviews.with(|m| {
+            m.get(&tab(provider, key, kind))
+                .map(|k| {
+                    k.overview
+                        .notes
+                        .iter()
+                        .filter(|n| n.project_id == project_id)
+                        .map(|n| n.file.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    }
+
     /// The provider's note of the row whose file is `file`.
     pub fn note(&self, provider: &str, key: &str, kind: ContentKind, file: &str) -> Option<FileNote> {
         self.overviews.with(|m| m.get(&tab(provider, key, kind)).and_then(|k| k.note(file).cloned()))
@@ -202,6 +218,29 @@ mod tests {
             icon_url: None,
             installed: false,
         }
+    }
+
+    #[test]
+    fn a_project_s_files_are_found_by_it() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let s = store();
+            let notes = vec![
+                note("sodium.jar", "S", None),
+                note("iris.jar", "I", None),
+                note("sodium-extra.jar", "S", None),
+            ];
+            s.set_overview("modrinth", "files", ContentKind::Mods, Overview { notes, updates: None });
+            assert_eq!(
+                s.files_of("modrinth", "files", ContentKind::Mods, "S"),
+                ["sodium.jar", "sodium-extra.jar"]
+            );
+            assert!(s.files_of("modrinth", "files", ContentKind::Mods, "gone").is_empty());
+            assert!(
+                s.files_of("curseforge", "files", ContentKind::Mods, "S").is_empty(),
+                "another provider's"
+            );
+        });
     }
 
     #[test]

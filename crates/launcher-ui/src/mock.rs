@@ -520,6 +520,19 @@ pub fn install() {
             ipc::emit_mock(names::ALERT, to_value(&alert)?);
             answer
         }
+        // An optional mod the server builds' preview put in goes as any file of the build does.
+        #[cfg(feature = "mod-tensa")]
+        "content_delete"
+            if tensa.borrow().has_optional(
+                args["key"].as_str().unwrap_or_default(),
+                args["file"].as_str().unwrap_or_default(),
+            ) =>
+        {
+            let (key, file) =
+                (args["key"].as_str().unwrap_or_default(), args["file"].as_str().unwrap_or_default());
+            tensa.borrow_mut().forget_optional(key, file);
+            content.borrow_mut().handle("content_list", &args).unwrap_or(Ok(Value::Null))
+        }
         #[cfg(feature = "mod-tensa")]
         "module_invoke" if args["module"] == "tensa" => {
             tensa.borrow_mut().handle(args["command"].as_str().unwrap_or_default(), &args["args"])

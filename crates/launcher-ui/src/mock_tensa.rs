@@ -42,6 +42,10 @@ const OPTIONAL: [Optional; 3] = [
     ("e4mc", "e4mc", "e4mc-neoforge-6.2.3.jar"),
 ];
 
+fn optional_file(id: &str) -> Option<&'static str> {
+    OPTIONAL.iter().find(|(known, ..)| *known == id).map(|(.., file)| *file)
+}
+
 pub struct MockTensa {
     builds: Rc<RefCell<MockBuilds>>,
     show: bool,
@@ -63,6 +67,18 @@ fn to_value<T: Serialize>(value: T) -> AppResult<Value> {
 impl MockTensa {
     pub fn new(show: bool, fails: bool, builds: Rc<RefCell<MockBuilds>>) -> MockTensa {
         MockTensa { builds, show, fails, installed: Vec::new(), optional: HashMap::new() }
+    }
+
+    /// Whether build `key` has the optional mod in file `file`.
+    pub fn has_optional(&self, key: &str, file: &str) -> bool {
+        self.optional.get(key).is_some_and(|set| set.iter().any(|id| optional_file(id) == Some(file)))
+    }
+
+    /// The optional mod in file `file` goes from build `key`, as a deleted file would.
+    pub fn forget_optional(&mut self, key: &str, file: &str) {
+        if let Some(set) = self.optional.get_mut(key) {
+            set.retain(|id| optional_file(id) != Some(file));
+        }
     }
 
     fn is_server_build(&self, key: &str) -> bool {
@@ -306,6 +322,10 @@ mod tests {
             serde_json::from_value(tensa.handle_provider("provider_overview", &call(overview)).unwrap())
                 .unwrap();
         assert_eq!(overview.notes.iter().map(|n| n.project_id.as_str()).collect::<Vec<_>>(), ["e4mc"]);
+        let file = overview.notes[0].file.clone();
+        assert!(tensa.has_optional(&key, &file));
+        tensa.forget_optional(&key, &file);
+        assert!(!tensa.has_optional(&key, &file), "deleted from the Mods tab, it is gone");
         let other = builds.borrow_mut().create_loader("Own", LoaderKind::Fabric, "26.3", "0.19.5").unwrap();
         let search = json!({"key": other.key, "kind": "mods", "query": "", "offset": 0});
         let page: SearchPage =

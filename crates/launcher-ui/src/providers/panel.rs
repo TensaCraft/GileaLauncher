@@ -11,8 +11,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::{
-    ActionGap, ActionTone, Button, EmptyState, Icon, IconAction, Reloadable, Size, TextInput, Variant,
-    use_toasts,
+    ActionTone, Button, ConfirmDialog, EmptyState, Icon, IconAction, Reloadable, Size, TextInput, Variant,
+    ipc, use_toasts,
 };
 
 use super::cards::{ListSkeleton, Pager, ProjectRow};
@@ -20,7 +20,15 @@ use super::flow::{InstallFlow, installs};
 use super::installed::{UpdateConfirm, load};
 use super::store::{UpdateAsk, store};
 use super::{DEBOUNCE, api, describe, open_page};
+use crate::pages::content::texts;
 use crate::store::use_store;
+
+#[derive(serde::Serialize)]
+struct FileArgs {
+    key: String,
+    kind: ContentKind,
+    file: String,
+}
 
 #[component]
 pub fn ProviderPanel(
@@ -125,6 +133,36 @@ pub fn ProviderPanel(
         flow.start(InstallArgs::new(key.get_value(), kind, hit.project_id, hit.slug, hit.title));
     };
 
+    // An installed project goes from here too: its files, as from the Installed list.
+    let delete_of = RwSignal::new(None::<ProjectHit>);
+    let delete_open = RwSignal::new(false);
+    let deleting = RwSignal::new(None::<String>);
+    let confirm_delete = Callback::new(move |()| {
+        delete_open.set(false);
+        let Some(hit) = delete_of.get_untracked() else { return };
+        if deleting.get_untracked().is_some() {
+            return;
+        }
+        let (key, provider) = (key.get_value(), info.get_value());
+        let files = store().files_of(&provider.id, &key, kind, &hit.project_id);
+        deleting.set(Some(hit.project_id));
+        spawn_local(async move {
+            for file in files {
+                let args = FileArgs { key: key.clone(), kind, file };
+                if let Err(e) = ipc::invoke::<_, serde_json::Value>("content_delete", &args).await {
+                    toasts.show(Level::Error, i18n.error(&e), None);
+                    break;
+                }
+            }
+            let _ = deleting.try_set(None);
+            load(&provider, key, kind);
+        });
+    });
+    let delete_text = Signal::derive(move || {
+        let name = delete_of.with(|h| h.as_ref().map(|h| h.title.clone()).unwrap_or_default());
+        i18n.tp(texts(kind).confirm_delete, &[("name", name)])
+    });
+
     let card = move |hit: ProjectHit| {
         let project = hit.project_id.clone();
         let is_installed = {
@@ -135,8 +173,13 @@ pub fn ProviderPanel(
             let project = project.clone();
             Memo::new(move |_| store().update_of(&id.get_value(), &key.get_value(), kind, &project))
         };
+        let removing = {
+            let project = project.clone();
+            Signal::derive(move || deleting.with(|d| d.as_deref() == Some(project.as_str())))
+        };
         let busy = Signal::derive(move || installs().running(&id.get_value(), &key.get_value(), &project));
-        let (site, for_install, title) = (hit.url.clone(), hit.clone(), hit.title.clone());
+        let (site, for_install, for_delete, title) =
+            (hit.url.clone(), hit.clone(), hit.clone(), hit.title.clone());
         // Installed with a newer version: "Update", after the same confirmation as in the list.
         let act = move || match newer.get_untracked() {
             Some(note) => confirm.ask(UpdateAsk {
@@ -150,18 +193,31 @@ pub fn ProviderPanel(
         };
         view! {
             <ProjectRow hit=hit>
-                {match site {
-                    Some(url) => view! {
-                        <IconAction
-                            icon="open_in_new"
-                            tone=ActionTone::Info
-                            title=t("open_on_site")
-                            on_click=Callback::new(move |()| info.with_value(|p| open_page(i18n, toasts, p, url.clone())))
-                        />
-                    }
-                    .into_any(),
-                    None => view! { <ActionGap /> }.into_any(),
-                }}
+                // From the edge inwards: the main button (one width for all), the site, and an
+                // installed project's delete further left; no row has a hole between its actions.
+                <Show when=move || is_installed.get()>
+                    <IconAction
+                        icon="delete_outline"
+                        tone=ActionTone::Danger
+                        title=t("delete")
+                        loading=removing
+                        on_click={
+                            let hit = for_delete.clone();
+                            Callback::new(move |()| {
+                                delete_of.set(Some(hit.clone()));
+                                delete_open.set(true);
+                            })
+                        }
+                    />
+                </Show>
+                {site.map(|url| view! {
+                    <IconAction
+                        icon="open_in_new"
+                        tone=ActionTone::Info
+                        title=t("open_on_site")
+                        on_click=Callback::new(move |()| info.with_value(|p| open_page(i18n, toasts, p, url.clone())))
+                    />
+                })}
                 <Button
                     size=Size::Md
                     variant=Variant::Primary
@@ -257,5 +313,14 @@ pub fn ProviderPanel(
         />
         {flow.dialog()}
         {confirm.view()}
+        <ConfirmDialog
+            open=delete_open
+            danger=true
+            title=t("confirmation")
+            message=delete_text
+            confirm_label=t("delete")
+            cancel_label=t("cancel")
+            on_confirm=confirm_delete
+        />
     }
 }
