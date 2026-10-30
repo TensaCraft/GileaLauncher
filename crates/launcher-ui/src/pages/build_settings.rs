@@ -22,6 +22,7 @@ use crate::builds::loader_pick::{
 };
 use crate::builds::ram::RamSetting;
 use crate::builds::{build_loader, build_minecraft, ram_slider};
+use crate::modules::use_module_parts;
 use crate::pages::settings::java::gpu_choice;
 use crate::pages::wizard::state::loader_available;
 use crate::shell::use_header;
@@ -488,6 +489,10 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
     let memory = RwSignal::new(None::<MemoryInfo>);
     let javas = RwSignal::new(JavaList::default());
     let build = Memo::new(move |_| store.builds.with(|b| b.iter().find(|b| b.key == key()).cloned()));
+    // A build whose loader a module sets (a server's) keeps it: why, in place of "Change".
+    let parts = use_module_parts();
+    let loader_lock =
+        Memo::new(move |_| build.with(|b| b.as_ref().and_then(|b| parts.with(|p| p.loader_lock_for(b)))));
 
     // Saved settings on the page. An answer after the page is gone changes nothing: the header is
     // the app's, and another page shows it by then.
@@ -660,7 +665,10 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                     <TextInput value=name invalid=Signal::derive(move || name_error.get().is_some()) />
                 </Field>
                 <DescriptionField value=description />
-                <Field label=t("build_loader_label")>
+                <Field
+                    label=t("build_loader_label")
+                    hint=Signal::derive(move || loader_lock.get().map(|reason| i18n.t(reason)))
+                >
                     {move || build.get().map(|b| {
                         let (name, sub) = loader_line(&b, &i18n.t("build_loader_vanilla"));
                         view! {
@@ -670,9 +678,11 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                                     <div class="build-row__name">{name}</div>
                                     <div class="build-row__sub">{sub}</div>
                                 </div>
-                                <Button icon="swap_horiz" on_click=move |_| change_open.set(true)>
-                                    {move || i18n.t("build_loader_change")}
-                                </Button>
+                                <Show when=move || loader_lock.get().is_none()>
+                                    <Button icon="swap_horiz" on_click=move |_| change_open.set(true)>
+                                        {move || i18n.t("build_loader_change")}
+                                    </Button>
+                                </Show>
                             </div>
                         }
                     })}
