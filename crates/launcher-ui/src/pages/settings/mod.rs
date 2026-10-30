@@ -67,6 +67,23 @@ pub fn sections(extra: &[ModuleSection]) -> Vec<SectionDef> {
     all
 }
 
+/// The element id of `module`'s block in its section: a link elsewhere scrolls to it.
+pub fn block_anchor(module: &str) -> String {
+    format!("settings-block-{module}")
+}
+
+/// Scrolls the settings to `module`'s block once its section is drawn.
+pub fn show_block(module: &'static str) {
+    request_animation_frame(move || {
+        if let Some(block) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id(&block_anchor(module)))
+        {
+            block.scroll_into_view_with_bool(true);
+        }
+    });
+}
+
 /// The blocks the modules put inside section `id`, in the modules' order.
 pub fn blocks_inside(blocks: &[ModuleSettingsBlock], id: &str) -> Vec<ModuleSettingsBlock> {
     blocks.iter().copied().filter(|b| b.inside == id).collect()
@@ -112,7 +129,11 @@ pub fn SettingsPage() -> impl IntoView {
                 {move || {
                     let id = active.get();
                     let blocks = parts.with(|p| blocks_inside(&p.blocks, id));
-                    view! { {section_view(id, defs)} {blocks.into_iter().map(|b| (b.view)()).collect_view()} }
+                    let blocks = blocks
+                        .into_iter()
+                        .map(|b| view! { <div id=block_anchor(b.module)>{(b.view)()}</div> })
+                        .collect_view();
+                    view! { {section_view(id, defs)} {blocks} }
                 }}
             </div>
         </div>
@@ -176,6 +197,13 @@ mod tests {
         assert_eq!(modules("storage"), ["backups", "other"]);
         assert_eq!(modules("launcher"), ["reports"]);
         assert!(modules("java").is_empty());
+    }
+
+    /// A block is found by its module, so a link elsewhere («Налаштувати» in storage) leads to it.
+    #[test]
+    fn a_block_is_found_by_its_module() {
+        assert_eq!(block_anchor("backups"), "settings-block-backups");
+        assert_ne!(block_anchor("backups"), block_anchor("reports"));
     }
 
     #[test]

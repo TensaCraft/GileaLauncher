@@ -366,10 +366,12 @@ pub fn UsageSection() -> impl IntoView {
                         icon="tune"
                         compact=true
                         title=t("storage_configure")
+                        // To the backups block (its section «Файли» puts it last).
                         on_click=Callback::new(move |()| {
                             if let Some(SettingsSection(active)) = active {
                                 active.set("storage");
                             }
+                            super::show_block("backups");
                         })
                     />
                 </SettingRow>
