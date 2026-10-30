@@ -200,6 +200,17 @@ mod tests {
         assert_eq!(play_class(CardPlay::Corner), "card__play is-corner");
     }
 
+    /// A running build's card glows in the accent, whatever accent is chosen.
+    #[test]
+    fn a_running_card_glows_in_the_accent() {
+        let css = include_str!("../../styles/components.css");
+        let tokens = include_str!("../../styles/tokens.css");
+        assert!(rule(css, ".card.is-running").contains("border-color: var(--running)"));
+        assert!(rule(css, ".card__dot").contains("background: var(--running)"));
+        assert!(tokens.contains("--running: var(--primary);"));
+        assert!(tokens.contains("--running-rgb: var(--accent-rgb);"));
+    }
+
     /// The declarations of `selector`'s rule (it may span lines).
     fn rule(css: &str, selector: &str) -> String {
         let start = css.find(&format!("{selector} {{")).unwrap_or_else(|| panic!("no rule {selector}"));

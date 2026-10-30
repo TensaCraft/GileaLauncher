@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use launcher_core::auth::page::PageLook;
 use launcher_core::core_app::CoreApp;
 use launcher_core::platform::sound::ClickPlayer;
 use launcher_shared::{
@@ -63,9 +64,13 @@ pub fn settings_set(
 ) -> AppResult<SettingsSnapshot> {
     let resize = matches!(update, SettingUpdate::WindowSize(_));
     let relang = matches!(update, SettingUpdate::Lang(_));
+    let recolour = matches!(update, SettingUpdate::Accent(_));
     let snapshot = state.core.settings.apply(update)?;
     if relang {
         crate::tray::retitle(&app);
+    }
+    if recolour && let Some(window) = app.get_webview_window("main") {
+        crate::window::apply_background(&window, &snapshot.accent);
     }
     if resize
         && let (Some(window), Some(size)) =
@@ -416,8 +421,8 @@ pub fn auth_state(state: State<'_, AppState>) -> AuthState {
 /// Microsoft sign-in; progress arrives as `app://auth` events (device code dialog).
 #[tauri::command]
 pub async fn auth_sign_in(state: State<'_, AppState>) -> AppResult<ProfileDto> {
-    let lang = state.core.settings.lang();
-    state.core.auth.sign_in_microsoft(&lang).await
+    let (lang, accent) = (state.core.settings.lang(), state.core.settings.snapshot().accent);
+    state.core.auth.sign_in_microsoft(PageLook { lang: &lang, accent: &accent }).await
 }
 
 #[tauri::command]

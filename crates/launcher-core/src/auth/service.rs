@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 use super::http::{AuthHttp, FlowError};
 use super::msa::{self, MsTokens};
 use super::offline::validate_offline_name;
+use super::page::PageLook;
 use super::store::{NewProfile, ProfileStore, REASON_REFRESH_INVALID, StoredProfile, TokenUpdate};
 use super::{AuthConfig, LAUNCH_SESSION_MARGIN, TOKEN_REFRESH_LEEWAY, UrlOpener, now_secs, xbox};
 use crate::feedback::{EventSink, FeedbackService};
@@ -136,13 +137,13 @@ impl AuthService {
 
     /// Browser sign-in, falling back to a device code when the browser flow is unavailable.
     /// The new Microsoft profile becomes the default (an existing one with the same name is updated).
-    pub async fn sign_in_microsoft(&self, lang: &str) -> AppResult<ProfileDto> {
+    pub async fn sign_in_microsoft(&self, look: PageLook<'_>) -> AppResult<ProfileDto> {
         let Ok(_guard) = self.sign_in.try_lock() else {
             return Err(AppError::new(ErrorCode::Busy, "a Microsoft sign-in is already running"));
         };
         let cancel = CancellationToken::new();
         *lock(&self.cancel) = Some(cancel.clone());
-        let result = self.run_sign_in(lang, &cancel).await;
+        let result = self.run_sign_in(look, &cancel).await;
         *lock(&self.cancel) = None;
         self.set_state(AuthState::Idle);
         match result {
@@ -158,7 +159,7 @@ impl AuthService {
         }
     }
 
-    async fn run_sign_in(&self, lang: &str, cancel: &CancellationToken) -> AppResult<StoredProfile> {
+    async fn run_sign_in(&self, look: PageLook<'_>, cancel: &CancellationToken) -> AppResult<StoredProfile> {
         let ep = &self.cfg.endpoints;
         let client_id = self.cfg.client_id.as_str();
         self.feedback.info(Text::key("microsoft_auth_browser_opening"));
@@ -168,7 +169,7 @@ impl AuthService {
             ep,
             client_id,
             self.opener.as_ref(),
-            lang,
+            look,
             self.cfg.timings.browser_timeout,
             cancel,
         )

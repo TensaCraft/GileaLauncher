@@ -186,7 +186,7 @@ pub fn ProviderRowActions(
                     view! {
                         <IconAction
                             icon="downloading"
-                            tone=ActionTone::Ok
+                            tone=ActionTone::Accent
                             title=Signal::derive(move || i18n.t(update_texts(kind).action))
                             loading=busy
                             on_click=Callback::new(move |()| {

@@ -211,8 +211,11 @@ pub fn InstalledPanel(
         let sub = subtitle(&item);
         let meta = format!("{} • {}", item.filename, launcher_shared::units::size(item.size, &i18n.lang()));
         let toggle_title = if item.enabled { texts.disable } else { texts.enable };
-        let (toggle_icon, toggle_tone) =
-            if item.enabled { ("toggle_on", ActionTone::Ok) } else { ("toggle_off", ActionTone::Neutral) };
+        let (toggle_icon, toggle_tone) = if item.enabled {
+            ("toggle_on", ActionTone::Accent)
+        } else {
+            ("toggle_off", ActionTone::Neutral)
+        };
         view! {
             <div class="list-row build-row content-row" class:is-off=!item.enabled>
                 <ContentIcon

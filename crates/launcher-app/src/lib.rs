@@ -208,6 +208,7 @@ pub fn run() -> i32 {
                 let size = launcher_shared::WindowSize::parse(&core.settings.snapshot().window_size)
                     .unwrap_or_default();
                 window::move_to_dev_monitor(&window);
+                window::apply_background(&window, &core.settings.snapshot().accent);
                 window::apply_window_size(&window, size);
                 tray::retitle(app.handle());
                 let _ = window.show();

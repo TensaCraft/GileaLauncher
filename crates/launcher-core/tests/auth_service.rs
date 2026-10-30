@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use launcher_core::auth::crypto::TokenCipher;
+use launcher_core::auth::page::PageLook;
 use launcher_core::auth::service::AuthService;
 use launcher_core::auth::store::{PROFILES_FILE, REASON_DECRYPTION_FAILED, REASON_REFRESH_INVALID};
 use launcher_core::auth::{AuthConfig, AuthTimings, NoOpener, UrlOpener};
@@ -87,7 +88,7 @@ async fn browser_sign_in_creates_a_default_microsoft_profile() {
     let fake = fake_ms::start().await;
     let dir = tempfile::tempdir().unwrap();
     let (svc, rec) = service(&fake, dir.path(), FakeBrowser::new(Browser::Consent));
-    let dto = svc.sign_in_microsoft("en_US").await.unwrap();
+    let dto = svc.sign_in_microsoft(PageLook::plain("en_US")).await.unwrap();
     assert_eq!((dto.name.as_str(), dto.id.as_str()), (MC_NAME, MC_ID));
     assert_eq!((dto.kind, dto.is_default, dto.reauth_required), (AccountKind::Microsoft, true, false));
     let text = std::fs::read_to_string(dir.path().join(PROFILES_FILE)).unwrap();
@@ -109,7 +110,7 @@ async fn falls_back_to_a_device_code_when_no_browser_opens() {
     fake.knobs().device_pending = 1;
     let dir = tempfile::tempdir().unwrap();
     let (svc, rec) = service(&fake, dir.path(), FakeBrowser::new(Browser::Broken));
-    svc.sign_in_microsoft("en_US").await.unwrap();
+    svc.sign_in_microsoft(PageLook::plain("en_US")).await.unwrap();
     let toasts = rec.toasts.lock().unwrap().clone();
     assert!(toasts.iter().any(|t| t.title == Text::key("microsoft_auth_browser_fallback")), "{toasts:?}");
     let device = rec
@@ -132,7 +133,7 @@ async fn minecraft_outage_does_not_fall_back_to_a_device_code() {
     fake.knobs().mc_login_status = Some(503);
     let dir = tempfile::tempdir().unwrap();
     let (svc, _) = service(&fake, dir.path(), FakeBrowser::new(Browser::Consent));
-    let err = svc.sign_in_microsoft("en_US").await.unwrap_err();
+    let err = svc.sign_in_microsoft(PageLook::plain("en_US")).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::MinecraftServicesUnavailable);
     assert!(fake.requests("/devicecode").is_empty());
     assert!(svc.snapshot().profiles.is_empty());
@@ -145,7 +146,7 @@ async fn a_second_sign_in_is_busy_and_cancel_stops_the_first() {
     let (svc, _) = service(&fake, dir.path(), FakeBrowser::new(Browser::Idle));
     let first = {
         let svc = svc.clone();
-        tokio::spawn(async move { svc.sign_in_microsoft("en_US").await })
+        tokio::spawn(async move { svc.sign_in_microsoft(PageLook::plain("en_US")).await })
     };
     for _ in 0..200 {
         if svc.auth_state() == AuthState::Browser {
@@ -154,7 +155,7 @@ async fn a_second_sign_in_is_busy_and_cancel_stops_the_first() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(svc.auth_state(), AuthState::Browser);
-    assert_eq!(svc.sign_in_microsoft("en_US").await.unwrap_err().code, ErrorCode::Busy);
+    assert_eq!(svc.sign_in_microsoft(PageLook::plain("en_US")).await.unwrap_err().code, ErrorCode::Busy);
     svc.cancel_sign_in();
     assert_eq!(first.await.unwrap().unwrap_err().code, ErrorCode::Cancelled);
     assert_eq!(svc.auth_state(), AuthState::Idle);

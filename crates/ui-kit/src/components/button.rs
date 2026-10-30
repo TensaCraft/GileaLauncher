@@ -111,7 +111,8 @@ pub fn Button(
 pub enum ActionTone {
     #[default]
     Neutral,
-    Ok,
+    /// A positive action (play, enable, update): the accent.
+    Accent,
     Danger,
     Info,
 }
@@ -120,7 +121,7 @@ impl ActionTone {
     pub fn class(self) -> &'static str {
         match self {
             ActionTone::Neutral => "",
-            ActionTone::Ok => "action--ok",
+            ActionTone::Accent => "action--accent",
             ActionTone::Danger => "action--danger",
             ActionTone::Info => "action--info",
         }
@@ -197,6 +198,7 @@ mod tests {
         assert_eq!(Size::default().class(), "");
         assert_eq!(Size::Sm.class(), "btn--sm");
         assert_eq!(ActionTone::Danger.class(), "action--danger");
+        assert_eq!(ActionTone::Accent.class(), "action--accent");
         assert_eq!(Size::Sm.control_class(), "control--sm");
         assert_eq!(Size::Md.control_class(), "");
         assert_eq!(Size::Lg.control_class(), "control--lg");
@@ -216,6 +218,14 @@ mod tests {
             .unwrap_or_else(|| panic!("no rule {selector}"));
         let body = &css[start..];
         &body[body.find('{').unwrap() + 1..body.find('}').unwrap()]
+    }
+
+    /// A positive action (play, enable, update) and the count on an action take the accent.
+    #[test]
+    fn positive_actions_and_counts_take_the_accent() {
+        let css = include_str!("../../styles/components.css");
+        assert_eq!(rule(css, ".action--accent").trim(), "color: var(--primary);");
+        assert!(rule(css, ".action__badge").contains("background: var(--primary); color: var(--on-accent);"));
     }
 
     /// A dim border lets a dark control read shorter than a bright one beside it: every control

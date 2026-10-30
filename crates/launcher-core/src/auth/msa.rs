@@ -14,7 +14,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
 use super::http::{AuthHttp, FlowError};
-use super::page::callback_page;
+use super::page::{PageLook, callback_page};
 use super::{AuthEndpoints, AuthTimings, DEVICE_GRANT, SCOPE, UrlOpener};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +103,7 @@ impl Loopback {
     pub async fn wait_for_code(
         &self,
         state: &str,
-        lang: &str,
+        look: PageLook<'_>,
         timeout: Duration,
         cancel: &CancellationToken,
     ) -> Result<String, FlowError> {
@@ -115,7 +115,7 @@ impl Loopback {
                 accepted = self.accept() => accepted,
             };
             let Ok(stream) = accepted else { continue };
-            if let Some(outcome) = serve_callback(stream, state, lang).await {
+            if let Some(outcome) = serve_callback(stream, state, look).await {
                 return outcome;
             }
         }
@@ -152,7 +152,11 @@ Cache-Control: no-store\r\nConnection: close\r\n\r\n",
 }
 
 /// `None` — not the callback (answered already), keep waiting.
-async fn serve_callback(mut stream: TcpStream, state: &str, lang: &str) -> Option<Result<String, FlowError>> {
+async fn serve_callback(
+    mut stream: TcpStream,
+    state: &str,
+    look: PageLook<'_>,
+) -> Option<Result<String, FlowError>> {
     let head = read_head(&mut stream).await?;
     let mut request_line = head.lines().next()?.split_whitespace();
     let (method, target) = (request_line.next()?, request_line.next()?);
@@ -169,22 +173,22 @@ async fn serve_callback(mut stream: TcpStream, state: &str, lang: &str) -> Optio
     // Only this sign-in's redirect counts (Microsoft sends the state with an error too): a stale
     // tab, another program or a page's image must not end it.
     if param("state").as_deref() != Some(state) {
-        respond(&mut stream, 400, "Bad Request", &callback_page(lang, Some("invalid_state"))).await;
+        respond(&mut stream, 400, "Bad Request", &callback_page(look, Some("invalid_state"))).await;
         return None;
     }
     let outcome = if let Some(error) = param("error") {
         let description = param("error_description").unwrap_or_else(|| error.clone());
-        respond(&mut stream, 400, "Bad Request", &callback_page(lang, Some(&description))).await;
+        respond(&mut stream, 400, "Bad Request", &callback_page(look, Some(&description))).await;
         if error == "access_denied" || error == "authorization_declined" {
             Err(FlowError::Denied)
         } else {
             Err(FlowError::Failed(format!("microsoft authorization failed: {error}: {description}")))
         }
     } else if let Some(code) = param("code").filter(|c| !c.is_empty()) {
-        respond(&mut stream, 200, "OK", &callback_page(lang, None)).await;
+        respond(&mut stream, 200, "OK", &callback_page(look, None)).await;
         Ok(code)
     } else {
-        respond(&mut stream, 400, "Bad Request", &callback_page(lang, Some("missing code"))).await;
+        respond(&mut stream, 400, "Bad Request", &callback_page(look, Some("missing code"))).await;
         Err(FlowError::Failed("the redirect carried no code".into()))
     };
     Some(outcome)
@@ -252,7 +256,7 @@ pub async fn browser_sign_in(
     ep: &AuthEndpoints,
     client_id: &str,
     opener: &dyn UrlOpener,
-    lang: &str,
+    look: PageLook<'_>,
     timeout: Duration,
     cancel: &CancellationToken,
 ) -> Result<MsTokens, FlowError> {
@@ -264,7 +268,7 @@ pub async fn browser_sign_in(
     if !opener.open(&url) {
         return Err(FlowError::Unavailable("the browser could not be opened".into()));
     }
-    let code = loopback.wait_for_code(&pkce.state, lang, timeout, cancel).await?;
+    let code = loopback.wait_for_code(&pkce.state, look, timeout, cancel).await?;
     exchange_code(http, ep, client_id, &code, &loopback.redirect_uri, &pkce.verifier).await
 }
 

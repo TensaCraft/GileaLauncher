@@ -100,6 +100,7 @@ async fn account_without_minecraft_is_explained() {
 use std::time::Duration;
 
 use launcher_core::auth::msa::{Loopback, browser_sign_in, refresh_tokens};
+use launcher_core::auth::page::PageLook;
 use launcher_core::auth::{AuthEndpoints, NoOpener};
 use support::fake_ms::{Browser, FakeBrowser, GOOD_CODE, visit};
 use tokio_util::sync::CancellationToken;
@@ -110,7 +111,9 @@ async fn wait_in_background(
     loopback: Loopback,
     state: &'static str,
 ) -> tokio::task::JoinHandle<Result<String, FlowError>> {
-    tokio::spawn(async move { loopback.wait_for_code(state, "en_US", WAIT, &CancellationToken::new()).await })
+    tokio::spawn(async move {
+        loopback.wait_for_code(state, PageLook::plain("en_US"), WAIT, &CancellationToken::new()).await
+    })
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -170,12 +173,16 @@ async fn loopback_answers_on_ipv6_localhost_too() {
 #[tokio::test(flavor = "multi_thread")]
 async fn loopback_times_out_and_can_be_cancelled() {
     let loopback = Loopback::bind(0).await.unwrap();
-    let result =
-        loopback.wait_for_code("s", "en_US", Duration::from_millis(100), &CancellationToken::new()).await;
+    let result = loopback
+        .wait_for_code("s", PageLook::plain("en_US"), Duration::from_millis(100), &CancellationToken::new())
+        .await;
     assert_eq!(result, Err(FlowError::Timeout));
     let cancel = CancellationToken::new();
     cancel.cancel();
-    assert_eq!(loopback.wait_for_code("s", "en_US", WAIT, &cancel).await, Err(FlowError::Cancelled));
+    assert_eq!(
+        loopback.wait_for_code("s", PageLook::plain("en_US"), WAIT, &cancel).await,
+        Err(FlowError::Cancelled)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -187,7 +194,7 @@ async fn browser_sign_in_exchanges_the_code_without_a_client_secret() {
         &fake.endpoints(),
         "client",
         browser.as_ref(),
-        "en_US",
+        PageLook::plain("en_US"),
         WAIT,
         &CancellationToken::new(),
     )
@@ -207,16 +214,30 @@ async fn browser_sign_in_exchanges_the_code_without_a_client_secret() {
 #[tokio::test(flavor = "multi_thread")]
 async fn browser_sign_in_is_unavailable_without_a_browser_or_port() {
     let fake = fake_ms::start().await;
-    let no_browser =
-        browser_sign_in(&http(), &fake.endpoints(), "c", &NoOpener, "en_US", WAIT, &CancellationToken::new())
-            .await;
+    let no_browser = browser_sign_in(
+        &http(),
+        &fake.endpoints(),
+        "c",
+        &NoOpener,
+        PageLook::plain("en_US"),
+        WAIT,
+        &CancellationToken::new(),
+    )
+    .await;
     assert!(matches!(no_browser, Err(FlowError::Unavailable(_))), "{no_browser:?}");
     let busy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoints = AuthEndpoints { redirect_port: busy.local_addr().unwrap().port(), ..fake.endpoints() };
     let browser = FakeBrowser::new(Browser::Consent);
-    let no_port =
-        browser_sign_in(&http(), &endpoints, "c", browser.as_ref(), "en_US", WAIT, &CancellationToken::new())
-            .await;
+    let no_port = browser_sign_in(
+        &http(),
+        &endpoints,
+        "c",
+        browser.as_ref(),
+        PageLook::plain("en_US"),
+        WAIT,
+        &CancellationToken::new(),
+    )
+    .await;
     assert!(matches!(no_port, Err(FlowError::Unavailable(_))), "{no_port:?}");
 }
 
@@ -229,7 +250,7 @@ async fn denied_consent_ends_the_browser_flow() {
         &fake.endpoints(),
         "c",
         browser.as_ref(),
-        "en_US",
+        PageLook::plain("en_US"),
         WAIT,
         &CancellationToken::new(),
     )

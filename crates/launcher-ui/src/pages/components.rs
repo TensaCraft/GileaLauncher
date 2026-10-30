@@ -209,7 +209,7 @@ pub fn ComponentsPage() -> impl IntoView {
                 <div class="build-row__actions">
                     <IconAction
                         icon="fact_check"
-                        tone=ActionTone::Ok
+                        tone=ActionTone::Accent
                         title=t("minecraft_components_verify")
                         loading=busy
                         on_click=Callback::new(move |()| {

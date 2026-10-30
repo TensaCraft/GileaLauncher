@@ -238,6 +238,15 @@ impl Resizable for WebviewWindow {
     }
 }
 
+/// Paints the window's own background in the page's (`--s-app` of `accent`): it shows before the
+/// page is drawn and at the edges while the window is resized.
+pub fn apply_background(window: &WebviewWindow, accent: &str) {
+    let (r, g, b) = launcher_shared::appearance::window_background(accent);
+    if let Err(e) = window.set_background_color(Some(tauri::window::Color(r, g, b, 255))) {
+        tracing::debug!("The window background stays the default: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;

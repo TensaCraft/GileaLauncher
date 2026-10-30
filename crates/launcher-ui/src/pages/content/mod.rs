@@ -329,7 +329,7 @@ pub fn ContentPage(key: String) -> impl IntoView {
         view! {
             <IconAction
                 icon="play_arrow"
-                tone=ActionTone::Ok
+                tone=ActionTone::Accent
                 title=t("play")
                 // Being started: Play waits, as on Home.
                 loading=Signal::derive(move || {

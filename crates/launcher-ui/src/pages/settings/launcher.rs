@@ -85,7 +85,7 @@ pub fn LauncherSection() -> impl IntoView {
                     view! {
                         <IconAction
                             icon="download"
-                            tone=ActionTone::Ok
+                            tone=ActionTone::Accent
                             compact=true
                             title=t("update_install")
                             on_click=Callback::new(move |()| updates.download())

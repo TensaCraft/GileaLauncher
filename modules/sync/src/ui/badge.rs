@@ -23,7 +23,7 @@ pub fn SyncBadge(key: String) -> impl IntoView {
             let tip = i18n.tp("sync_badge_tip", &[("groups", names.join(", "))]);
             view! {
                 <span class="sync-mark" role="img" aria-label=tip.clone() data-tip=tip data-tip-side="top">
-                    <Icon name="sync" />
+                    <Icon name="sync_lock" />
                 </span>
             }
         })

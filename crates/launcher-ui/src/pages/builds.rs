@@ -7,7 +7,7 @@ use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
 use ui_kit::reorder::{Reorder, Reorderable};
-use ui_kit::{ActionTone, Button, EmptyState, Icon, IconAction, NudgeSide, Size, Tag, TagTone, Variant};
+use ui_kit::{ActionTone, Button, EmptyState, Icon, IconAction, NudgeSide, Size, Variant};
 
 use crate::builds::actions::use_build_actions;
 use crate::builds::dialogs::{use_build_dialogs, use_build_menu};
@@ -113,7 +113,7 @@ fn BuildRow(item: BuildDto, update_pack: Callback<(ProviderInfo, ModpackBuild)>)
         Some(view! {
             <IconAction
                 icon="downloading"
-                tone=ActionTone::Ok
+                tone=ActionTone::Accent
                 title=Signal::derive(move || i18n.tp("modpack_update_to", &[("version", version.clone())]))
                 loading=Signal::derive(move || updates().updating(&key))
                 on_click=Callback::new(move |()| update_pack.run((provider.clone(), pack.clone())))
@@ -183,9 +183,9 @@ fn BuildRow(item: BuildDto, update_pack: Callback<(ProviderInfo, ModpackBuild)>)
                 <div class="build-row__name">{build.name.clone()}</div>
                 <div class="build-row__sub">{build_subtitle(&build)}</div>
             </div>
-            <crate::modules::BuildBadges key=build.key.clone() />
-            {running.then(|| view! { <Tag tone=TagTone::Vanilla>{move || i18n.t("version_running_badge")}</Tag> })}
             <div class="build-row__actions">
+                // The modules' marks first, as squares of the buttons' size.
+                <crate::modules::BuildBadges key=build.key.clone() />
                 {pack_update}
                 // Named, not just an icon: the way to the build's mods (the row opens the same). First of the
                 // permanent actions: its hint lies over the row's empty middle, not over Play.
@@ -201,7 +201,7 @@ fn BuildRow(item: BuildDto, update_pack: Callback<(ProviderInfo, ModpackBuild)>)
                 </span>
                 <IconAction
                     icon=icon
-                    tone=if running { ActionTone::Danger } else { ActionTone::Ok }
+                    tone=if running { ActionTone::Danger } else { ActionTone::Accent }
                     title=t(label)
                     loading=starting
                     on_click=main

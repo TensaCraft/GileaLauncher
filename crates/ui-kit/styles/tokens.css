@@ -1,4 +1,9 @@
+/* The design's only colours: every other stylesheet and inline style reads these variables
+   (`cargo xtask check` refuses a colour named by value anywhere else). The accent and the
+   neutrals are this file's defaults; the window replaces them with the palette of the chosen
+   accent (`launcher_shared::appearance::palette`). */
 :root {
+  /* ---------- the accent (set by the chosen accent) ---------- */
   --primary: #17c3a2;
   --primary-hi: #3fe0c0;
   --primary-lo: #0f8d77;
@@ -14,16 +19,16 @@
   /* The hue and the share of colour of the design's dark tints: hsl(var(--tint-h) …). */
   --tint-h: 168.5;
   --tint-s: 1;
-  --ok: #45c27e;
-  --danger: #f0524a;
-  --danger-text: #ff8c85;
-  --warn: #f2b544;
-  --info: #2db8da;
 
+  /* ---------- the neutrals (tinted by the chosen accent) ---------- */
   --text: #e6f6f2;
   --text-2: #bed7d2;
   --text-3: #8da7a2;
   --text-4: #59706c;
+  /* --text-3 as r, g, b: the quiet fills and edges. */
+  --text-3-rgb: 141, 167, 162;
+  /* Text in a code editor. */
+  --text-code: #cfe9e3;
 
   --s-app: #0b1412;
   --s-shell: rgba(10, 19, 17, 0.38);
@@ -31,6 +36,10 @@
   --s-sec: rgba(13, 25, 22, 0.86);
   --s-input: rgba(7, 14, 12, 0.72);
   --s-pop: rgba(12, 22, 20, 0.97);
+  /* A switch's knob while it is off. */
+  --s-knob: #b9cfca;
+  /* The darkest shade as r, g, b: under pictures, captions and overlays. */
+  --s-scrim-rgb: 3, 8, 7;
 
   --line: rgba(var(--accent-light-rgb), 0.09);
   --line-2: rgba(var(--accent-light-rgb), 0.16);
@@ -38,6 +47,91 @@
   /* The edge of every control that sits in a row (buttons, actions, fields, segments). */
   --line-ctl: rgba(var(--accent-light-rgb), 0.26);
 
+  /* ---------- the dark tints, derived here from the accent's hue ---------- */
+  /* Ink on an accent fill (the primary button, a checked box, a done step, a nudge). */
+  --on-accent: hsl(var(--tint-h) calc(var(--tint-s) * 84.6%) 7.6%);
+  --on-accent-hover: hsl(var(--tint-h) calc(var(--tint-s) * 84.6%) 7.6% / 0.12);
+  /* Behind the whole window. */
+  --fill-deep: hsl(var(--tint-h) calc(var(--tint-s) * 37.5%) 3.1%);
+  --fill-btn: hsl(var(--tint-h) calc(var(--tint-s) * 29%) 12.2% / 0.94);
+  --fill-ghost: hsl(var(--tint-h) calc(var(--tint-s) * 29.6%) 10.6% / 0.45);
+  /* An icon button. */
+  --fill-action: hsl(var(--tint-h) calc(var(--tint-s) * 33.3%) 4.1% / 0.8);
+  /* An operation's card in the operations list. */
+  --fill-card: hsl(var(--tint-h) calc(var(--tint-s) * 32%) 9.8% / 0.7);
+  /* A wizard's bar of steps and its foot. */
+  --fill-bar: hsl(var(--tint-h) calc(var(--tint-s) * 41.2%) 3.3% / 0.35);
+  --fill-foot: hsl(var(--tint-h) calc(var(--tint-s) * 36.8%) 3.7% / 0.55);
+  --fill-tabs: hsl(var(--tint-h) calc(var(--tint-s) * 28.2%) 7.6% / 0.35);
+
+  /* ---------- plain light and shade ---------- */
+  /* Shadows and the wells under pictures. */
+  --shade-rgb: 0, 0, 0;
+  /* Highlights, and ink on a strong colour (a red close button). */
+  --light: #ffffff;
+  --light-rgb: 255, 255, 255;
+
+  /* ---------- states: the colour is the meaning, whatever the accent ---------- */
+  --ok: #45c27e;
+  --ok-rgb: 69, 194, 126;
+  --ok-text: #8fd9a8;
+  --warn: #f2b544;
+  --warn-rgb: 242, 181, 68;
+  --warn-text: #f2c46a;
+  --danger: #f0524a;
+  --danger-rgb: 240, 82, 74;
+  --danger-text: #ff8c85;
+  --info: #2db8da;
+  --info-rgb: 45, 184, 218;
+  --info-text: #86cfe6;
+
+  /* ---------- roles: which colour a part of the design takes ---------- */
+  /* A running build: the accent. */
+  --running: var(--primary);
+  --running-rgb: var(--accent-rgb);
+
+  /* ---------- identities: the colour says what a thing is ---------- */
+  /* Loaders and version kinds, as tags, chips and marks. */
+  --loader-vanilla-rgb: 69, 194, 126;
+  --loader-vanilla-text: #8fd9a8;
+  --loader-fabric-rgb: 219, 190, 120;
+  --loader-fabric-text: #e7ce93;
+  --loader-forge-rgb: 45, 184, 218;
+  --loader-forge-text: #86cfe6;
+  --loader-neoforge-rgb: 245, 145, 66;
+  --loader-neoforge-text: #f7b27a;
+  --loader-quilt-rgb: 170, 130, 240;
+  --loader-quilt-text: #cdb3f4;
+  --loader-snapshot-rgb: 242, 181, 68;
+  --loader-snapshot-text: #f2c46a;
+  --loader-beta-rgb: 255, 112, 67;
+  --loader-beta-text: #ff9d6b;
+  /* The kinds of content a build holds. */
+  --kind-mods: #86cfe6;
+  --kind-resourcepacks: #cdb3f4;
+  --kind-shaders: #e7ce93;
+  /* The kinds of place a game was played in. */
+  --kind-server-rgb: var(--info-rgb);
+  --kind-server-text: var(--info-text);
+  --kind-world-rgb: var(--ok-rgb);
+  --kind-world-text: var(--ok-text);
+  /* Other makers' colours. */
+  --brand-modrinth: #1bd96a;
+  --brand-curseforge: #f16436;
+  /* Minecraft's grey: a server's message of the day without colours of its own. */
+  --mc-gray: #aaaaaa;
+  /* The launcher's cube, in the "About" footer. */
+  --logo-edge: rgba(6, 32, 15, 0.6);
+  --logo-top: #8fe9b2;
+  --logo-left: #44b06c;
+  --logo-right: #237a45;
+  --logo-floor: #368d5a;
+  --logo-inner-left: #2a7d4a;
+  --logo-inner-right: #195a33;
+  /* The swatch of a colour of one's own: every ready accent around a circle. */
+  --spectrum: #f0506e, #f2a93b, #5bc236, #34cfe6, #3d9cf5, #9b6cf6, #f06aa8, #f0506e;
+
+  /* ---------- shape, size, type and motion ---------- */
   --r-xs: 3px;
   --r-sm: 6px;
   --r-md: 8px;
@@ -54,7 +148,7 @@
 
   --ring: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
   --cut: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
-  --shadow-pop: 0 18px 40px rgba(0, 0, 0, 0.55);
+  --shadow-pop: 0 18px 40px rgba(var(--shade-rgb), 0.55);
   /* The background picture follows the accent: greyed by the filter, coloured by the tint over it. */
   --bg-filter: none;
   --bg-tint: transparent;

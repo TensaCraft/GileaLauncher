@@ -73,7 +73,7 @@ pub fn KitPage() -> impl IntoView {
                     <div class="wrap">
                         <Button icon="refresh" />
                         <IconAction icon="play_arrow" title=s("Грати") />
-                        <IconAction icon="power_settings_new" tone=ActionTone::Ok title=s("Вимкнути") />
+                        <IconAction icon="power_settings_new" tone=ActionTone::Accent title=s("Вимкнути") />
                         <IconAction icon="delete" tone=ActionTone::Danger title=s("Видалити") />
                         <Tooltip text=s("Підказка праворуч")><IconAction icon="folder" title=s("Тека") /></Tooltip>
                     </div>

@@ -12,8 +12,7 @@ use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use ui_kit::i18n::{I18nCtx, use_i18n};
 use ui_kit::{
-    Button, Dialog, DialogFooter, Icon, IconAction, Select, SelectOption, SettingRow, Size, Tag, TagTone,
-    Variant,
+    Button, Dialog, DialogFooter, Icon, IconAction, Select, SelectOption, SettingRow, Size, Variant,
 };
 
 use crate::builds::dialogs::use_build_menu;
@@ -267,7 +266,6 @@ fn RecentRow(dto: BuildDto, recent: RecentBuild) -> impl IntoView {
                 <div class="build-row__sub">{build_subtitle(&build)}</div>
                 <div class="recent-row__when">
                     {move || played(i18n, played_ms)}
-                    {running.then(|| view! { <Tag tone=TagTone::Vanilla>{move || i18n.t("version_running_badge")}</Tag> })}
                 </div>
             </div>
             {tile}

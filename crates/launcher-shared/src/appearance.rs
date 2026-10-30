@@ -152,7 +152,7 @@ fn triplet((r, g, b): (u8, u8, u8)) -> String {
 type Neutral = (&'static str, (u8, u8, u8), Option<&'static str>);
 
 /// Today's neutrals (the default accent's).
-const NEUTRALS: [Neutral; 10] = [
+const NEUTRALS: [Neutral; 12] = [
     ("--s-app", (11, 20, 18), None),
     ("--s-shell", (10, 19, 17), Some("0.38")),
     ("--s-row", (15, 28, 25), Some("0.84")),
@@ -163,7 +163,13 @@ const NEUTRALS: [Neutral; 10] = [
     ("--text-2", (190, 215, 210), None),
     ("--text-3", (141, 167, 162), None),
     ("--text-4", (89, 112, 108), None),
+    ("--text-code", (207, 233, 227), None),
+    ("--s-knob", (185, 207, 202), None),
 ];
+
+/// Neutrals the CSS reads as r, g, b (`rgba(var(--x-rgb), a)`): name and today's colour.
+const NEUTRAL_TRIPLETS: [(&str, (u8, u8, u8)); 2] =
+    [("--text-3-rgb", (141, 167, 162)), ("--s-scrim-rgb", (3, 8, 7))];
 
 /// The edges, in the pale accent: name and alpha.
 const LINES: [(&str, &str); 4] =
@@ -229,9 +235,13 @@ pub fn palette(accent: &str) -> Vec<(&'static str, String)> {
         ("--tint-h", format!("{:.1}", (base.h + shift).rem_euclid(360.0))),
         ("--tint-s", if colour >= 1.0 { "1".to_string() } else { format!("{colour:.2}") }),
     ];
-    for (name, today, alpha) in NEUTRALS {
+    // A neutral of today takes the accent's hue and its share of colour, and keeps its light.
+    let tint = |today| {
         let n = to_hsl(today);
-        let tinted = to_rgb(Hsl { h: n.h + shift, s: n.s * colour, l: n.l });
+        to_rgb(Hsl { h: n.h + shift, s: n.s * colour, l: n.l })
+    };
+    for (name, today, alpha) in NEUTRALS {
+        let tinted = tint(today);
         vars.push((
             name,
             match alpha {
@@ -239,6 +249,9 @@ pub fn palette(accent: &str) -> Vec<(&'static str, String)> {
                 Some(alpha) => format!("rgba({}, {alpha})", triplet(tinted)),
             },
         ));
+    }
+    for (name, today) in NEUTRAL_TRIPLETS {
+        vars.push((name, triplet(tint(today))));
     }
     for (name, alpha) in LINES {
         vars.push((name, format!("rgba({}, {alpha})", triplet(light))));
@@ -255,6 +268,16 @@ pub fn palette(accent: &str) -> Vec<(&'static str, String)> {
         vars.push(("--bg-tint", format!("hsl({:.0} {saturation:.0}% 50%)", a.h)));
     }
     vars
+}
+
+/// The page's background (`--s-app`) under `accent`, as r, g, b: the window shows it before the
+/// page is drawn.
+pub fn window_background(accent: &str) -> (u8, u8, u8) {
+    palette(accent)
+        .into_iter()
+        .find(|(name, _)| *name == "--s-app")
+        .and_then(|(_, hex)| parse_hex(&hex))
+        .unwrap_or((11, 20, 18))
 }
 
 /// The palette of `accent` and the stacks of `font`: every property the window sets.
@@ -322,6 +345,10 @@ mod tests {
         close(&p["--primary-top"], "#22d6b2");
         close(&p["--primary-bottom"], "#13b494");
         close(&p["--primary-top-hover"], "#34e3c0");
+        close(&p["--text-code"], "#cfe9e3");
+        close(&p["--s-knob"], "#b9cfca");
+        assert_eq!(p["--text-3-rgb"], "141, 167, 162");
+        assert_eq!(p["--s-scrim-rgb"], "3, 8, 7");
         assert_eq!((p["--tint-h"].as_str(), p["--tint-s"].as_str()), ("168.5", "1"));
         assert_eq!(p["--accent-rgb"], "23, 195, 162");
         assert_eq!(p["--ring"], "0 0 0 3px rgba(23, 195, 162, 0.18)");
@@ -338,6 +365,20 @@ mod tests {
         assert!((app.l - today.l).abs() < 0.01);
         assert_eq!(p["--bg-filter"], "grayscale(1)");
         assert_eq!(hsl_hue(&p["--bg-tint"]).round(), accent.h.round(), "{}", p["--bg-tint"]);
+    }
+
+    #[test]
+    fn the_shades_under_pictures_and_the_quiet_fills_take_the_accent() {
+        let accent = to_hsl(parse_hex("#f0506e").unwrap());
+        let p = map(palette("#f0506e"));
+        for name in ["--text-3-rgb", "--s-scrim-rgb"] {
+            let rgb = rgb_of(&format!("rgba({}, 1)", p[name]));
+            assert!((to_hsl(rgb).h - accent.h).abs() < 6.0, "{name} = {}", p[name]);
+        }
+        assert_eq!(p["--text-3-rgb"], {
+            let (r, g, b) = rgb_of(&p["--text-3"]);
+            format!("{r}, {g}, {b}")
+        });
     }
 
     #[test]
@@ -412,6 +453,15 @@ mod tests {
             DEFAULT_ACCENT,
             "a bright accent stays as chosen"
         );
+    }
+
+    /// The window's own background, under the page before it is drawn, is the page's.
+    #[test]
+    fn the_window_background_is_the_page_background() {
+        assert_eq!(window_background(DEFAULT_ACCENT), (11, 20, 18), "tauri.conf.json's #0B1412");
+        for accent in ["#3d9cf5", "#f0506e", "#c0c0c0", "teal"] {
+            assert_eq!(window_background(accent), rgb_of(&map(palette(accent))["--s-app"]), "{accent}");
+        }
     }
 
     #[test]

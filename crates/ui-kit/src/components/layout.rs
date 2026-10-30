@@ -168,7 +168,7 @@ mod tests {
     fn a_dangerous_section_shows_its_icon_like_a_dangerous_dialog() {
         let css = include_str!("../../styles/components.css");
         assert!(css.contains(
-            ".section__icon--danger { background: rgba(240, 82, 74, 0.12); border-color: rgba(240, 82, 74, 0.35); color: var(--danger); }"
+            ".section__icon--danger { background: rgba(var(--danger-rgb), 0.12); border-color: rgba(var(--danger-rgb), 0.35); color: var(--danger); }"
         ));
     }
 
@@ -211,15 +211,15 @@ mod tests {
     #[test]
     fn chips_take_their_loader_colour() {
         let css = include_str!("../../styles/components.css");
-        for (tone, rgb) in [
-            (crate::TagTone::Vanilla, "69, 194, 126"),
-            (crate::TagTone::Fabric, "219, 190, 120"),
-            (crate::TagTone::Quilt, "170, 130, 240"),
-            (crate::TagTone::Forge, "45, 184, 218"),
-            (crate::TagTone::NeoForge, "245, 145, 66"),
+        for (tone, loader) in [
+            (crate::TagTone::Vanilla, "vanilla"),
+            (crate::TagTone::Fabric, "fabric"),
+            (crate::TagTone::Quilt, "quilt"),
+            (crate::TagTone::Forge, "forge"),
+            (crate::TagTone::NeoForge, "neoforge"),
         ] {
             let chip = rule(css, &format!(".{}", tone.chip_class()));
-            assert!(chip.contains(&format!("--chip: {rgb}")), "{tone:?}: {chip}");
+            assert!(chip.contains(&format!("--chip: var(--loader-{loader}-rgb)")), "{tone:?}: {chip}");
         }
         assert!(rule(css, ".chip.is-active").contains("rgba(var(--chip), 0.45)"));
     }

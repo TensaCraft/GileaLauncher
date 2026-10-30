@@ -10,6 +10,8 @@ mod release;
 mod secrets;
 mod sweep;
 mod templates;
+#[cfg(test)]
+mod theme;
 
 use std::path::PathBuf;
 
