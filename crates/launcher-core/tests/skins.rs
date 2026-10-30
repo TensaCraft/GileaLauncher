@@ -191,26 +191,26 @@ async fn forget_asks_mojang_again() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_texture_by_url_is_fetched_once() {
+async fn a_worn_skin_file_is_fetched_once_and_only_from_mojang() {
     let fake = known().await;
     let dir = tempfile::tempdir().unwrap();
     let svc = service(config(&fake, dir.path()));
-    let slim = svc.texture_by_url(&fake.texture_url("steve"), true).await.unwrap();
-    let classic = svc.texture_by_url(&fake.texture_url("steve"), false).await.unwrap();
+    let slim = svc.wear(&steve(), &fake.texture_url("steve"), true).await.unwrap();
+    let classic = svc.wear(&steve(), &fake.texture_url("steve"), false).await.unwrap();
     assert_eq!(slim.png, normalised(&skin_png(7, false)));
     assert_eq!(slim.hash, classic.hash);
     assert!(slim.slim && !classic.slim, "the model is the caller's");
     assert!(slim.official);
     assert_eq!(fake.requests("/textures/steve").len(), 1);
     let again = service(config(&fake, dir.path()));
-    assert_eq!(again.texture_by_url(&fake.texture_url("steve"), false).await.unwrap(), classic);
+    assert_eq!(again.wear(&steve(), &fake.texture_url("steve"), false).await.unwrap(), classic);
     assert_eq!(fake.requests("/textures/steve").len(), 1, "kept on disk");
 
-    let elsewhere = svc.texture_by_url("https://example.com/skin.png", false).await;
+    let elsewhere = svc.wear(&steve(), "https://example.com/skin.png", false).await;
     assert_eq!(elsewhere.unwrap_err().code, ErrorCode::InvalidInput, "only Mojang's texture hosts");
-    assert!(svc.texture_by_url(&fake.texture_url("missing"), false).await.is_err());
+    assert!(svc.wear(&steve(), &fake.texture_url("missing"), false).await.is_err());
     fake.add_texture("broken", b"not a png".to_vec());
-    assert!(svc.texture_by_url(&fake.texture_url("broken"), false).await.is_err());
+    assert!(svc.wear(&steve(), &fake.texture_url("broken"), false).await.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -296,15 +296,6 @@ async fn a_worn_skin_is_the_player_s_at_once() {
     assert_eq!(svc.texture(&steve()).await.unwrap(), worn);
     assert_eq!(svc.head(&steve(), 8).await, Some(Avatar::Png(render::head(&worn.png, 8))));
     assert_eq!(fake.requests(&format!("/session/{STEVE_ID}")).len(), 1, "the session server is not asked");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_front_is_drawn_on_the_player_s_model() {
-    let fake = known().await;
-    let dir = tempfile::tempdir().unwrap();
-    let svc = service(config(&fake, dir.path()));
-    let front = svc.front(&Player::named("Alex")).await.unwrap();
-    assert_eq!(front, render::front(&normalised(&skin_png(5, true)), true));
 }
 
 #[tokio::test(flavor = "multi_thread")]

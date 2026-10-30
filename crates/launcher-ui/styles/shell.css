@@ -561,8 +561,6 @@
 
 /* Skins and capes (module `skins`): the glass bar, the figure on the left, the cards on the right. */
 .skins-page { display: flex; flex-direction: column; gap: 12px; }
-.skins-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 6px; background: var(--s-sec); border: 1px solid var(--line); border-radius: var(--r-lg); }
-.skins-bar .chips { flex: 1; min-width: 0; }
 .skins-account { display: flex; align-items: center; gap: 8px; }
 .skins-account__head { width: 36px; height: 36px; flex: none; display: grid; place-items: center; overflow: hidden; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--s-row); color: var(--text-3); }
 .skins-account__head img { width: 100%; height: 100%; image-rendering: pixelated; }

@@ -562,12 +562,6 @@ impl SkinService {
         Ok(SkinTexture { png, slim, official: true, hash })
     }
 
-    /// The skin file at `url` (one of Mojang's texture hosts), on the model `slim`; fetched once.
-    pub async fn texture_by_url(&self, url: &str, slim: bool) -> AppResult<SkinTexture> {
-        let (_, png, hash) = self.fetch_texture(url).await?;
-        Ok(SkinTexture { png, slim, official: true, hash })
-    }
-
     /// The skin file at a web address the player gave (any host, wherever it redirects), its
     /// model guessed; asked anew each time.
     pub async fn at_link(&self, url: &str) -> AppResult<SkinTexture> {
@@ -642,12 +636,6 @@ impl SkinService {
         }
         let bytes = response.bytes().await.ok()?;
         (!bytes.is_empty()).then(|| bytes.to_vec())
-    }
-
-    /// The front of `player`'s body (`render::front`).
-    pub async fn front(&self, player: &Player) -> Option<Vec<u8>> {
-        let texture = self.texture(player).await?;
-        Some(render::front(&texture.png, texture.slim))
     }
 
     /// Forgets what `player` was seen wearing (their skin changed), by UUID and by nickname: the

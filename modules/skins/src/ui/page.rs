@@ -401,7 +401,7 @@ pub fn SkinsPage() -> impl IntoView {
                 }
                 .into_any(),
                 Some(true) => view! {
-                    <nav class="skins-bar">
+                    <nav class="content__nav">
                         <ChipTabs chips=chips.clone() active=tab />
                         <AccountSwitch
                             accounts=Signal::derive(move || accounts.get().unwrap_or_default())
