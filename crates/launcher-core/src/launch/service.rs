@@ -381,10 +381,15 @@ impl LaunchService {
         let identity = identity?;
         // An account on another auth server: the game reaches it through authlib-injector.
         let agent_jar = match identity.agent {
-            Some(_) => Some(
-                crate::auth::injector::ensure_jar(&d.downloader, &d.mc_dir, &crate::auth::injector::pinned())
-                    .await?,
-            ),
+            Some(_) => {
+                let jar = crate::auth::injector::ensure_jar(
+                    &d.downloader,
+                    &d.mc_dir,
+                    &crate::auth::injector::pinned(),
+                )
+                .await?;
+                Some(crate::auth::injector::usable_path(&jar)?)
+            }
             None => None,
         };
         let installed = installed.map_err(|e| {

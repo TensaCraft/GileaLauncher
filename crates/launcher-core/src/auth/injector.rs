@@ -56,6 +56,26 @@ pub async fn ensure_jar(downloader: &Downloader, dir: &Path, artifact: &Artifact
     Err(last.unwrap_or_else(|| AppError::new(ErrorCode::DownloadFailed, "authlib-injector has no address")))
 }
 
+/// Where the game can load `jar` from: the JVM reads `-javaagent:<jar>=<options>` up to the first
+/// `=`, so a jar whose path has one is handed over from a copy in the temporary folder.
+pub fn usable_path(jar: &Path) -> AppResult<PathBuf> {
+    if !jar.to_string_lossy().contains('=') {
+        return Ok(jar.to_path_buf());
+    }
+    let name = jar.file_name().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("authlib-injector.jar"));
+    let copy = std::env::temp_dir().join("launcher-agents").join(name);
+    if copy.to_string_lossy().contains('=') {
+        return Err(AppError::new(
+            ErrorCode::Io,
+            format!("the agent's path and the temporary folder both have '=': {}", jar.display()),
+        ));
+    }
+    let io = |e: std::io::Error| AppError::new(ErrorCode::Io, format!("{}: {e}", copy.display()));
+    std::fs::create_dir_all(copy.parent().unwrap_or(Path::new("."))).map_err(io)?;
+    std::fs::copy(jar, &copy).map_err(io)?;
+    Ok(copy)
+}
+
 /// The JVM arguments that load the agent for `server`, its metadata handed over so the game
 /// starts without asking the server.
 pub fn agent_arguments(jar: &Path, server: &AgentServer) -> Vec<String> {

@@ -68,3 +68,26 @@ async fn a_second_address_is_tried_and_a_wrong_file_is_refused() {
     let err = injector::ensure_jar(&downloader(), other.path(), &wrong).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::IntegrityMismatch);
 }
+
+/// The JVM reads `-javaagent:<jar>=<options>` up to the first `=`: an agent in a folder whose path
+/// has one is handed over from a copy whose path has none.
+#[test]
+fn an_agent_under_a_path_with_an_equals_sign_is_handed_over_from_a_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = dir.path().join("agents").join("agent.jar");
+    std::fs::create_dir_all(plain.parent().unwrap()).unwrap();
+    std::fs::write(&plain, b"jar").unwrap();
+    assert_eq!(injector::usable_path(&plain).unwrap(), plain, "a path without one is used as it is");
+
+    let odd = dir.path().join("mine=craft").join("agents").join("agent.jar");
+    std::fs::create_dir_all(odd.parent().unwrap()).unwrap();
+    std::fs::write(&odd, b"jar").unwrap();
+    let usable = injector::usable_path(&odd).unwrap();
+    assert!(!usable.to_string_lossy().contains('='), "{}", usable.display());
+    assert_eq!(std::fs::read(&usable).unwrap(), b"jar");
+    let args = injector::agent_arguments(
+        &usable,
+        &AgentServer { api_root: "https://ely.by/api/".into(), metadata: "{}".into() },
+    );
+    assert_eq!(args[0].matches('=').count(), 1, "{}", args[0]);
+}
