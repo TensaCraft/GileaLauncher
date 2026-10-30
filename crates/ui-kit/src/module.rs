@@ -48,6 +48,15 @@ pub struct ModuleSection {
     pub view: fn() -> AnyView,
 }
 
+/// A block a module puts inside a section of the launcher's settings (`inside`: the section's id),
+/// under the section's own blocks; it has no menu item of its own.
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleSettingsBlock {
+    pub module: &'static str,
+    pub inside: &'static str,
+    pub view: fn() -> AnyView,
+}
+
 /// A switch a module adds to deleting a build (off by default); when on, the module's `command`
 /// runs with `{"key": <build key>}` before the build goes.
 #[derive(Debug, Clone, Copy)]
@@ -219,6 +228,11 @@ pub trait UiModule: 'static {
 
     /// Sections of the launcher's settings.
     fn settings_sections(&self) -> Vec<ModuleSection> {
+        Vec::new()
+    }
+
+    /// Blocks inside sections of the launcher's settings.
+    fn settings_blocks(&self) -> Vec<ModuleSettingsBlock> {
         Vec::new()
     }
 

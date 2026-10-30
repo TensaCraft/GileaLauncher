@@ -18,6 +18,9 @@ pub const IDENTIFIER: &str = or(option_env!("LAUNCHER_IDENTIFIER"), "com.gileala
 pub const EDITION: &str = or(option_env!("LAUNCHER_EDITION"), "standard");
 pub const SUPPORT_URL: &str =
     or(option_env!("LAUNCHER_SUPPORT_URL"), "https://discord.com/invite/mftAjQA4Pp");
+/// The launcher's source code, which «Про програму» opens; empty means no link.
+pub const SOURCE_URL: &str =
+    or(option_env!("LAUNCHER_SOURCE_URL"), "https://github.com/TensaCraft/GileaLauncher");
 /// Where bugs and suggestions go; empty means nowhere.
 pub const ISSUES_URL: &str =
     or(option_env!("LAUNCHER_ISSUES_URL"), "https://github.com/TensaCraft/GileaLauncher/issues");

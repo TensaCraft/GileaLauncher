@@ -1,5 +1,5 @@
-//! The server builds module's UI: cards on Home for the server builds not installed yet, a
-//! settings section with the Home switch, "Force sync" in a server build's menu, and a warning on
+//! The server builds module's UI: cards on Home for the server builds not installed yet, the Home
+//! switch in «Інтерфейс» among Home's other settings, "Force sync" in a server build's menu, and a warning on
 //! a server build's provider tabs that what is added to the server's folders goes at its next sync.
 
 mod home;
@@ -8,7 +8,7 @@ mod settings;
 use launcher_shared::BuildDto;
 use leptos::prelude::*;
 use ui_kit::module::{
-    BuildActionRun, ModuleBuildAction, ModuleContentNotice, ModuleHomeCards, ModuleSection, UiModule,
+    BuildActionRun, ModuleBuildAction, ModuleContentNotice, ModuleHomeCards, ModuleSettingsBlock, UiModule,
 };
 
 use crate::CLIENT;
@@ -29,13 +29,10 @@ impl UiModule for TensaModuleUi {
         vec![ModuleHomeCards { module: crate::ID, view: || view! { <home::ServerBuildCards /> }.into_any() }]
     }
 
-    fn settings_sections(&self) -> Vec<ModuleSection> {
-        vec![ModuleSection {
+    fn settings_blocks(&self) -> Vec<ModuleSettingsBlock> {
+        vec![ModuleSettingsBlock {
             module: crate::ID,
-            id: "tensa",
-            icon: "rocket_launch",
-            label: "settings_tab_tensa",
-            after: "interface",
+            inside: "interface",
             view: || view! { <settings::ServerBuildsSettings /> }.into_any(),
         }]
     }
@@ -97,13 +94,15 @@ mod tests {
     }
 
     #[test]
-    fn the_module_adds_home_cards_a_section_and_a_menu_action() {
+    fn the_module_adds_home_cards_an_interface_block_and_a_menu_action() {
         let ui = TensaModuleUi;
         assert_eq!(ui.home_cards().iter().map(|c| c.module).collect::<Vec<_>>(), [crate::ID]);
-        let sections = ui.settings_sections();
+        // Its one switch is about Home, so it sits with Home's settings (owner, 2026-10-30).
+        assert!(ui.settings_sections().is_empty(), "no menu item of its own");
+        let blocks = ui.settings_blocks();
         assert_eq!(
-            sections.iter().map(|s| (s.id, s.label, s.after)).collect::<Vec<_>>(),
-            [("tensa", "settings_tab_tensa", "interface")]
+            blocks.iter().map(|b| (b.module, b.inside)).collect::<Vec<_>>(),
+            [(crate::ID, "interface")]
         );
         let actions = ui.build_actions();
         assert_eq!(
@@ -149,11 +148,14 @@ mod tests {
     }
 
     #[test]
-    fn the_settings_section_is_named_after_the_module() {
-        // The module's own section: everything Tensa has to set lives there.
-        for raw in [include_str!("../../locales/uk_UA.json"), include_str!("../../locales/en_US.json")] {
+    fn the_interface_block_is_named_for_what_it_sets() {
+        for (raw, title) in [
+            (include_str!("../../locales/uk_UA.json"), "Серверні збірки"),
+            (include_str!("../../locales/en_US.json"), "Server builds"),
+        ] {
             let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(raw).unwrap();
-            assert_eq!(map["settings_tab_tensa"], "Tensa");
+            assert_eq!(map["tensa_settings_title"], title);
+            assert!(!map.contains_key("settings_tab_tensa"), "no menu item, no label");
         }
     }
 }

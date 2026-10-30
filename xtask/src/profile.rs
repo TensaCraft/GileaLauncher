@@ -33,6 +33,9 @@ struct Branding {
     identifier: String,
     #[serde(default)]
     support_url: String,
+    /// The launcher's source code («Про програму» links it).
+    #[serde(default)]
+    source_url: String,
     /// Where bugs and suggestions go (the repository's issues).
     #[serde(default)]
     issues_url: String,
@@ -177,6 +180,7 @@ pub fn parse_profile(text: &str) -> Result<BuildSpec> {
         ("LAUNCHER_IDENTIFIER".to_string(), b.identifier.clone()),
         ("LAUNCHER_EDITION".to_string(), b.edition.clone()),
         ("LAUNCHER_SUPPORT_URL".to_string(), b.support_url.clone()),
+        ("LAUNCHER_SOURCE_URL".to_string(), b.source_url.clone()),
         ("LAUNCHER_ISSUES_URL".to_string(), b.issues_url.clone()),
         ("LAUNCHER_MEDIA_URL".to_string(), b.media_url.clone()),
         ("LAUNCHER_UPDATE_REPO".to_string(), b.update_repo.clone()),
@@ -312,6 +316,9 @@ mod tests {
         assert!(spec.env.contains(&("LAUNCHER_PROFILE".into(), "standard".into())));
         let issues = spec.env.iter().find(|(k, _)| k == "LAUNCHER_ISSUES_URL").map(|(_, v)| v.as_str());
         assert!(issues.is_some_and(|url| url.starts_with("https://github.com/") && url.ends_with("/issues")));
+        // «Про програму» links the code: the repository the issues are in.
+        let source = spec.env.iter().find(|(k, _)| k == "LAUNCHER_SOURCE_URL").map(|(_, v)| v.as_str());
+        assert_eq!(source.map(|url| format!("{url}/issues")).as_deref(), issues, "{source:?}");
         let media = spec.env.iter().find(|(k, _)| k == "LAUNCHER_MEDIA_URL").map(|(_, v)| v.as_str());
         assert!(
             media.is_some_and(|url| url.starts_with("https://") && !url.ends_with('/')),

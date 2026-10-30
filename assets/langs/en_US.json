@@ -802,6 +802,7 @@
   "directory_create_failed": "Failed to create directory",
   "version_delete_failed": "Failed to delete build",
   "support_title": "Support",
+  "about_source_code": "Source on GitHub",
   "support_discord": "Discord",
   "support_discord_desc": "Questions, help and news",
   "support_issues": "GitHub Issues",

@@ -24,6 +24,8 @@ pub fn AboutSection() -> impl IntoView {
     let i18n = use_i18n();
     let store = use_store();
     let help = use_support();
+    let opener = crate::shell::use_url_opener();
+    let source = launcher_shared::branding::SOURCE_URL;
     let contacts = has_contacts();
     let toasts = use_toasts();
     let logs_open = RwSignal::new(false);
@@ -53,11 +55,16 @@ pub fn AboutSection() -> impl IntoView {
                         })}
                         {info.dev_mode.then(|| view! { <Tag tone=TagTone::Snapshot>{i18n.t("about_dev_mode")}</Tag> })}
                     </div>
-                    {move || contacts.get().then(|| view! {
-                        <div style="margin-left:auto">
+                    <div class="about__links">
+                        {(!source.is_empty()).then(|| view! {
+                            <Button icon="brand:github" on_click=move |_| opener.open(source.to_string())>
+                                {move || i18n.t("about_source_code")}
+                            </Button>
+                        })}
+                        {move || contacts.get().then(|| view! {
                             <Button icon="support_agent" outlined=true on_click=move |_| help.open()>{i18n.t("support_title")}</Button>
-                        </div>
-                    })}
+                        })}
+                    </div>
                 </div>
                 <Section icon="extension" title=t("about_modules")>
                     {if modules.is_empty() {

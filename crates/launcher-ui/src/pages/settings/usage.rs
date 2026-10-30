@@ -121,7 +121,7 @@ pub fn UsageSection() -> impl IntoView {
     let confirm_world = RwSignal::new(false);
     let world_clear = RwSignal::new(None::<WorldClear>);
 
-    let has_backups = Signal::derive(move || parts.with(|p| p.sections.iter().any(|s| s.id == "backups")));
+    let has_backups = Signal::derive(move || parts.with(|p| p.blocks.iter().any(|b| b.module == "backups")));
     let load = move |refresh: bool| {
         if refresh {
             working.set(Some("refresh".into()));
@@ -368,7 +368,7 @@ pub fn UsageSection() -> impl IntoView {
                         title=t("storage_configure")
                         on_click=Callback::new(move |()| {
                             if let Some(SettingsSection(active)) = active {
-                                active.set("backups");
+                                active.set("storage");
                             }
                         })
                     />

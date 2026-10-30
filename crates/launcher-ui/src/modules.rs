@@ -4,7 +4,8 @@ use launcher_shared::{AppInfo, BuildDto};
 use leptos::prelude::*;
 use ui_kit::module::{
     DeleteOption, ModuleAlertAction, ModuleBuildAction, ModuleBuildBadge, ModuleContentNotice,
-    ModuleHomeCards, ModuleOverlay, ModuleSection, ModuleSupportAction, ModuleTab, UiModule,
+    ModuleHomeCards, ModuleOverlay, ModuleSection, ModuleSettingsBlock, ModuleSupportAction, ModuleTab,
+    UiModule,
 };
 
 use crate::shell::sidebar::backend_modules;
@@ -15,6 +16,7 @@ use crate::shell::sidebar::backend_modules;
 pub struct ModuleParts {
     pub tabs: Vec<ModuleTab>,
     pub sections: Vec<ModuleSection>,
+    pub blocks: Vec<ModuleSettingsBlock>,
     pub delete_options: Vec<DeleteOption>,
     pub overlays: Vec<ModuleOverlay>,
     pub home_cards: Vec<ModuleHomeCards>,
@@ -30,6 +32,7 @@ impl ModuleParts {
         ModuleParts {
             tabs: modules.iter().flat_map(|m| m.content_tabs()).collect(),
             sections: modules.iter().flat_map(|m| m.settings_sections()).collect(),
+            blocks: modules.iter().flat_map(|m| m.settings_blocks()).collect(),
             delete_options: modules.iter().flat_map(|m| m.delete_options()).collect(),
             overlays: modules.iter().flat_map(|m| m.overlays()).collect(),
             home_cards: modules.iter().flat_map(|m| m.home_cards()).collect(),
@@ -52,6 +55,7 @@ impl ModuleParts {
         ModuleParts {
             tabs: self.tabs.iter().copied().filter(|t| has(t.module)).collect(),
             sections: self.sections.iter().copied().filter(|s| has(s.module)).collect(),
+            blocks: self.blocks.iter().copied().filter(|b| has(b.module)).collect(),
             delete_options: self.delete_options.iter().copied().filter(|o| has(o.module)).collect(),
             overlays: self.overlays.iter().copied().filter(|o| has(o.module)).collect(),
             home_cards: self.home_cards.iter().copied().filter(|c| has(c.module)).collect(),
@@ -174,6 +178,9 @@ mod tests {
         fn alert_actions(&self) -> Vec<ModuleAlertAction> {
             vec![ModuleAlertAction { module: "watcher", view: |_| ().into_any() }]
         }
+        fn settings_blocks(&self) -> Vec<ModuleSettingsBlock> {
+            vec![ModuleSettingsBlock { module: "watcher", inside: "storage", view: || ().into_any() }]
+        }
         fn content_notices(&self) -> Vec<ModuleContentNotice> {
             vec![ModuleContentNotice {
                 module: "watcher",
@@ -234,6 +241,15 @@ mod tests {
             |modules: &[&str]| all.present_among(&modules.iter().map(|m| m.to_string()).collect::<Vec<_>>());
         assert_eq!((on(&["watcher"]).home_cards.len(), on(&["watcher"]).build_actions.len()), (1, 1));
         assert!(on(&[]).home_cards.is_empty() && on(&[]).build_actions.is_empty());
+    }
+
+    #[test]
+    fn settings_blocks_show_only_with_their_backend() {
+        let all = ModuleParts::of(&[Box::new(WithOverlay) as Box<dyn UiModule>]);
+        let on =
+            |modules: &[&str]| all.present_among(&modules.iter().map(|m| m.to_string()).collect::<Vec<_>>());
+        assert_eq!(on(&["watcher"]).blocks.iter().map(|b| b.inside).collect::<Vec<_>>(), ["storage"]);
+        assert!(on(&[]).blocks.is_empty(), "no backend, no block");
     }
 
     #[test]

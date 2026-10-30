@@ -10,7 +10,7 @@ mod settings;
 mod state;
 
 use leptos::prelude::*;
-use ui_kit::module::{ModuleAlertAction, ModuleOverlay, ModuleSection, ModuleSupportAction, UiModule};
+use ui_kit::module::{ModuleAlertAction, ModuleOverlay, ModuleSettingsBlock, ModuleSupportAction, UiModule};
 
 pub struct ReportsModuleUi;
 
@@ -51,13 +51,11 @@ impl UiModule for ReportsModuleUi {
         }]
     }
 
-    fn settings_sections(&self) -> Vec<ModuleSection> {
-        vec![ModuleSection {
+    /// Under «Лаунчер»: the reports are the launcher's own.
+    fn settings_blocks(&self) -> Vec<ModuleSettingsBlock> {
+        vec![ModuleSettingsBlock {
             module: crate::ID,
-            id: "reports",
-            icon: "bug_report",
-            label: "settings_tab_reports",
-            after: "backups",
+            inside: "launcher",
             view: || view! { <settings::ReportsSettings /> }.into_any(),
         }]
     }
@@ -79,16 +77,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_module_adds_a_report_button_its_windows_a_support_row_and_a_section() {
+    fn the_module_adds_a_report_button_its_windows_a_support_row_and_a_launcher_block() {
         let ui = ReportsModuleUi;
         assert_eq!(ui.alert_actions().iter().map(|a| a.module).collect::<Vec<_>>(), [crate::ID]);
         assert_eq!(ui.overlays().len(), 2, "the problem's window and the question after a crash");
         assert_eq!(ui.support_actions().len(), 1);
         assert!(ui.build_actions().is_empty(), "a build's game logs are not the launcher's to send");
-        let sections = ui.settings_sections();
+        assert!(ui.settings_sections().is_empty(), "no menu item of its own (owner, 2026-10-30)");
+        let blocks = ui.settings_blocks();
         assert_eq!(
-            sections.iter().map(|s| (s.id, s.label, s.after)).collect::<Vec<_>>(),
-            [("reports", "settings_tab_reports", "backups")]
+            blocks.iter().map(|b| (b.module, b.inside)).collect::<Vec<_>>(),
+            [(crate::ID, "launcher")]
         );
     }
 

@@ -7,7 +7,7 @@ mod tab;
 
 use leptos::prelude::*;
 use ui_kit::TagTone;
-use ui_kit::module::{DeleteOption, ModuleSection, ModuleTab, UiModule};
+use ui_kit::module::{DeleteOption, ModuleSettingsBlock, ModuleTab, UiModule};
 
 use crate::dto::Kind;
 
@@ -59,13 +59,11 @@ impl UiModule for BackupsModuleUi {
         }]
     }
 
-    fn settings_sections(&self) -> Vec<ModuleSection> {
-        vec![ModuleSection {
+    /// Under «Файли»: the backups' folder sits with the launcher's other folders.
+    fn settings_blocks(&self) -> Vec<ModuleSettingsBlock> {
+        vec![ModuleSettingsBlock {
             module: crate::ID,
-            id: "backups",
-            icon: "backup",
-            label: "settings_tab_backups",
-            after: "java",
+            inside: "storage",
             view: || view! { <settings::BackupsSettings /> }.into_any(),
         }]
     }
@@ -100,15 +98,19 @@ mod tests {
     }
 
     #[test]
-    fn the_module_adds_a_tab_a_section_and_a_delete_switch() {
+    fn the_module_adds_a_tab_a_files_block_and_a_delete_switch() {
         let ui = BackupsModuleUi;
         let tabs = ui.content_tabs();
         assert_eq!(
             tabs.iter().map(|t| (t.module, t.id, t.after)).collect::<Vec<_>>(),
             vec![("backups", "backups", "shaders")]
         );
-        let sections = ui.settings_sections();
-        assert_eq!(sections.iter().map(|s| (s.id, s.after)).collect::<Vec<_>>(), vec![("backups", "java")]);
+        assert!(ui.settings_sections().is_empty(), "no menu item of its own (owner, 2026-10-30)");
+        let blocks = ui.settings_blocks();
+        assert_eq!(
+            blocks.iter().map(|b| (b.module, b.inside)).collect::<Vec<_>>(),
+            vec![("backups", "storage")]
+        );
         let options = ui.delete_options();
         assert_eq!(
             options.iter().map(|o| (o.label, o.command)).collect::<Vec<_>>(),

@@ -9,7 +9,7 @@ mod usage;
 
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
-use ui_kit::module::ModuleSection;
+use ui_kit::module::{ModuleSection, ModuleSettingsBlock};
 use ui_kit::{NavEntry, SettingsNav};
 
 use crate::modules::use_module_parts;
@@ -17,8 +17,8 @@ use crate::modules::use_module_parts;
 use crate::shell::{PageHeader, use_header};
 use crate::store::use_store;
 
-/// The section the settings show, for a section that opens another (the storage tab opens
-/// «Бекапи»).
+/// The section the settings show, for a section that opens another («Сховище» opens «Файли»,
+/// where the backups' block is).
 #[derive(Clone, Copy)]
 pub struct SettingsSection(pub RwSignal<&'static str>);
 
@@ -67,6 +67,11 @@ pub fn sections(extra: &[ModuleSection]) -> Vec<SectionDef> {
     all
 }
 
+/// The blocks the modules put inside section `id`, in the modules' order.
+pub fn blocks_inside(blocks: &[ModuleSettingsBlock], id: &str) -> Vec<ModuleSettingsBlock> {
+    blocks.iter().copied().filter(|b| b.inside == id).collect()
+}
+
 #[component]
 pub fn SettingsPage() -> impl IntoView {
     let i18n = use_i18n();
@@ -104,20 +109,29 @@ pub fn SettingsPage() -> impl IntoView {
         <div class="settings">
             {move || view! { <SettingsNav entries=nav() active=active /> }}
             <div class="settings__body">
-                {move || match active.get() {
-                    "interface" => view! { <interface::InterfaceSection /> }.into_any(),
-                    "storage" => view! { <storage::StorageSection /> }.into_any(),
-                    "usage" => view! { <usage::UsageSection /> }.into_any(),
-                    "java" => view! { <java::JavaSection /> }.into_any(),
-                    "activity" => view! { <activity::ActivitySection /> }.into_any(),
-                    "about" => view! { <about::AboutSection /> }.into_any(),
-                    id => match defs.with(|d| d.iter().find(|s| s.id == id).and_then(|s| s.view)) {
-                        Some(module_view) => module_view(),
-                        None => view! { <launcher::LauncherSection /> }.into_any(),
-                    },
+                {move || {
+                    let id = active.get();
+                    let blocks = parts.with(|p| blocks_inside(&p.blocks, id));
+                    view! { {section_view(id, defs)} {blocks.into_iter().map(|b| (b.view)()).collect_view()} }
                 }}
             </div>
         </div>
+    }
+}
+
+/// The view of the section with `id` (a module's, or the core's; «Лаунчер» for anything else).
+fn section_view(id: &'static str, defs: Signal<Vec<SectionDef>>) -> AnyView {
+    match id {
+        "interface" => view! { <interface::InterfaceSection /> }.into_any(),
+        "storage" => view! { <storage::StorageSection /> }.into_any(),
+        "usage" => view! { <usage::UsageSection /> }.into_any(),
+        "java" => view! { <java::JavaSection /> }.into_any(),
+        "activity" => view! { <activity::ActivitySection /> }.into_any(),
+        "about" => view! { <about::AboutSection /> }.into_any(),
+        id => match defs.with(|d| d.iter().find(|s| s.id == id).and_then(|s| s.view)) {
+            Some(module_view) => module_view(),
+            None => view! { <launcher::LauncherSection /> }.into_any(),
+        },
     }
 }
 
@@ -152,6 +166,16 @@ mod tests {
         );
         let core: Vec<&str> = sections(&[]).into_iter().map(|s| s.id).collect();
         assert_eq!(core, vec!["launcher", "interface", "storage", "usage", "java", "activity", "about"]);
+    }
+
+    #[test]
+    fn a_section_shows_the_blocks_put_inside_it() {
+        let block = |module, inside| ModuleSettingsBlock { module, inside, view: || ().into_any() };
+        let blocks = [block("backups", "storage"), block("reports", "launcher"), block("other", "storage")];
+        let modules = |id: &str| blocks_inside(&blocks, id).iter().map(|b| b.module).collect::<Vec<_>>();
+        assert_eq!(modules("storage"), ["backups", "other"]);
+        assert_eq!(modules("launcher"), ["reports"]);
+        assert!(modules("java").is_empty());
     }
 
     #[test]

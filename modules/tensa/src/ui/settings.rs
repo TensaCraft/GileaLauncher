@@ -1,5 +1,5 @@
-//! The module's own section of the launcher's settings, «Tensa»: all it has to set (for now,
-//! whether Home offers the server builds not installed yet).
+//! The module's block in «Інтерфейс», «Серверні збірки»: whether Home offers the server builds
+//! not installed yet.
 
 use launcher_shared::Level;
 use leptos::prelude::*;
@@ -38,7 +38,7 @@ pub fn ServerBuildsSettings() -> impl IntoView {
         });
     });
     view! {
-        <Section icon="rocket_launch" title=t("settings_tab_tensa") desc=t("tensa_settings_desc")>
+        <Section icon="rocket_launch" title=t("tensa_settings_title") desc=t("tensa_settings_desc")>
             <SettingRow title=t("show_tensacraft_versions")>
                 <Switch checked=show on_change=toggle label=t("show_tensacraft_versions") />
             </SettingRow>
