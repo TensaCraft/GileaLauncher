@@ -641,13 +641,10 @@ pub fn install() {
             let name = "Alex_UA";
             let mut profile = mock_profile(&format!("{server}:{name}"), AccountKind::Yggdrasil, true);
             profile.name = name.into();
-            let (kind, server_name) = match server.as_str() {
-                "elyby" => (AccountKind::Yggdrasil, "Ely.by"),
-                "tensa" => (AccountKind::Module, "TensaCraft"),
-                _ => return Err(AppError::new(ErrorCode::NotFound, format!("no auth server {server}"))),
-            };
-            profile.kind = kind;
-            profile.server_name = Some(server_name.into());
+            if server != "elyby" {
+                return Err(AppError::new(ErrorCode::NotFound, format!("no auth server {server}")));
+            }
+            profile.server_name = Some("Ely.by".into());
             profile.server = Some(server);
             {
                 let mut list = profiles.borrow_mut();

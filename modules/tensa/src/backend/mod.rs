@@ -15,7 +15,6 @@ pub mod plan;
 pub mod profile;
 pub mod provider;
 pub mod service;
-pub mod site;
 pub mod sync;
 pub mod whitelist;
 
@@ -104,17 +103,6 @@ impl Module for TensaModule {
 
     fn managed_files(&self, build: &Build, game_dir: &Path) -> Vec<String> {
         if identity::is_managed(build, game_dir) { plan::managed_paths(game_dir) } else { Vec::new() }
-    }
-
-    /// The site's sign-in, where the build profile names the site.
-    fn attach(&self, core: &Arc<CoreApp>) {
-        if site::SITE.is_empty() {
-            return;
-        }
-        match site::TensaSite::new(site::SITE) {
-            Ok(site) => core.auth.register_provider(Arc::new(site)),
-            Err(e) => tracing::warn!("The site's sign-in is unavailable: {}", e.detail),
-        }
     }
 
     fn launch_hook(&self) -> Option<Arc<dyn LaunchHook>> {

@@ -18,5 +18,3 @@ endpoint = "https://gigabait.uk/api/mods/launcher/logs"
 
 [modules.tensa]
 api_base = "https://gigabait.uk/api/mods"
-# The site whose auth API signs players in («Сайт TensaCraft» in «Додати акаунт»).
-site = "https://tensa.co.ua"

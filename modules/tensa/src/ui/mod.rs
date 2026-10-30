@@ -9,8 +9,7 @@ mod settings;
 use launcher_shared::BuildDto;
 use leptos::prelude::*;
 use ui_kit::module::{
-    BuildActionRun, ModuleAccountKind, ModuleBuildAction, ModuleContentNotice, ModuleHomeCards,
-    ModuleSettingsBlock, UiModule,
+    BuildActionRun, ModuleBuildAction, ModuleContentNotice, ModuleHomeCards, ModuleSettingsBlock, UiModule,
 };
 
 use crate::CLIENT;
@@ -29,21 +28,6 @@ impl UiModule for TensaModuleUi {
 
     fn home_cards(&self) -> Vec<ModuleHomeCards> {
         vec![ModuleHomeCards { module: crate::ID, view: || view! { <home::ServerBuildCards /> }.into_any() }]
-    }
-
-    /// «Сайт TensaCraft»: the server's site signs players in (the backend's `site`), when the
-    /// build profile names the site.
-    fn account_kinds(&self) -> Vec<ModuleAccountKind> {
-        if crate::SITE.is_empty() {
-            return Vec::new();
-        }
-        vec![ModuleAccountKind {
-            module: crate::ID,
-            id: crate::ID,
-            label: "tensa_account",
-            icon: "language",
-            desc: "tensa_account_desc",
-        }]
     }
 
     fn settings_blocks(&self) -> Vec<ModuleSettingsBlock> {
@@ -119,9 +103,6 @@ mod tests {
         assert_eq!(ui.home_cards().iter().map(|c| c.module).collect::<Vec<_>>(), [crate::ID]);
         // Its one switch is about Home, so it sits with Home's settings (owner, 2026-10-30).
         assert!(ui.settings_sections().is_empty(), "no menu item of its own");
-        let kinds: Vec<_> = ui.account_kinds().iter().map(|k| (k.module, k.id)).collect();
-        let site: &[(&str, &str)] = if crate::SITE.is_empty() { &[] } else { &[(crate::ID, crate::ID)] };
-        assert_eq!(kinds, site, "its site's kind, only where the profile names the site");
         let blocks = ui.settings_blocks();
         assert_eq!(
             blocks.iter().map(|b| (b.module, b.inside)).collect::<Vec<_>>(),
