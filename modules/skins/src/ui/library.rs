@@ -11,7 +11,6 @@ use ui_kit::{
 
 use super::add::AddSkinDialog;
 use super::api;
-use super::land::land_variant;
 use super::model::{is_worn, matching};
 use crate::dto::{AccountState, LibrarySkin, SkinVariant, error_text};
 
@@ -84,14 +83,6 @@ pub fn LibraryTab(
             let _ = applying.try_set(None);
         });
     };
-    let set_model = move |skin: LibrarySkin, variant: SkinVariant| {
-        spawn_local(async move {
-            match api::set_variant(skin.id, variant).await {
-                Ok(changed) => land_variant(library, changed),
-                Err(e) => fail(e),
-            }
-        });
-    };
     let save_name = move || {
         let Some(skin) = renaming.get_untracked() else { return };
         let name = new_name.get_untracked();
@@ -119,15 +110,10 @@ pub fn LibraryTab(
             }
         });
     };
+    // The model is the switch under the figure: one place, which keeps a worn skin worn.
     let open_menu = move |skin: LibrarySkin, x: i32, y: i32| {
-        let other = match skin.variant {
-            SkinVariant::Classic => SkinVariant::Slim,
-            SkinVariant::Slim => SkinVariant::Classic,
-        };
         let entries = vec![
             MenuEntry::item("rename", i18n.t("rename")).icon("edit"),
-            MenuEntry::item("model", i18n.tp("skins_model", &[("model", model_name(other).to_string())]))
-                .icon("accessibility_new"),
             MenuEntry::Separator,
             MenuEntry::item("delete", i18n.t("delete")).icon("delete_outline").danger(),
         ];
@@ -138,7 +124,6 @@ pub fn LibraryTab(
                 renaming.set(Some(skin.clone()));
                 rename_open.set(true);
             }
-            "model" => set_model(skin.clone(), other),
             "delete" => {
                 deleting.set(Some(skin.clone()));
                 delete_open.set(true);

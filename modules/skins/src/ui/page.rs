@@ -9,8 +9,8 @@ use leptos::task::spawn_local;
 use ui_kit::i18n::use_i18n;
 use ui_kit::module::use_module_host;
 use ui_kit::{
-    Button, ChipDef, ChipTabs, EmptyState, Icon, IconAction, LatestRequest, Select, SelectOption, Skeleton,
-    Switch, TagTone, Variant, use_toasts,
+    Button, ChipDef, ChipTabs, EmptyState, Icon, IconAction, LatestRequest, Select, SelectOption, Size,
+    Skeleton, Switch, TagTone, Variant, use_toasts,
 };
 
 use super::capes::CapesTab;
@@ -221,20 +221,29 @@ pub fn SkinsPage() -> impl IntoView {
         }
     };
     // The model of the skin the figure shows (the previewed one, else the worn one), changed from
-    // the switch under it; a worn skin then can be put on again on its new model.
+    // the «Модель» row under it; a worn skin is then put on again on its new model.
     let target = Memo::new(move |_| model_target(preview.get(), worn.get()).filter(|id| entry(id).is_some()));
-    let slim = RwSignal::new(false);
+    let model = RwSignal::new(SkinVariant::Classic.as_str().to_string());
     Effect::new(move |_| {
-        let model = target.get().and_then(|id| entry(&id)).map(|e| e.variant == SkinVariant::Slim);
-        slim.set(model.unwrap_or(false));
+        let variant = target.get().and_then(|id| entry(&id)).map_or(SkinVariant::Classic, |e| e.variant);
+        model.set(variant.as_str().to_string());
+    });
+    let models = Signal::derive(move || {
+        vec![
+            SelectOption::new(SkinVariant::Classic.as_str(), "Classic"),
+            SelectOption::new(SkinVariant::Slim.as_str(), "Slim"),
+        ]
     });
     let on_state = Callback::new(move |answer: AccountState| {
         land_state(state, account, latest, answer);
         let _ = cape_pick.try_set(None);
     });
-    let set_model = Callback::new(move |on: bool| {
+    let set_model = Callback::new(move |chosen: String| {
         let Some(id) = target.get_untracked() else { return };
-        let variant = if on { SkinVariant::Slim } else { SkinVariant::Classic };
+        let (variant, was) = match chosen.as_str() {
+            "slim" => (SkinVariant::Slim, SkinVariant::Classic),
+            _ => (SkinVariant::Classic, SkinVariant::Slim),
+        };
         // The worn skin changes on the account too: it stays worn, on its new model.
         let wearing = worn.get_untracked().as_deref() == Some(id.as_str());
         let profile = account.get_untracked();
@@ -242,8 +251,8 @@ pub fn SkinsPage() -> impl IntoView {
             match super::api::set_variant(id.clone(), variant).await {
                 Ok(changed) => land_variant(library, changed),
                 Err(e) => {
-                    // The switch moved at the click: it goes back to the model the skin still has.
-                    let _ = slim.try_set(!on);
+                    // The choice showed at the click: it goes back to the model the skin still has.
+                    let _ = model.try_set(was.as_str().to_string());
                     return toasts.show(Level::Error, i18n.text(&error_text(&e)), None);
                 }
             }
@@ -313,7 +322,7 @@ pub fn SkinsPage() -> impl IntoView {
                 <aside class="skins-stage">
                     <SkinStage skin=viewer_skin cape=viewer_cape walking=walking flat=flat />
                     <div class="skins-stage__caption">{caption}</div>
-                    // Each option its own row, its switch at the right edge, as in the settings.
+                    // Each option its own row, its control at the right edge, as in the settings.
                     <div class="skins-stage__tools">
                         <div class="skins-stage__switch">
                             <Icon name="directions_walk" outlined=true />
@@ -322,13 +331,16 @@ pub fn SkinsPage() -> impl IntoView {
                         </div>
                         <div class="skins-stage__switch">
                             <Icon name="accessibility_new" outlined=true />
-                            <span class="grow">{move || i18n.t("skins_slim_tip")}</span>
-                            <Switch
-                                checked=slim
-                                label=t("skins_slim_tip")
-                                disabled=Signal::derive(move || target.get().is_none())
-                                on_change=set_model
-                            />
+                            <span class="grow">{move || i18n.t("skins_model_label")}</span>
+                            <div class="skins-stage__model">
+                                <Select
+                                    options=models
+                                    value=model
+                                    size=Size::Sm
+                                    disabled=Signal::derive(move || target.get().is_none())
+                                    on_change=set_model
+                                />
+                            </div>
                         </div>
                     </div>
                 </aside>
