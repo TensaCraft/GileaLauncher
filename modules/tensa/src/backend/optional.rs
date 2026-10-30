@@ -429,6 +429,22 @@ mod tests {
     }
 
     #[test]
+    fn a_mod_the_player_deleted_stays_deleted_at_the_next_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        // Noted at an older version, its file since deleted from the Mods tab; the server now
+        // has a newer one.
+        let mut note = Note::new();
+        let old = Noted { file: "CreateCyberGoggles-1.21.1-8.6.8-NeoForge.jar".into(), ..Noted::default() };
+        note.insert("goggles".into(), old);
+        let rules = [glob("mods/CreateCyberGoggles-*.jar")];
+        let found = recognize(dir.path(), &[goggles()], &rules, &note, &mut real_hash(dir.path()));
+        assert_eq!(found[0].state, State::Missing);
+        let sync = for_sync(dir.path(), Some(&found), &note);
+        assert!(sync.items.iter().all(|i| i.download.is_none()), "nothing is put back: {:?}", sync.items);
+        assert_eq!(sync.note, Some(Note::new()), "and the note forgets it");
+    }
+
+    #[test]
     fn a_file_with_the_items_hash_is_current() {
         let dir = tempfile::tempdir().unwrap();
         put(dir.path(), "mods/goggles-any-name.jar", "goggles 8.6.9");
