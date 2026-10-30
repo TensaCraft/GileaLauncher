@@ -107,6 +107,16 @@ pub async fn start() -> FakeYgg {
         .route("/api/yggdrasil/authserver/invalidate", post(invalidate))
         .route("/api/yggdrasil/sessionserver/session/minecraft/profile/{id}", get(profile))
         .route("/textures/{name}", get(texture))
+        // An API that sends its sign-in on to plain http elsewhere.
+        .route(
+            "/away/authserver/authenticate",
+            post(|| async {
+                (
+                    StatusCode::TEMPORARY_REDIRECT,
+                    [("location", "http://example.invalid/authserver/authenticate")],
+                )
+            }),
+        )
         .with_state(shared.clone());
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();

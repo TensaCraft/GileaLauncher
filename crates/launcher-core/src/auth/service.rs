@@ -297,6 +297,14 @@ impl AuthService {
         let server_id = profile.server.clone().unwrap_or_default();
         let server = self.servers.refreshed(&self.http, &server_id).await?;
         let agent = AgentServer { api_root: server.api_root.clone(), metadata: server.metadata.clone() };
+        // One renewal at a time: the server takes a token back once, so a launch that waited plays
+        // on the session the other one renewed.
+        let seen_token = profile.access_token.clone();
+        let _guard = self.refresh.lock().await;
+        let profile = self.store.get(&profile.key).ok_or_else(|| no_profile(&profile.key))?;
+        if profile.access_token != seen_token {
+            return Ok((profile, agent));
+        }
         let (Some(access), Some(client)) = (profile.access_token.clone(), profile.refresh_token.clone())
         else {
             return Ok((profile, agent));
@@ -482,6 +490,10 @@ impl AuthService {
         margin: i64,
     ) -> AppResult<(StoredProfile, Option<AppError>)> {
         let profile = self.store.get(key).ok_or_else(|| no_profile(key))?;
+        // Another server's session is that server's to renew (at launch): never Microsoft's.
+        if matches!(profile.kind, AccountKind::Yggdrasil | AccountKind::Module) {
+            return Ok((profile, None));
+        }
         if let Some(done) = self.settled(&profile, force, margin)? {
             return Ok((done, None));
         }

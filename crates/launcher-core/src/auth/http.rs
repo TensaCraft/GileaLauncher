@@ -83,9 +83,11 @@ pub struct AuthHttp {
 impl AuthHttp {
     pub fn new(timings: &AuthTimings) -> AppResult<Self> {
         let _ = rustls::crypto::ring::default_provider().install_default();
+        // Redirects follow the downloader's rules: a password never goes on to plain http.
         let client = Client::builder()
             .user_agent(format!("{APP_NAME}/{VERSION}"))
             .timeout(timings.http_timeout)
+            .redirect(crate::net::redirect_policy())
             .build()
             .map_err(|e| AppError::internal(e.to_string()))?;
         Ok(Self { client, backoff: timings.retry_backoff })

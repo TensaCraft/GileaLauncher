@@ -72,6 +72,14 @@ async fn a_sign_in_gives_the_session_and_its_game_profile() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_password_never_follows_a_redirect_to_plain_http() {
+    let fake = fake_ygg::start().await;
+    let away = format!("{}/away/", fake.base);
+    let err = yggdrasil::authenticate(&http(), &away, &credentials(LOGIN, PASSWORD, None)).await.unwrap_err();
+    assert!(err.detail.contains("redirect"), "refused at the redirect, not sent on: {}", err.detail);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_wrong_password_is_wrong_credentials() {
     let fake = fake_ygg::start().await;
     let err = yggdrasil::authenticate(&http(), &fake.api_root(), &credentials(LOGIN, "nope", None))

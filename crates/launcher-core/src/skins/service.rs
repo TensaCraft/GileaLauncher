@@ -285,6 +285,24 @@ pub fn secure(url: &str) -> String {
     }
 }
 
+/// An auth server's skin address over `https`: such servers name plain `http` (Ely.by:
+/// `http://ely.by/storage/skins/…`) and serve the same over `https`; the downloader takes `http`
+/// only from this machine.
+pub fn over_https(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(mut parsed)
+            if parsed.scheme() == "http"
+                && !matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")) =>
+        {
+            match parsed.set_scheme("https") {
+                Ok(()) => parsed.to_string(),
+                Err(()) => url.to_string(),
+            }
+        }
+        _ => url.to_string(),
+    }
+}
+
 /// Percent-encodes a URL path segment (RFC 3986 unreserved characters stay as they are).
 pub fn encode_segment(value: &str) -> String {
     value
@@ -611,7 +629,8 @@ impl SkinService {
     }
 
     /// The skin `player`'s own session server names (`None`: they wear none there), fetched from
-    /// wherever it says (such servers keep skins on their own hosts, often over plain http).
+    /// wherever it says (such servers keep skins on their own hosts and name them over plain
+    /// http: fetched over https, `over_https`).
     async fn server_skin(
         &self,
         session: &str,
@@ -621,7 +640,7 @@ impl SkinService {
         let url = Self::address(session, &["session", "minecraft", "profile", &uuid])?;
         let Some((skin, slim)) = self.ask(url).await?.as_ref().and_then(skin_of) else { return Ok(None) };
         let origin = Origin::new(|u| matches!(u.scheme(), "http" | "https"));
-        let (file, png, hash) = self.fetch_from_host(&skin, origin).await?;
+        let (file, png, hash) = self.fetch_from_host(&over_https(&skin), origin).await?;
         Ok(Some((file, png, hash, slim)))
     }
 
@@ -773,6 +792,18 @@ mod tests {
         );
         assert_eq!(secure("http://127.0.0.1:5/textures/a"), "http://127.0.0.1:5/textures/a");
         assert_eq!(secure("http://textures.minecraft.net.evil/x"), "http://textures.minecraft.net.evil/x");
+    }
+
+    #[test]
+    fn a_server_s_skin_address_goes_over_https_but_on_this_machine() {
+        assert_eq!(
+            over_https("http://ely.by/storage/skins/69c6740d.png"),
+            "https://ely.by/storage/skins/69c6740d.png"
+        );
+        assert_eq!(over_https("https://ely.by/storage/skins/a.png"), "https://ely.by/storage/skins/a.png");
+        assert_eq!(over_https("http://127.0.0.1:5/skins/a.png"), "http://127.0.0.1:5/skins/a.png");
+        assert_eq!(over_https("http://localhost:5/skins/a.png"), "http://localhost:5/skins/a.png");
+        assert_eq!(over_https("not an address"), "not an address");
     }
 
     #[test]

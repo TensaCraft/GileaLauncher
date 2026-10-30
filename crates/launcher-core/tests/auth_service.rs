@@ -449,6 +449,34 @@ async fn a_stale_session_is_renewed_before_a_launch_and_an_ended_one_asks_for_th
     assert!(profile.reauth_required, "the card asks for a new sign-in");
 }
 
+/// Two builds started at once with a stale session: one renews it, the other plays on the renewed
+/// one (the server takes the old token back once: a second renewal of it would end the account).
+#[tokio::test(flavor = "multi_thread")]
+async fn two_launches_at_once_renew_a_stale_session_once() {
+    let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = with_server(&fake, &ygg, dir.path());
+    svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
+    ygg.stale_all();
+    let (a, b) = tokio::join!(svc.launch_identity(Some(ELY_KEY)), svc.launch_identity(Some(ELY_KEY)));
+    assert_eq!(a.unwrap().access_token, b.unwrap().access_token);
+    assert_eq!(ygg.posts("authserver/refresh").len(), 1);
+    let profile = svc.snapshot().profiles.into_iter().find(|p| p.key == ELY_KEY).unwrap();
+    assert!(!profile.reauth_required);
+}
+
+/// Microsoft renews Microsoft accounts only: another server's token never goes there.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_microsoft_refresh_leaves_an_account_of_another_server_alone() {
+    let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());
+    let (svc, _) = with_server(&fake, &ygg, dir.path());
+    svc.sign_in_server("elyby", fake_ygg::LOGIN, fake_ygg::PASSWORD, None).await.unwrap();
+    let kept = svc.refresh(ELY_KEY, true).await.unwrap();
+    assert_eq!(kept.access_token.as_deref(), Some("token-1"));
+    assert!(fake.requests("/token").is_empty(), "nothing went to Microsoft");
+    let card = svc.snapshot().profiles.into_iter().find(|p| p.key == ELY_KEY).unwrap();
+    assert!(!card.reauth_required);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn deleting_such_an_account_ends_its_session_on_the_server() {
     let (fake, ygg, dir) = (fake_ms::start().await, fake_ygg::start().await, tempfile::tempdir().unwrap());

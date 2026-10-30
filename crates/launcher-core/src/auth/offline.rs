@@ -14,17 +14,19 @@ pub fn offline_uuid(name: &str) -> String {
 }
 
 /// Trimmed nickname of 1–16 visible ASCII characters: Minecraft 1.20.3+ lets no other name in, not
-/// even in single player (`StringUtil.isValidPlayerName`). Profiles made before stay as they are.
+/// even in single player (`StringUtil.isValidPlayerName`). No colon: it parts an account of another
+/// server from its name (`elyby:Steve`). Profiles made before stay as they are.
 pub fn validate_offline_name(raw: &str) -> AppResult<String> {
     let name = raw.trim();
     let count = name.chars().count();
-    let valid = (1..=MAX_NAME_CHARS).contains(&count) && name.chars().all(|c| c.is_ascii_graphic());
+    let valid =
+        (1..=MAX_NAME_CHARS).contains(&count) && name.chars().all(|c| c.is_ascii_graphic() && c != ':');
     if valid {
         Ok(name.to_string())
     } else {
         Err(AppError::new(
             ErrorCode::ProfileNameInvalid,
-            "offline nickname must be 1-16 visible ASCII characters",
+            "offline nickname must be 1-16 visible ASCII characters, no colon",
         )
         .with_param("max", MAX_NAME_CHARS.to_string()))
     }
@@ -48,7 +50,10 @@ mod tests {
         assert_eq!(validate_offline_name("Player_01").unwrap(), "Player_01");
         assert_eq!(validate_offline_name(&"x".repeat(16)).unwrap().len(), 16);
         // Minecraft 1.20.3+ lets in names of visible ASCII only, single player too.
-        for bad in ["", "   ", "two words", "tab\tname", &"x".repeat(17), "Іван", "Steve·", "名前"] {
+        // A colon parts an account of another server from its name (`elyby:Steve`).
+        for bad in
+            ["", "   ", "two words", "tab\tname", &"x".repeat(17), "Іван", "Steve·", "名前", "elyby:Steve"]
+        {
             assert_eq!(
                 validate_offline_name(bad).unwrap_err().code,
                 ErrorCode::ProfileNameInvalid,
