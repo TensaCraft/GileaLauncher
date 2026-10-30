@@ -236,6 +236,9 @@ pub fn App() -> impl IntoView {
                 close_label=Signal::derive(move || i18n.t("toast_close"))
                 on_action=Callback::new(move |action: String| {
                     // A failure's «Report»: the reports module opens its window with it.
+                    // A module's page (`/sync`, `/skins`) is a route of its own, not the fallback: two
+                    // quick visits of a fallback page left it on screen under the next page.
+                    <Route path=path!("/:page") view=RouteFallback />
                     if let Some(problem) = ui_kit::problem::reported_problem(&action) {
                         problems.request.set(Some(problem));
                     }
@@ -257,7 +260,8 @@ pub fn App() -> impl IntoView {
     }
 }
 
-/// A module's page by its address — under a header titled with its sidebar label — otherwise Home.
+/// A module's page by its address — under a header titled with its sidebar label — otherwise Home
+/// (also the fallback of an address no route takes).
 #[component]
 fn RouteFallback() -> impl IntoView {
     let store = use_store();
