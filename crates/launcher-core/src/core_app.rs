@@ -231,13 +231,16 @@ impl CoreApp {
             &paths.minecraft_dir,
         ));
         let instances = Arc::new(Coordinator::instances());
-        let builds = Arc::new(BuildService::new(
-            versions.clone(),
-            components.clone(),
-            feedback.clone(),
-            config.clone(),
-            instances.clone(),
-        ));
+        let builds = Arc::new(
+            BuildService::new(
+                versions.clone(),
+                components.clone(),
+                feedback.clone(),
+                config.clone(),
+                instances.clone(),
+            )
+            .with_loader_keepers(modules.loader_keepers()),
+        );
         let backups = resolver(config.clone(), paths.minecraft_dir.clone());
         let content = Arc::new(ContentService::new(
             versions.clone(),

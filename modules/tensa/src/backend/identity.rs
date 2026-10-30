@@ -1,9 +1,11 @@
 //! Which builds are the server's: a managed build follows the server at every
-//! launch; its catalog id is kept apart from the component it runs.
+//! launch, and keeps the loader the server sets; its catalog id is kept apart from the component
+//! it runs.
 
 use std::fs;
 use std::path::Path;
 
+use launcher_core::builds::service::LoaderKeeper;
 use launcher_core::storage::journal::{JOURNAL_DIR, JournalName};
 use launcher_core::storage::versions::Build;
 use serde_json::{Value, json};
@@ -56,6 +58,19 @@ pub fn is_managed(build: &Build, game_dir: &Path) -> bool {
         .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
         .and_then(|journal| journal.get("operation").and_then(Value::as_str).map(str::to_string));
     operation.is_some_and(|op| op.trim().to_lowercase().starts_with("tensacraft_"))
+}
+
+/// Why a server build's loader is not changed by hand (the module's translation key).
+pub const LOADER_KEPT: &str = "tensa_loader_set_by_server";
+
+/// The server sets the loader of the builds it manages (`is_managed`): its sync installs it, and
+/// the player does not change it.
+pub struct ServerLoader;
+
+impl LoaderKeeper for ServerLoader {
+    fn kept(&self, build: &Build, game_dir: &Path) -> Option<&'static str> {
+        is_managed(build, game_dir).then_some(LOADER_KEPT)
+    }
 }
 
 /// Names `build` a server build following `pack_id`; whether anything changed.
@@ -166,6 +181,22 @@ mod tests {
         b.client = Some("TENSACRAFT".into());
         assert!(!mark(&mut b, ""), "any case of the client is the client; no id keeps the old one");
         assert_eq!(b.remote_pack_id, Some(json!("aero")));
+    }
+
+    #[test]
+    fn the_server_keeps_the_loader_of_the_builds_it_manages() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = build();
+        b.client = Some("Fabric".into());
+        assert_eq!(ServerLoader.kept(&b, dir.path()), None, "the player's own build");
+        mark(&mut b, "aero");
+        assert_eq!(ServerLoader.kept(&b, dir.path()), Some(LOADER_KEPT));
+        b.options.insert("syncMode".into(), json!("manual"));
+        assert_eq!(ServerLoader.kept(&b, dir.path()), None, "a copy set to manual is the player's");
+        for raw in [include_str!("../../locales/uk_UA.json"), include_str!("../../locales/en_US.json")] {
+            let map: serde_json::Map<String, Value> = serde_json::from_str(raw).unwrap();
+            assert!(map.contains_key(LOADER_KEPT), "the settings say why");
+        }
     }
 
     #[test]

@@ -9,13 +9,14 @@ use std::sync::Arc;
 
 use launcher_shared::{
     AppError, AppResult, BuildDto, BuildSettingsDto, BuildSettingsUpdate, BuildsSnapshot, DESCRIPTION_MAX,
-    ErrorCode, LoaderKind, Text,
+    ErrorCode, LoaderKind, Text, mods_supported,
 };
 use serde_json::{Value, json};
 
 use crate::builds::components::classify;
 use crate::builds::ids::validate_component_id;
 use crate::builds::settings::{apply_options, read_icon, settings_of};
+use crate::content::inventory::count_mods;
 use crate::feedback::{FeedbackService, OperationHandle, OperationSpec};
 use crate::java::preferences::resolve_java_executable;
 use crate::launch::alive::game_open;
@@ -87,22 +88,43 @@ pub fn default_gpu_mode(config: &ConfigStore) -> &'static str {
     }
 }
 
-/// `build` as the UI lists it.
-pub fn build_dto(build: &Build, mc_dir: &Path, running: bool) -> BuildDto {
-    BuildDto {
-        key: build.key.clone(),
-        version_id: build.version_id.clone(),
-        name: build.name.clone(),
-        version: build.version.clone(),
-        loader: build.loader.clone(),
-        client: build.client.clone(),
-        loader_version: build.loader_version.clone(),
-        game_dir: game_dir(build, mc_dir).to_string_lossy().into_owned(),
-        image: crate::builds::settings::image_src(build.image.as_deref()),
-        description: build.description.clone(),
-        running,
-        profile: crate::launch::options::assigned_profile(&build.options).map(str::to_string),
+/// The mod loader a build had before it went back to vanilla (`LoaderKind`, in lower case).
+pub const LAST_LOADER_OPTION: &str = "lastLoader";
+
+/// The mod loader `build` had before it went back to vanilla, if it did.
+pub fn last_loader(build: &Build) -> Option<LoaderKind> {
+    let kind = serde_json::from_value(build.options.get(LAST_LOADER_OPTION)?.clone()).ok()?;
+    (kind != LoaderKind::Minecraft).then_some(kind)
+}
+
+/// The mod loader `build` runs: its component's, else its client's (vanilla when neither says).
+fn loader_of(build: &Build) -> LoaderKind {
+    component_id(build)
+        .and_then(LoaderKind::of_component)
+        .or_else(|| build.client.as_deref().and_then(LoaderKind::from_client))
+        .unwrap_or(LoaderKind::Minecraft)
+}
+
+/// Notes on `build`, about to go to vanilla (`vanilla`) or to a loader, the loader it leaves: one
+/// going back to vanilla keeps the name of its loader, one taking a loader needs it no more.
+fn note_last_loader(build: &mut Build, vanilla: bool) {
+    match loader_of(build) {
+        _ if !vanilla => {
+            build.options.remove(LAST_LOADER_OPTION);
+        }
+        LoaderKind::Minecraft => {}
+        from => {
+            build.options.insert(LAST_LOADER_OPTION.into(), json!(from));
+        }
     }
+}
+
+/// A module's say over the builds it sets up itself (a server's): their loader is its own, and the
+/// player never changes it by hand.
+pub trait LoaderKeeper: Send + Sync {
+    /// Why `build` (its game folder `game_dir`) keeps its loader, as a translation key; `None`
+    /// when the player may change it.
+    fn kept(&self, build: &Build, game_dir: &Path) -> Option<&'static str>;
 }
 
 /// What a copy of a build leaves behind, by its path in the build: the record (the copy gets its
@@ -158,6 +180,7 @@ pub struct BuildService {
     feedback: Arc<FeedbackService>,
     config: Arc<ConfigStore>,
     instances: Arc<Coordinator>,
+    keepers: Vec<Arc<dyn LoaderKeeper>>,
 }
 
 impl BuildService {
@@ -168,15 +191,50 @@ impl BuildService {
         config: Arc<ConfigStore>,
         instances: Arc<Coordinator>,
     ) -> BuildService {
-        BuildService { versions, components, feedback, config, instances }
+        BuildService { versions, components, feedback, config, instances, keepers: Vec::new() }
+    }
+
+    /// The modules' say over which builds keep their loader (`Module::loader_keeper`).
+    pub fn with_loader_keepers(mut self, keepers: Vec<Arc<dyn LoaderKeeper>>) -> BuildService {
+        self.keepers = keepers;
+        self
+    }
+
+    /// Why a module keeps `build`'s loader (a translation key), if one does.
+    pub fn kept_loader(&self, build: &Build) -> Option<&'static str> {
+        let folder = game_dir(build, self.versions.minecraft_dir());
+        self.keepers.iter().find_map(|keeper| keeper.kept(build, &folder))
+    }
+
+    /// `build` as the UI lists it, with what its folder tells: the mods a build without a mod
+    /// loader still holds.
+    pub fn dto(&self, build: &Build, running: bool) -> BuildDto {
+        let folder = game_dir(build, self.versions.minecraft_dir());
+        let leftover = if mods_supported(build.client.as_deref()) { 0 } else { count_mods(&folder) };
+        BuildDto {
+            key: build.key.clone(),
+            version_id: build.version_id.clone(),
+            name: build.name.clone(),
+            version: build.version.clone(),
+            loader: build.loader.clone(),
+            client: build.client.clone(),
+            loader_version: build.loader_version.clone(),
+            game_dir: folder.to_string_lossy().into_owned(),
+            image: crate::builds::settings::image_src(build.image.as_deref()),
+            description: build.description.clone(),
+            running,
+            profile: crate::launch::options::assigned_profile(&build.options).map(str::to_string),
+            loader_kept: self.kept_loader(build).map(str::to_string),
+            last_loader: last_loader(build),
+            leftover_mods: u32::try_from(leftover).unwrap_or(u32::MAX),
+        }
     }
 
     /// Every build in the user's order (the rest by name); `running` tells which build keys have
     /// a game running.
     pub fn snapshot(&self, running: impl Fn(&Build) -> bool) -> BuildsSnapshot {
-        let mc_dir = self.versions.minecraft_dir();
         let mut builds: Vec<BuildDto> =
-            self.versions.list().iter().map(|b| build_dto(b, mc_dir, running(b))).collect();
+            self.versions.list().iter().map(|b| self.dto(b, running(b))).collect();
         ordered(&mut builds, &saved_order(&self.config));
         BuildsSnapshot { builds }
     }
@@ -370,8 +428,17 @@ impl BuildService {
 
     /// Saves the settings page: a non-empty name no other build has, an installed component, a
     /// real Java file, a valid port and an image icon — or nothing at all. The key and the game
-    /// folder stay.
-    pub fn update_settings(&self, key: &str, update: BuildSettingsUpdate) -> AppResult<BuildSettingsDto> {
+    /// folder stay. It holds the build's folder and writes over the record as it is then, so a
+    /// loader changed meanwhile stays; another component is a loader change, guarded as
+    /// `change_component` is (`running()` tells the build's game runs).
+    pub fn update_settings(
+        &self,
+        key: &str,
+        update: BuildSettingsUpdate,
+        running: impl Fn() -> bool,
+    ) -> AppResult<BuildSettingsDto> {
+        let folder = game_dir(&self.find(key)?, self.versions.minecraft_dir());
+        let _lease = self.instances.try_acquire(&folder, "settings")?;
         let mut build = self.find(key)?;
         let name = update.name.trim().to_string();
         if name.is_empty() {
@@ -388,12 +455,14 @@ impl BuildService {
         }
         let component = update.component.as_deref().map(str::trim).filter(|c| !c.is_empty());
         if let Some(component) = component.filter(|c| build.loader.as_deref() != Some(*c)) {
+            self.may_change_loader(&build, &folder, &running)?;
             validate_component_id(component)?;
             let json = read_version_json(self.versions.minecraft_dir(), component).map_err(|_| {
                 AppError::new(ErrorCode::VersionNotFound, format!("no component {component}"))
                     .with_param("version", component)
             })?;
             let (loader, minecraft, loader_version) = classify(component, &json);
+            note_last_loader(&mut build, loader == Some(LoaderKind::Minecraft));
             build.loader = Some(component.to_string());
             if let Some(mc) = minecraft {
                 build.version = Some(mc);
@@ -417,6 +486,22 @@ impl BuildService {
         self.versions.save(&mut build)?;
         self.feedback.success(Text::key("version_updated"));
         self.settings(key)
+    }
+
+    /// A change of `build`'s loader, under its folder's lease (`folder`): refused for a build a
+    /// module keeps, while another operation runs and while its game runs (`running()`, or
+    /// `game_open`: a game the launcher does not know has its folder open).
+    fn may_change_loader(&self, build: &Build, folder: &Path, running: &impl Fn() -> bool) -> AppResult<()> {
+        if self.kept_loader(build).is_some() {
+            return Err(kept_error(build));
+        }
+        if self.feedback.is_busy() {
+            return Err(AppError::new(ErrorCode::Busy, "another operation is running"));
+        }
+        if running() || game_open(folder) {
+            return Err(running_error(build));
+        }
+        Ok(())
     }
 
     /// The Minecraft version `build` runs: its own, else the one its component names.
@@ -449,8 +534,8 @@ impl BuildService {
 
     /// "Install and use": installs the build of `kind` for Minecraft `mc` and
     /// points build `key` at it — the record changes only once the install succeeded. Refused
-    /// while the build's game runs (`running()`, or `game_open`); its folder is held meanwhile, so
-    /// no game starts on a build half changed.
+    /// for a build a module keeps the loader of, and while the build's game runs (`running()`, or
+    /// `game_open`); its folder is held meanwhile, so no game starts on a build half changed.
     pub async fn change_component(
         &self,
         key: &str,
@@ -460,6 +545,9 @@ impl BuildService {
         running: impl Fn() -> bool,
     ) -> AppResult<BuildSettingsDto> {
         let build = self.find(key)?;
+        if self.kept_loader(&build).is_some() {
+            return Err(kept_error(&build));
+        }
         let spec = match (kind, loader_version) {
             (LoaderKind::Minecraft, _) => ComponentSpec::vanilla(mc),
             (kind, Some(lv)) => ComponentSpec::loader(kind, mc, lv),
@@ -471,14 +559,9 @@ impl BuildService {
                 .with_param("version", mc));
             }
         };
-        if self.feedback.is_busy() {
-            return Err(AppError::new(ErrorCode::Busy, "another operation is running"));
-        }
         let folder = game_dir(&build, self.versions.minecraft_dir());
         let _lease = self.instances.try_acquire(&folder, "loader")?;
-        if running() || game_open(&folder) {
-            return Err(running_error(&build));
-        }
+        self.may_change_loader(&self.find(key)?, &folder, &running)?;
         let (title, status) = match &spec.loader_version {
             None => (
                 Text::key("build_loader_removing").param("build", &build.name),
@@ -508,6 +591,7 @@ impl BuildService {
         };
         op.finish();
         let mut build = self.find(key)?;
+        note_last_loader(&mut build, kind == LoaderKind::Minecraft);
         build.loader = Some(installed.id);
         build.version = Some(spec.mc.clone());
         build.client = Some(kind.display_name().to_string());
@@ -549,6 +633,11 @@ impl BuildService {
 
 fn running_error(build: &Build) -> AppError {
     AppError::new(ErrorCode::BuildRunning, "the build's game is running").with_param("version", &build.name)
+}
+
+fn kept_error(build: &Build) -> AppError {
+    AppError::new(ErrorCode::LoaderKept, "a module keeps the build's loader")
+        .with_param("version", &build.name)
 }
 
 #[cfg(test)]

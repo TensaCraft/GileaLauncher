@@ -471,6 +471,9 @@ mod tests {
             description: String::new(),
             running,
             profile: None,
+            loader_kept: None,
+            last_loader: None,
+            leftover_mods: 0,
         }
     }
 

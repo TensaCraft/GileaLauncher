@@ -396,7 +396,7 @@ pub struct SetupPreview {
 }
 
 /// One build as the UI lists it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildDto {
     pub key: String,
     /// The id `--launch-version` and desktop shortcuts use.
@@ -414,6 +414,15 @@ pub struct BuildDto {
     /// Its own account (a profile key): Play starts with it and asks no account.
     #[serde(default)]
     pub profile: Option<String>,
+    /// Why a module keeps its loader (a translation key): the loader is not changed by hand.
+    #[serde(default)]
+    pub loader_kept: Option<String>,
+    /// The mod loader it had before it went back to vanilla.
+    #[serde(default)]
+    pub last_loader: Option<LoaderKind>,
+    /// Mod files left in its mods folder while it has no mod loader.
+    #[serde(default)]
+    pub leftover_mods: u32,
 }
 
 /// Every build in the order the user put them (the rest by name) (`app://builds`).

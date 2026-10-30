@@ -95,16 +95,17 @@ pub fn tab_tone(tab: &str) -> TagTone {
     }
 }
 
-/// Mods and shader packs need a mod loader: a build without one offers it there.
-pub fn offers_loader(tab: &str, client: Option<&str>) -> bool {
-    matches!(tab, "mods" | "shaders") && !mods_supported(client)
+/// Mods and shader packs need a mod loader: a build without one offers it there, unless a module
+/// keeps its loader (`kept`, the backend's say).
+pub fn offers_loader(tab: &str, client: Option<&str>, kept: bool) -> bool {
+    matches!(tab, "mods" | "shaders") && !mods_supported(client) && !kept
 }
 
 /// The tab a build of `client` opens on for `tab`: a build without a mod loader opens on its
 /// resource packs rather than on the loader its mods offer.
 pub fn tab_for(tab: &str, client: Option<&str>) -> &'static str {
     let tab = normalize_tab(tab, &[]);
-    if offers_loader(tab, client) { "resourcepacks" } else { tab }
+    if offers_loader(tab, client, false) { "resourcepacks" } else { tab }
 }
 
 /// The content a tab lists, if it lists content.
@@ -345,8 +346,10 @@ pub fn ContentPage(key: String) -> impl IntoView {
         }
     };
     // A build without a mod loader offers one in its mods and shader packs: their panel follows
-    // the client (a memo, so the build's other changes leave the panel as it is).
-    let client = Memo::new(move |_| build.with(|b| b.as_ref().map(|b| b.client.clone())));
+    // the client and whether a module keeps the loader (a memo, so the build's other changes
+    // leave the panel as it is).
+    let client =
+        Memo::new(move |_| build.with(|b| b.as_ref().map(|b| (b.client.clone(), b.loader_kept.is_some()))));
     let chips = move || -> Vec<ChipDef> {
         with_module_tabs(TABS.to_vec(), &module_tabs())
             .into_iter()
@@ -367,7 +370,9 @@ pub fn ContentPage(key: String) -> impl IntoView {
             id if module_tabs().iter().any(|t| t.id == id) => {
                 module_tabs().into_iter().find(|t| t.id == id).map(|t| (t.view)(key))
             }
-            id if client.with(|c| c.as_ref().is_some_and(|c| offers_loader(id, c.as_deref()))) => {
+            id if client
+                .with(|c| c.as_ref().is_some_and(|(c, kept)| offers_loader(id, c.as_deref(), *kept))) =>
+            {
                 let kind = kind_of_tab(id).unwrap_or(ContentKind::Mods);
                 Some(view! { <LoaderOffer key=key kind=kind current=build /> }.into_any())
             }
@@ -555,8 +560,9 @@ mod tests {
             ("mods", Some("Fabric"), false),
             ("shaders", Some("TensaCraft"), false),
         ] {
-            assert_eq!(offers_loader(tab, client), offer, "{tab} of {client:?}");
+            assert_eq!(offers_loader(tab, client, false), offer, "{tab} of {client:?}");
         }
+        assert!(!offers_loader("mods", Some("Minecraft"), true), "a module keeps its loader");
     }
 
     #[test]

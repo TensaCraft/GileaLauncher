@@ -28,6 +28,9 @@ fn mock_build(key: &str, name: &str, version: &str) -> BuildDto {
         description: String::new(),
         running: false,
         profile: None,
+        loader_kept: None,
+        last_loader: None,
+        leftover_mods: 0,
     }
 }
 

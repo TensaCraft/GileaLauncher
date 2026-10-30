@@ -246,6 +246,7 @@
   "build_loader_vanilla_warning": "Vanilla Minecraft loads no mods. The mods for {from} stay in the mods folder and work again once {from} is back.",
   "build_loader_confirm_title": "Change the loader?",
   "build_loader_confirm": "Change",
+  "build_loader_kept": "The loader of “{version}” is set for it by the server it follows, so it is not changed by hand.",
   "loader_offer_mods_title": "To add mods, install a loader",
   "loader_offer_mods_desc": "The loader goes into this build for Minecraft {mc}. Worlds, settings and resource packs stay.",
   "loader_offer_shaders_title": "To add shaders, install a loader",

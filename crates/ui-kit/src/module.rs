@@ -125,16 +125,6 @@ pub struct ModuleContentNotice {
     pub applies: fn(&launcher_shared::BuildDto) -> bool,
 }
 
-/// Builds whose loader a module sets itself (a server's builds), for the builds `applies` accepts:
-/// their settings show the loader without "Change", and `reason` says why.
-#[derive(Debug, Clone, Copy)]
-pub struct ModuleLoaderLock {
-    pub module: &'static str,
-    /// Translation key of why the loader is not changed here.
-    pub reason: &'static str,
-    pub applies: fn(&launcher_shared::BuildDto) -> bool,
-}
-
 /// A mark a module puts on a build's card and row (its tip says what it means): `view` gets the
 /// build's key and shows nothing when the mark does not apply.
 #[derive(Debug, Clone, Copy)]
@@ -300,11 +290,6 @@ pub trait UiModule: 'static {
 
     /// Marks on a build's card and row.
     fn build_badges(&self) -> Vec<ModuleBuildBadge> {
-        Vec::new()
-    }
-
-    /// Builds whose loader the module sets itself.
-    fn loader_locks(&self) -> Vec<ModuleLoaderLock> {
         Vec::new()
     }
 }

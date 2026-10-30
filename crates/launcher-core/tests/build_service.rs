@@ -1,10 +1,10 @@
 mod support;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use launcher_core::builds::service::{BuildService, GPU_MODE_DEFAULT_KEY};
+use launcher_core::builds::service::{BuildService, GPU_MODE_DEFAULT_KEY, LoaderKeeper};
 use launcher_core::feedback::{EventSink, FeedbackService, OperationSpec};
 use launcher_core::java::runtime::JavaRuntimes;
 use launcher_core::loaders::ComponentInstaller;
@@ -61,6 +61,11 @@ fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
 }
 
 fn world(fake: &FakeMojang) -> World {
+    world_with(fake, Vec::new())
+}
+
+/// `world` whose modules keep the loader of the builds `keepers` name.
+fn world_with(fake: &FakeMojang, keepers: Vec<Arc<dyn LoaderKeeper>>) -> World {
     let tmp = tempfile::tempdir().unwrap();
     let (state, mc) = (tmp.path().join("state"), tmp.path().join("minecraft"));
     std::fs::create_dir_all(&state).unwrap();
@@ -101,7 +106,8 @@ fn world(fake: &FakeMojang) -> World {
             .with_runner(Arc::new(FakeRunner::default())),
     );
     let service =
-        BuildService::new(versions.clone(), components, feedback.clone(), config.clone(), instances.clone());
+        BuildService::new(versions.clone(), components, feedback.clone(), config.clone(), instances.clone())
+            .with_loader_keepers(keepers);
     World { _tmp: tmp, games, versions, feedback, heard, config, instances, service }
 }
 
@@ -463,7 +469,7 @@ async fn settings_are_read_and_saved() {
     update.server_host = "play.example".into();
     update.server_port = "25570".into();
     update.image_path = Some(icon.to_string_lossy().into_owned());
-    let after = w.service.update_settings(&build.key, update).unwrap();
+    let after = w.service.update_settings(&build.key, update, || false).unwrap();
     assert_eq!((after.name.as_str(), after.gpu_mode.as_str(), after.max_ram_gb), ("Aero 2", "igpu", Some(4)));
     assert!(
         after.java_path.is_some()
@@ -476,7 +482,7 @@ async fn settings_are_read_and_saved() {
     let mut back = update_from(&after);
     back.java_path = None;
     back.remove_image = true;
-    let reset = w.service.update_settings(&build.key, back).unwrap();
+    let reset = w.service.update_settings(&build.key, back, || false).unwrap();
     assert_eq!((reset.java_path, reset.image), (None, None));
     assert!(!w.versions.get(&build.key).unwrap().options.contains_key("executablePath"));
 }
@@ -522,7 +528,7 @@ async fn bad_settings_change_nothing() {
     ];
     for (update, code) in cases {
         assert_eq!(
-            w.service.update_settings(&build.key, update.clone()).unwrap_err().code,
+            w.service.update_settings(&build.key, update.clone(), || false).unwrap_err().code,
             code,
             "{update:?}"
         );
@@ -571,7 +577,7 @@ async fn a_build_changes_its_component_only_after_the_install() {
     );
     let mut back = update_from(&fabric);
     back.component = Some("1.21.1".into());
-    w.service.update_settings(&build.key, back).unwrap();
+    w.service.update_settings(&build.key, back, || false).unwrap();
     let record = w.versions.get(&build.key).unwrap();
     assert_eq!(
         (record.loader.as_deref(), record.client.as_deref(), record.loader_version.as_deref()),
@@ -596,7 +602,7 @@ async fn a_new_component_brings_its_own_java() {
     std::fs::write(&jdk8, b"java").unwrap();
     let mut pinned = update_from(&w.service.settings(&build.key).unwrap());
     pinned.java_path = Some(jdk8.to_string_lossy().into_owned());
-    assert!(w.service.update_settings(&build.key, pinned).unwrap().java_path.is_some());
+    assert!(w.service.update_settings(&build.key, pinned, || false).unwrap().java_path.is_some());
     let changed = w
         .service
         .change_component(&build.key, LoaderKind::Fabric, "1.21.1", Some("0.16.9"), || false)
@@ -730,6 +736,109 @@ async fn a_loader_needs_its_build_and_the_build_s_minecraft() {
     );
 }
 
+/// Keeps the loader of the builds named "Server…", as a module that sets up a server's builds.
+struct ServerBuilds;
+
+impl LoaderKeeper for ServerBuilds {
+    fn kept(&self, build: &Build, _game_dir: &Path) -> Option<&'static str> {
+        build.name.starts_with("Server").then_some("server_sets_the_loader")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_loader_a_module_keeps_is_never_changed_by_hand() {
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    fake.add_loader("fabric", "1.21.1", "0.16.9", true);
+    let w = world_with(&fake, vec![Arc::new(ServerBuilds)]);
+    let server = w.service.install_loader("Server", LoaderKind::Fabric, "1.21.1", "0.16.9").await.unwrap();
+    let own = w.service.install_vanilla("Own", "1.21.1").await.unwrap();
+    let (before, requests) = (w.versions.get(&server.key).unwrap(), fake.server.total_requests());
+    let why = |e: launcher_shared::AppError| (e.code, e.params.get("version").cloned());
+    let refused = (ErrorCode::LoaderKept, Some("Server".to_string()));
+    let set = w.service.set_loader(&server.key, LoaderKind::Minecraft, None, || false).await;
+    assert_eq!(why(set.unwrap_err()), refused);
+    let changed =
+        w.service.change_component(&server.key, LoaderKind::Fabric, "1.21.1", Some("0.16.9"), || false).await;
+    assert_eq!(why(changed.unwrap_err()), refused);
+    let mut vanilla = update_from(&w.service.settings(&server.key).unwrap());
+    vanilla.component = Some("1.21.1".into());
+    assert_eq!(why(w.service.update_settings(&server.key, vanilla.clone(), || false).unwrap_err()), refused);
+    assert_eq!(w.versions.get(&server.key).unwrap(), before, "nothing is written");
+    assert_eq!(fake.server.total_requests(), requests, "nothing is downloaded");
+    // Its other settings still save.
+    vanilla.component = None;
+    vanilla.max_ram_gb = Some(4);
+    assert_eq!(w.service.update_settings(&server.key, vanilla, || false).unwrap().max_ram_gb, Some(4));
+    // The list tells which builds keep their loader, and why.
+    let listed = w.service.snapshot(|_| false).builds;
+    let kept = |key: &str| listed.iter().find(|b| b.key == key).unwrap().loader_kept.clone();
+    assert_eq!(kept(&server.key).as_deref(), Some("server_sets_the_loader"));
+    assert_eq!(kept(&own.key), None);
+    w.service.set_loader(&own.key, LoaderKind::Fabric, Some("0.16.9"), || false).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_save_under_the_build_s_folder_and_change_its_component_only_while_the_game_is_closed() {
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    fake.add_loader("fabric", "1.21.1", "0.16.9", true);
+    let w = world(&fake);
+    let build = w.service.install_loader("Aero", LoaderKind::Fabric, "1.21.1", "0.16.9").await.unwrap();
+    let folder = w.games.join("aero");
+    let base = update_from(&w.service.settings(&build.key).unwrap());
+    // A running game keeps nothing else from saving.
+    let renamed = BuildSettingsUpdate { name: "Aero 2".into(), ..base.clone() };
+    assert_eq!(w.service.update_settings(&build.key, renamed, || true).unwrap().name, "Aero 2");
+    // A new component is a loader change: not while its game runs, nor while another operation does.
+    let before = w.versions.get(&build.key).unwrap();
+    let vanilla = BuildSettingsUpdate { component: Some("1.21.1".into()), ..base.clone() };
+    let save = |update: &BuildSettingsUpdate, running: bool| {
+        w.service.update_settings(&build.key, update.clone(), move || running).map_err(|e| e.code)
+    };
+    assert_eq!(save(&vanilla, true).unwrap_err(), ErrorCode::BuildRunning);
+    // A game the launcher started before it restarted: the registry does not know it.
+    let game = open_world(&folder, "World");
+    assert_eq!(save(&vanilla, false).unwrap_err(), ErrorCode::BuildRunning);
+    drop(game);
+    let other = w.feedback.begin(OperationSpec::new(Text::key("installation_started"), "install"));
+    assert_eq!(save(&vanilla, false).unwrap_err(), ErrorCode::Busy);
+    other.finish();
+    // Another hold on the folder (a loader change on its way, a sync): nothing is saved meanwhile.
+    let lease = w.instances.try_acquire(&folder, "loader").unwrap();
+    assert_eq!(save(&base, false).unwrap_err(), ErrorCode::InstanceBusy);
+    drop(lease);
+    assert_eq!(w.versions.get(&build.key).unwrap(), before, "nothing is written");
+    assert_eq!(save(&vanilla, false).unwrap().component.as_deref(), Some("1.21.1"));
+    assert!(w.instances.active_kind(&folder).is_none(), "the folder is free again");
+    let listed = w.service.snapshot(|_| false).builds.into_iter().find(|b| b.key == build.key).unwrap();
+    assert_eq!(listed.last_loader, Some(LoaderKind::Fabric), "back on vanilla, it remembers its loader");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_back_on_vanilla_remembers_its_loader_and_counts_the_mods_it_left() {
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    fake.add_loader("fabric", "1.21.1", "0.16.9", true);
+    let w = world(&fake);
+    let build = w.service.install_loader("Aero", LoaderKind::Fabric, "1.21.1", "0.16.9").await.unwrap();
+    let mods = w.games.join("aero").join("mods");
+    std::fs::create_dir_all(mods.join("folder.jar")).unwrap();
+    for file in ["sodium.jar", "Lithium.JAR.disabled", "notes.txt"] {
+        std::fs::write(mods.join(file), b"x").unwrap();
+    }
+    let listed = || w.service.snapshot(|_| false).builds.into_iter().find(|b| b.key == build.key).unwrap();
+    let state = |b: launcher_shared::BuildDto| (b.last_loader, b.leftover_mods);
+    assert_eq!(state(listed()), (None, 0), "its mods are its loader's");
+    w.service.set_loader(&build.key, LoaderKind::Minecraft, None, || false).await.unwrap();
+    assert_eq!(state(listed()), (Some(LoaderKind::Fabric), 2), "jars, turned off or not");
+    std::fs::remove_file(mods.join("sodium.jar")).unwrap();
+    assert_eq!(state(listed()), (Some(LoaderKind::Fabric), 1), "counted as the folder is");
+    w.service.set_loader(&build.key, LoaderKind::Fabric, Some("0.16.9"), || false).await.unwrap();
+    assert_eq!(state(listed()), (None, 0), "a loader again");
+    assert!(!w.versions.get(&build.key).unwrap().options.contains_key("lastLoader"));
+}
+
 fn names(w: &World) -> Vec<String> {
     w.service.snapshot(|_| false).builds.into_iter().map(|b| b.name).collect()
 }
@@ -835,11 +944,11 @@ async fn a_build_keeps_the_description_it_is_given() {
     let build = w.service.install_vanilla("Aero", "1.21.1").await.unwrap();
     let base = update_from(&w.service.settings(&build.key).unwrap());
     let set = BuildSettingsUpdate { description: Some("  Тест  ".into()), ..base.clone() };
-    assert_eq!(w.service.update_settings(&build.key, set).unwrap().description, "Тест");
-    let kept = w.service.update_settings(&build.key, base.clone()).unwrap();
+    assert_eq!(w.service.update_settings(&build.key, set, || false).unwrap().description, "Тест");
+    let kept = w.service.update_settings(&build.key, base.clone(), || false).unwrap();
     assert_eq!(kept.description, "Тест", "none keeps it");
     let long = BuildSettingsUpdate { description: Some("а".repeat(400)), ..base };
-    let cut = w.service.update_settings(&build.key, long).unwrap();
+    let cut = w.service.update_settings(&build.key, long, || false).unwrap();
     assert_eq!(cut.description.chars().count(), 300);
     assert_eq!(w.service.settings(&build.key).unwrap().description.chars().count(), 300);
 }

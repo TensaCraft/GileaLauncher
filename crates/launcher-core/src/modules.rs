@@ -1,6 +1,7 @@
 //! Compile-time module system. Modules register through cargo features in `launcher-app`/`launcher-ui`.
 //! A module may provide content (`ContentProvider`), steps before a launch
-//! (`LaunchHook`), eyes on a started game (`GameWatcher`) and its own commands (`Module::call`).
+//! (`LaunchHook`), eyes on a started game (`GameWatcher`), a say over which builds keep their
+//! loader (`LoaderKeeper`) and its own commands (`Module::call`).
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -13,6 +14,7 @@ use launcher_shared::provider::{Need, ProviderInfo};
 use launcher_shared::{AppError, AppResult, ErrorCode, ModuleInfo};
 use serde_json::Value;
 
+use crate::builds::service::LoaderKeeper;
 use crate::core_app::CoreApp;
 use crate::feedback::FeedbackService;
 use crate::launch::hooks::{GameWatcher, LaunchHook};
@@ -62,6 +64,11 @@ pub trait Module: Send + Sync + 'static {
 
     /// Its eye on every started game, if it has one.
     fn game_watcher(&self) -> Option<Arc<dyn GameWatcher>> {
+        None
+    }
+
+    /// Its say over the loader of the builds it sets up itself, if it sets up any.
+    fn loader_keeper(&self) -> Option<Arc<dyn LoaderKeeper>> {
         None
     }
 
@@ -160,6 +167,11 @@ impl ModuleRegistry {
     /// The modules' eyes on every started game, in registration order.
     pub fn game_watchers(&self) -> Vec<Arc<dyn GameWatcher>> {
         self.modules.iter().filter_map(|m| m.game_watcher()).collect()
+    }
+
+    /// The modules' say over which builds keep their loader, in registration order.
+    pub fn loader_keepers(&self) -> Vec<Arc<dyn LoaderKeeper>> {
+        self.modules.iter().filter_map(|m| m.loader_keeper()).collect()
     }
 
     /// Module `module`'s `command` creates or changes builds.
@@ -279,6 +291,36 @@ mod tests {
         let build = crate::storage::versions::Build::new("Aero");
         let managed = registry.managed_files(&build, std::path::Path::new("games/aero"));
         assert_eq!(managed, vec!["config/server", "mods", "resourcepacks/pack.zip"]);
+    }
+
+    /// Keeps the loader of every build.
+    struct Keeps;
+    impl LoaderKeeper for Keeps {
+        fn kept(&self, _build: &Build, _game_dir: &Path) -> Option<&'static str> {
+            Some("kept_by_keeper")
+        }
+    }
+
+    struct Keeper;
+    impl Module for Keeper {
+        fn id(&self) -> &'static str {
+            "keeper"
+        }
+        fn version(&self) -> &'static str {
+            "1.0.0"
+        }
+        fn loader_keeper(&self) -> Option<Arc<dyn LoaderKeeper>> {
+            Some(Arc::new(Keeps))
+        }
+    }
+
+    #[test]
+    fn only_a_module_with_a_say_over_loaders_keeps_them() {
+        let registry = ModuleRegistry::new(vec![Box::new(Dummy("a")), Box::new(Keeper)]).unwrap();
+        let keepers = registry.loader_keepers();
+        assert_eq!(keepers.len(), 1, "a module without one adds none");
+        let build = Build::new("Aero");
+        assert_eq!(keepers[0].kept(&build, Path::new("games/aero")), Some("kept_by_keeper"));
     }
 
     #[test]

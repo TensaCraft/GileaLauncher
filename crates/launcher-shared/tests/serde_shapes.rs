@@ -86,7 +86,7 @@ fn update_error_codes_have_their_own_keys() {
     assert_eq!(ErrorCode::IntegrityMismatch.i18n_key(), "update_hash_mismatch");
     assert_eq!(ErrorCode::NoUpdateAsset.i18n_key(), "update_no_asset");
     assert_eq!(serde_json::to_value(ErrorCode::RateLimited).unwrap(), json!("rate_limited"));
-    assert_eq!(ErrorCode::ALL.len(), 59);
+    assert_eq!(ErrorCode::ALL.len(), 60);
     assert_eq!(
         (serde_json::to_value(ErrorCode::LowMemory).unwrap(), ErrorCode::LowMemory.i18n_key()),
         (json!("low_memory"), "version_low_memory")
@@ -291,11 +291,23 @@ fn build_and_java_dtos_keep_their_wire_shape() {
         description: String::new(),
         running: true,
         profile: Some("Alex".into()),
+        loader_kept: None,
+        last_loader: Some(LoaderKind::Fabric),
+        leftover_mods: 3,
     };
     assert_eq!(
         serde_json::to_value(BuildsSnapshot { builds: vec![build] }).unwrap(),
         json!({"builds": [{"key": "aero", "version_id": "aero", "name": "Aero", "version": "1.21.1", "loader": "1.21.1", "client": "Minecraft",
-                           "loader_version": null, "game_dir": "G/games/aero", "image": null, "description": "", "running": true, "profile": "Alex"}]})
+                           "loader_version": null, "game_dir": "G/games/aero", "image": null, "description": "", "running": true, "profile": "Alex",
+                           "loader_kept": null, "last_loader": "fabric", "leftover_mods": 3}]})
+    );
+    let old: BuildDto = serde_json::from_value(json!({"key": "aero", "version_id": "aero", "name": "Aero", "version": null,
+        "loader": null, "client": null, "loader_version": null, "game_dir": "G", "image": null, "description": "", "running": false}))
+    .unwrap();
+    assert_eq!(
+        (old.loader_kept, old.last_loader, old.leftover_mods),
+        (None, None, 0),
+        "a list from before reads"
     );
     let java = JavaList {
         launcher: vec![JavaEntry {
@@ -701,4 +713,12 @@ fn third_party_sign_in_errors_have_their_own_keys() {
         assert!(ErrorCode::ALL.contains(&code));
         assert!(!code.reportable(), "{code:?}");
     }
+}
+
+/// A build a module keeps the loader of says so in its own words, and it is no launcher fault.
+#[test]
+fn a_kept_loader_has_its_own_key() {
+    assert_eq!(ErrorCode::LoaderKept.i18n_key(), "build_loader_kept");
+    assert_eq!(serde_json::to_value(ErrorCode::LoaderKept).unwrap(), json!("loader_kept"));
+    assert!(ErrorCode::ALL.contains(&ErrorCode::LoaderKept) && !ErrorCode::LoaderKept.reportable());
 }

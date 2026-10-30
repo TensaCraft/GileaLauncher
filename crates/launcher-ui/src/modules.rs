@@ -4,8 +4,8 @@ use launcher_shared::{AppInfo, BuildDto};
 use leptos::prelude::*;
 use ui_kit::module::{
     DeleteOption, ModuleAccountKind, ModuleAlertAction, ModuleBuildAction, ModuleBuildBadge,
-    ModuleContentNotice, ModuleHomeCards, ModuleLoaderLock, ModuleOverlay, ModuleSection,
-    ModuleSettingsBlock, ModuleSupportAction, ModuleTab, UiModule,
+    ModuleContentNotice, ModuleHomeCards, ModuleOverlay, ModuleSection, ModuleSettingsBlock,
+    ModuleSupportAction, ModuleTab, UiModule,
 };
 
 use crate::shell::sidebar::backend_modules;
@@ -26,7 +26,6 @@ pub struct ModuleParts {
     pub content_notices: Vec<ModuleContentNotice>,
     pub support_actions: Vec<ModuleSupportAction>,
     pub badges: Vec<ModuleBuildBadge>,
-    pub loader_locks: Vec<ModuleLoaderLock>,
 }
 
 impl ModuleParts {
@@ -44,7 +43,6 @@ impl ModuleParts {
             content_notices: modules.iter().flat_map(|m| m.content_notices()).collect(),
             support_actions: modules.iter().flat_map(|m| m.support_actions()).collect(),
             badges: modules.iter().flat_map(|m| m.build_badges()).collect(),
-            loader_locks: modules.iter().flat_map(|m| m.loader_locks()).collect(),
         }
     }
 
@@ -69,14 +67,7 @@ impl ModuleParts {
             content_notices: self.content_notices.iter().copied().filter(|n| has(n.module)).collect(),
             support_actions: self.support_actions.iter().copied().filter(|a| has(a.module)).collect(),
             badges: self.badges.iter().copied().filter(|b| has(b.module)).collect(),
-            loader_locks: self.loader_locks.iter().copied().filter(|l| has(l.module)).collect(),
         }
-    }
-
-    /// Why `build`'s loader is not changed in its settings: the translation key of the first module
-    /// that sets it, if one does.
-    pub fn loader_lock_for(&self, build: &BuildDto) -> Option<&'static str> {
-        self.loader_locks.iter().find(|l| (l.applies)(build)).map(|l| l.reason)
     }
 
     /// The translation keys of the warnings for `build`'s provider tab of `source`: a module's own
@@ -200,13 +191,6 @@ mod tests {
                 applies: |b| b.client.as_deref() == Some("Watched"),
             }]
         }
-        fn loader_locks(&self) -> Vec<ModuleLoaderLock> {
-            vec![ModuleLoaderLock {
-                module: "watcher",
-                reason: "watched_loader_is_set",
-                applies: |b| b.client.as_deref() == Some("Watched"),
-            }]
-        }
     }
 
     fn build(client: Option<&str>) -> BuildDto {
@@ -223,6 +207,9 @@ mod tests {
             description: String::new(),
             running: false,
             profile: None,
+            loader_kept: None,
+            last_loader: None,
+            leftover_mods: 0,
         }
     }
 
@@ -239,19 +226,6 @@ mod tests {
         assert!(
             all.present_among(&[]).notices_for(&build(Some("Watched")), "modrinth").is_empty(),
             "no backend, no warning"
-        );
-    }
-
-    #[test]
-    fn a_module_keeps_the_loader_of_the_builds_it_sets() {
-        let all = ModuleParts::of(&[Box::new(WithOverlay) as Box<dyn UiModule>]);
-        let on = all.present_among(&["watcher".to_string()]);
-        assert_eq!(on.loader_lock_for(&build(Some("Watched"))), Some("watched_loader_is_set"));
-        assert_eq!(on.loader_lock_for(&build(Some("Fabric"))), None, "the player's own builds change");
-        assert_eq!(
-            all.present_among(&[]).loader_lock_for(&build(Some("Watched"))),
-            None,
-            "no backend, no lock"
         );
     }
 

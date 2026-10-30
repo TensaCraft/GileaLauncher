@@ -73,10 +73,12 @@ pub enum ErrorCode {
     AuthCodeRequired,
     /// No auth server answers at the address given.
     AuthServerInvalid,
+    /// A module keeps the build's loader (a server's build): it is not changed by hand.
+    LoaderKept,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 59] = [
+    pub const ALL: [ErrorCode; 60] = [
         ErrorCode::Internal,
         ErrorCode::Io,
         ErrorCode::InvalidInput,
@@ -136,6 +138,7 @@ impl ErrorCode {
         ErrorCode::AuthCredentialsInvalid,
         ErrorCode::AuthCodeRequired,
         ErrorCode::AuthServerInvalid,
+        ErrorCode::LoaderKept,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -199,6 +202,7 @@ impl ErrorCode {
             ErrorCode::AuthCredentialsInvalid => "auth_credentials_invalid",
             ErrorCode::AuthCodeRequired => "auth_code_required",
             ErrorCode::AuthServerInvalid => "auth_server_invalid",
+            ErrorCode::LoaderKept => "build_loader_kept",
         }
     }
 
@@ -306,7 +310,8 @@ impl ErrorCode {
             | ProviderFilesHeld
             | LowMemory
             | FileNameInvalid
-            | FileNameTaken => false,
+            | FileNameTaken
+            | LoaderKept => false,
         }
     }
 }

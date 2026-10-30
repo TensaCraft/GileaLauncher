@@ -22,7 +22,7 @@ pub mod whitelist;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
-use launcher_core::builds::service::default_gpu_mode;
+use launcher_core::builds::service::{LoaderKeeper, default_gpu_mode};
 use launcher_core::core_app::CoreApp;
 use launcher_core::launch::hooks::LaunchHook;
 use launcher_core::modules::{Module, ModuleFuture};
@@ -125,6 +125,10 @@ impl Module for TensaModule {
                 None
             }
         }
+    }
+
+    fn loader_keeper(&self) -> Option<Arc<dyn LoaderKeeper>> {
+        Some(Arc::new(identity::ServerLoader))
     }
 
     fn changes_builds(&self, command: &str) -> bool {

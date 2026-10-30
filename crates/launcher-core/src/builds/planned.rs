@@ -54,11 +54,12 @@ fn apply_settings(core: &CoreApp, key: &str, settings: &PlannedSettings) -> AppR
     if !settings.description.trim().is_empty() {
         update.description = Some(settings.description.clone());
     }
-    core.builds.update_settings(key, update)?;
+    let running = || core.launcher.is_running(key);
+    core.builds.update_settings(key, update, running)?;
     if let Some(image) = settings.image_path.clone() {
         let icon =
             BuildSettingsUpdate { image_path: Some(image), ..update_from(&core.builds.settings(key)?) };
-        core.builds.update_settings(key, icon)?;
+        core.builds.update_settings(key, icon, running)?;
     }
     Ok(())
 }

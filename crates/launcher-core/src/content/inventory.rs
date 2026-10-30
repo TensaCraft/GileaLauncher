@@ -111,6 +111,14 @@ fn split_disabled<'a>(name: &'a str, ext: &str) -> Option<(&'a str, bool)> {
     }
 }
 
+/// How many mod files (`.jar`, turned off or not) `<game>/mods` holds; none is read.
+pub fn count_mods(game_dir: &Path) -> usize {
+    children(&game_dir.join("mods"))
+        .into_iter()
+        .filter(|(_, name, meta)| meta.is_file() && split_disabled(name, ".jar").is_some())
+        .count()
+}
+
 /// The mods in `<game>/mods`, by name, with what each JAR says of itself.
 /// `backups` are the build's mod backups (`content::backups::backups`), for `has_backup`.
 pub fn scan_mods(

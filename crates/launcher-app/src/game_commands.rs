@@ -1,7 +1,6 @@
 //! IPC for builds, the Minecraft catalog, Java and memory. Commands that change the
 //! build list announce it on `app://builds`.
 
-use launcher_core::builds::service::build_dto;
 use launcher_core::core_app::CoreApp;
 use launcher_core::java::memory::MemoryLimits;
 use launcher_core::java::preferences::now_secs;
@@ -35,7 +34,7 @@ fn find_build(core: &CoreApp, key: &str) -> AppResult<Build> {
 }
 
 fn dto(core: &CoreApp, build: &Build) -> BuildDto {
-    build_dto(build, &core.paths.minecraft_dir, core.launcher.runs(build))
+    core.builds.dto(build, core.launcher.runs(build))
 }
 
 #[tauri::command]
@@ -121,7 +120,7 @@ pub async fn build_settings_save(
 ) -> AppResult<BuildSettingsDto> {
     let core = state.core.clone();
     blocking(move || {
-        let result = core.builds.update_settings(&key, update);
+        let result = core.builds.update_settings(&key, update, || core.launcher.is_running(&key));
         announce_builds(&app, &core);
         result
     })

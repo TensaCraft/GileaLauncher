@@ -246,6 +246,7 @@
   "build_loader_vanilla_warning": "Ванільний Minecraft не завантажує моди. Моди для {from} лишаться в теці mods і запрацюють знову, якщо повернути {from}.",
   "build_loader_confirm_title": "Змінити лоадер?",
   "build_loader_confirm": "Змінити",
+  "build_loader_kept": "Лоадер «{version}» задає сервер, за яким вона йде, тож вручну він не змінюється.",
   "loader_offer_mods_title": "Щоб додавати моди, встановіть лоадер",
   "loader_offer_mods_desc": "Лоадер встановиться в цю збірку для Minecraft {mc}. Світи, налаштування й пакети ресурсів лишаться на місці.",
   "loader_offer_shaders_title": "Щоб додавати шейдери, встановіть лоадер",

@@ -45,6 +45,7 @@ Every method but `id` and `version` is optional:
 | `game_watcher` | watching a running game, and hearing it exit (`GameWatch::exited`: `sync` syncs after a game closes) |
 | `attach` | the started core, once (for a launch step or a watch that needs its services: `sync`) |
 | `managed_files` | the paths of a build the module keeps in line itself; other modules leave them alone there (`tensa`'s server builds) |
+| `loader_keeper` | which builds keep the loader the module sets (`tensa`'s server builds): the core refuses to change it by hand, and the interface hides «Change» |
 | `call` | the module's own commands, which the interface calls through `module_invoke` |
 | `changes_builds` | a command changes builds: the app refreshes the build list after it |
 

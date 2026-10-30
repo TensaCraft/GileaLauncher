@@ -42,7 +42,7 @@ const HOLD_WAIT: Duration = Duration::from_secs(60);
 /// Holds a launch waits out instead of refusing: the launcher's own, which end by themselves — a
 /// sync pass, and the start's file move and daily clean (a shortcut's launch comes right then).
 fn waits_out(kind: &str) -> bool {
-    matches!(kind, "sync" | "layout" | "storage")
+    matches!(kind, "sync" | "layout" | "storage" | "settings")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
