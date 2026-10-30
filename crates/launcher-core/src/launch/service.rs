@@ -132,6 +132,19 @@ pub struct LaunchStarted {
     pub game_dir: PathBuf,
 }
 
+/// How long a game the launcher did not start may take to close: its process to go, then its
+/// files (Java closes them a moment after its exit code shows).
+const CLOSING: Duration = Duration::from_secs(30);
+
+/// Waits until nothing holds `folder` open as a running game does, at most `limit`: the pages
+/// that ask again once a game is told gone must see it stopped.
+fn until_closed(folder: &Path, poll: Duration, limit: Duration) {
+    let deadline = Instant::now() + limit;
+    while game_open(folder) && Instant::now() < deadline {
+        std::thread::sleep(poll);
+    }
+}
+
 pub struct LaunchService {
     deps: LaunchDeps,
     registry: Arc<LaunchRegistry>,
@@ -172,6 +185,8 @@ impl LaunchService {
             self.registry.register(&entry.key, process.clone());
             let (registry, sink, ledger, poll) =
                 (self.registry.clone(), self.deps.sink.clone(), ledger.clone(), self.deps.timings.poll);
+            let folder =
+                self.deps.versions.get(&entry.build_key).map(|build| game_dir(&build, &self.deps.mc_dir));
             let watched = std::thread::Builder::new().name(format!("game-{pid}")).spawn(move || {
                 while matches!(process.lock().unwrap_or_else(|e| e.into_inner()).try_wait(), Ok(None)) {
                     std::thread::sleep(poll);
@@ -180,6 +195,10 @@ impl LaunchService {
                 registry.take_stopped(pid);
                 registry.unregister(&entry.key, pid);
                 let _ = ledger.remove(pid);
+                // Another copy of the build keeps its folder open: it runs on, nothing to wait for.
+                if let Some(folder) = folder.filter(|_| !registry.is_active(&entry.key)) {
+                    until_closed(&folder, poll, CLOSING);
+                }
                 sink.game(&GameEvent {
                     build_key: entry.build_key,
                     build_name: entry.build_name,
@@ -235,11 +254,13 @@ impl LaunchService {
     fn announce_end(&self, build: &Build, pid: u32) {
         let (sink, poll) = (self.deps.sink.clone(), self.deps.timings.poll);
         let (build_key, build_name) = (build.key.clone(), build.name.clone());
+        let folder = game_dir(build, &self.deps.mc_dir);
         let _ = std::thread::Builder::new().name(format!("game-{pid}")).spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(30);
+            let deadline = Instant::now() + CLOSING;
             while process_started(pid).is_some() && Instant::now() < deadline {
                 std::thread::sleep(poll);
             }
+            until_closed(&folder, poll, deadline.saturating_duration_since(Instant::now()));
             sink.game(&GameEvent { build_key, build_name, state: GameState::Exited { code: None } });
         });
     }

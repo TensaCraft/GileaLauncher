@@ -709,6 +709,33 @@ async fn a_game_left_by_a_restart_can_be_stopped() {
     eventually("the ledger forgets it", || Ledger::new(w.ledger.clone()).entries().is_empty());
 }
 
+/// Java closes a game's files a moment after its process has gone: the end of a game taken back
+/// after a restart is told once its folder is free, so the pages that ask again see it stopped.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_game_left_by_a_restart_is_told_gone_once_its_folder_is_free() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let w = world().await;
+    w.auth.create_offline("Steve").unwrap();
+    let key = w.build("Aero", &["-Dfake.after=30000"]).await;
+    let started = w.launcher.launch(request(&key)).await.unwrap();
+    let seen = Arc::new(Recorder::default());
+    let again = LaunchService::new(LaunchDeps { sink: seen.clone() as Arc<dyn EventSink>, ..w.deps.clone() });
+    assert_eq!(again.adopt(), 1);
+    let log = started.game_dir.join("logs").join("latest.log");
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    // FILE_SHARE_READ only: written, as the game writes its log.
+    let held =
+        std::fs::File::options().create(true).truncate(true).write(true).share_mode(1).open(&log).unwrap();
+    assert_eq!(again.terminate(&key), 1);
+    eventually("the game stops", || process_started(started.pid).is_none());
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(seen.games.lock().unwrap().is_empty(), "not told gone while its log is still written");
+    drop(held);
+    eventually("told gone", || !seen.games.lock().unwrap().is_empty());
+    assert!(!again.is_running(&key), "the pages ask again and see it stopped");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_record_whose_process_is_gone_is_dropped() {
     let w = world().await;
