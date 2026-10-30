@@ -18,6 +18,8 @@ const GAME_ID: &str = "2ca6c1be-e03b-32d5-a995-86a64e1a3b2a";
 struct Site {
     two_factor: bool,
     disabled: bool,
+    /// The site knows no game account for the user (no `uuid`).
+    no_game_id: bool,
     token: Arc<Mutex<Option<String>>>,
     logged_out: Arc<Mutex<Vec<String>>>,
 }
@@ -61,7 +63,11 @@ async fn authenticate(State(s): State<Site>, Json(body): Json<Value>) -> Respons
         }
     }
     *s.token.lock().unwrap() = Some("site-token".into());
-    Json(user("site-token")).into_response()
+    let mut reply = user("site-token");
+    if s.no_game_id {
+        reply["uuid"] = Value::Null;
+    }
+    Json(reply).into_response()
 }
 
 async fn verify(State(s): State<Site>, Json(body): Json<Value>) -> Response {
@@ -127,6 +133,24 @@ async fn a_wrong_password_a_second_factor_and_a_closed_api_each_say_so() {
     let closed = Site { disabled: true, ..Site::default() };
     let (base, _task) = start(closed).await;
     let err = TensaSite::new(&base).unwrap().sign_in("Builder", "pw", None).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::AuthServerInvalid);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_account_the_site_half_sends_is_refused_without_its_token_in_the_error() {
+    let site = Site { no_game_id: true, ..Site::default() };
+    let (base, _task) = start(site).await;
+    let err = TensaSite::new(&base).unwrap().sign_in("Builder", "pw", None).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::AuthFailed);
+    assert!(err.detail.contains("uuid"), "names what is missing: {}", err.detail);
+    assert!(!err.detail.contains("site-token"), "the token stays out of logs: {}", err.detail);
+}
+
+#[test]
+fn a_site_is_spoken_to_over_https_or_on_this_machine_only() {
+    assert!(TensaSite::new("https://site.example").is_ok());
+    assert!(TensaSite::new("http://127.0.0.1:8000").is_ok());
+    let err = TensaSite::new("http://site.example").err().expect("plain http elsewhere is refused");
     assert_eq!(err.code, ErrorCode::AuthServerInvalid);
 }
 

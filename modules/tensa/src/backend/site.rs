@@ -38,16 +38,37 @@ fn refusal(status: u16, body: &Value) -> AppError {
     }
 }
 
+/// The account in the site's reply; one it half sends names only what is missing (the reply
+/// carries the token, which never goes to a log).
 fn account(body: &Value) -> AppResult<ProviderAccount> {
     let text = |field: &str| body[field].as_str().map(str::to_string).filter(|v| !v.is_empty());
     match (text("uuid"), text("username"), text("access_token")) {
         (Some(id), Some(name), Some(token)) => Ok(ProviderAccount { id, name, token }),
-        _ => Err(AppError::new(ErrorCode::AuthFailed, format!("the site sent no account: {body}"))),
+        _ => {
+            let missing: Vec<&str> =
+                ["uuid", "username", "access_token"].into_iter().filter(|f| text(f).is_none()).collect();
+            Err(AppError::new(
+                ErrorCode::AuthFailed,
+                format!("the site sent no account: no {}", missing.join(", ")),
+            ))
+        }
     }
 }
 
 impl TensaSite {
+    /// The site at `base`: over https (plain http on this machine only, as passwords go there).
     pub fn new(base: &str) -> AppResult<TensaSite> {
+        let secure = reqwest::Url::parse(base).is_ok_and(|url| match url.scheme() {
+            "https" => true,
+            "http" => matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")),
+            _ => false,
+        });
+        if !secure {
+            return Err(AppError::new(
+                ErrorCode::AuthServerInvalid,
+                format!("the site is not https: {base}"),
+            ));
+        }
         let client = api_client(&format!("{APP_NAME}/{VERSION}"), CONNECT, READ)?;
         Ok(TensaSite { base: base.trim_end_matches('/').to_string(), client })
     }
