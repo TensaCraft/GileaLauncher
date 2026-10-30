@@ -20,9 +20,7 @@ use crate::shell::PageHeader;
 use crate::store::{AppStore, use_store};
 use state::{Catalogs, WizardState, WizardStep, newest_release};
 
-/// The mod loaders the wizard offers, after vanilla.
-pub const LOADERS: [LoaderKind; 4] =
-    [LoaderKind::Fabric, LoaderKind::NeoForge, LoaderKind::Forge, LoaderKind::Quilt];
+pub use crate::builds::loader_pick::LOADERS;
 
 #[derive(serde::Serialize)]
 struct CatalogArgs {

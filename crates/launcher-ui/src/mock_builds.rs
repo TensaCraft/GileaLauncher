@@ -57,6 +57,23 @@ pub(crate) fn toast(level: Level, title: Text) {
     }
 }
 
+/// The toast of a build's new loader, as the core says it.
+fn loader_done(builds: &[BuildDto], key: &str, kind: LoaderKind, lv: Option<&str>) -> Text {
+    let build = builds.iter().find(|b| b.key == key);
+    let name = build.map(|b| b.name.clone()).unwrap_or_default();
+    let mc = build.and_then(|b| b.version.clone()).unwrap_or_default();
+    match (kind, lv) {
+        (LoaderKind::Minecraft, _) | (_, None) => {
+            Text::key("build_loader_removed").param("build", name).param("mc", mc)
+        }
+        (kind, Some(lv)) => Text::key("build_loader_set")
+            .param("build", name)
+            .param("loader", kind.display_name())
+            .param("version", lv)
+            .param("mc", mc),
+    }
+}
+
 pub struct MockBuilds {
     builds: Vec<BuildDto>,
     custom_java: Vec<JavaEntry>,
@@ -209,6 +226,20 @@ impl MockBuilds {
         settings.component = Some(id);
         self.settings.insert(key.to_string(), settings.clone());
         Ok(settings)
+    }
+
+    /// `change_component` for the build's own Minecraft version.
+    pub fn set_loader(
+        &mut self,
+        key: &str,
+        kind: LoaderKind,
+        lv: Option<&str>,
+    ) -> Result<BuildSettingsDto, AppError> {
+        let mc =
+            self.builds.iter().find(|b| b.key == key).map(crate::builds::build_minecraft).ok_or_else(
+                || AppError::new(ErrorCode::VersionNotFound, "mock").with_param("version", key),
+            )?;
+        self.change_component(key, kind, &mc, lv)
     }
 
     pub fn snapshot(&self) -> BuildsSnapshot {
@@ -572,19 +603,18 @@ impl MockBuilds {
                     to_value(saved)
                 })
             }
-            "build_change_component" => {
+            "build_change_component" | "build_set_loader" => {
                 let kind: LoaderKind =
                     serde_json::from_value(args["loader"].clone()).unwrap_or(LoaderKind::Minecraft);
-                let mc = arg(args, "mc").to_string();
                 let lv = args["loaderVersion"].as_str().map(str::to_string);
-                self.change_component(arg(args, "key"), kind, &mc, lv.as_deref()).and_then(|settings| {
+                let key = arg(args, "key");
+                let changed = match args["mc"].as_str() {
+                    Some(mc) => self.change_component(key, kind, mc, lv.as_deref()),
+                    None => self.set_loader(key, kind, lv.as_deref()),
+                };
+                changed.and_then(|settings| {
                     self.emit_builds();
-                    toast(
-                        Level::Success,
-                        Text::key("version_component_install_complete")
-                            .param("loader", kind.display_name())
-                            .param("version", mc),
-                    );
+                    toast(Level::Success, loader_done(&self.builds, key, kind, lv.as_deref()));
                     to_value(settings)
                 })
             }
@@ -727,6 +757,24 @@ mod tests {
         assert_eq!(
             m.change_component(&key, LoaderKind::Forge, "1.21.1", None).unwrap_err().code,
             ErrorCode::InvalidInput
+        );
+    }
+
+    #[test]
+    fn a_vanilla_build_takes_a_loader_for_its_own_minecraft_in_the_mock() {
+        let mut m = MockBuilds::new(false, false);
+        let build =
+            m.snapshot().builds.into_iter().find(|b| b.client.as_deref() == Some("Minecraft")).unwrap();
+        let mc = build.version.clone().unwrap();
+        let fabric = m.set_loader(&build.key, LoaderKind::Fabric, Some("0.16.9")).unwrap();
+        assert_eq!(fabric.component, Some(LoaderKind::Fabric.component_id(&mc, "0.16.9")));
+        let now = m.snapshot().builds.into_iter().find(|b| b.key == build.key).unwrap();
+        assert_eq!((now.client.as_deref(), now.version), (Some("Fabric"), Some(mc.clone())));
+        let back = m.set_loader(&build.key, LoaderKind::Minecraft, None).unwrap();
+        assert_eq!(back.component, Some(mc));
+        assert_eq!(
+            m.set_loader("ghost", LoaderKind::Fabric, Some("0.16.9")).unwrap_err().code,
+            ErrorCode::VersionNotFound
         );
     }
 }

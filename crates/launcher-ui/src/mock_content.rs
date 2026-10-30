@@ -1,11 +1,12 @@
 //! Browser-preview backend for a build's content: the same sample mods, resource packs
-//! and shader packs for every build; mods are unsupported for the `vanilna…` builds.
+//! and shader packs for every build; mods are unsupported for the `vanilna…` builds until a
+//! loader is put on them.
 
 use std::collections::HashMap;
 
 use launcher_shared::{
     AppError, BuildShots, ContentItem, ContentKind, ContentList, ErrorCode, Level, ScreenshotDto, ShotRef,
-    Text,
+    Text, mods_supported,
 };
 use serde_json::Value;
 
@@ -124,6 +125,8 @@ fn announce((list, message): (ContentList, Option<Text>)) -> Result<Value, AppEr
 pub struct MockContent {
     lists: HashMap<(String, ContentKind), Vec<ContentItem>>,
     shots: HashMap<String, Vec<ScreenshotDto>>,
+    /// The client of each build whose loader changed here.
+    clients: HashMap<String, String>,
 }
 
 impl MockContent {
@@ -169,19 +172,27 @@ impl MockContent {
         MockContent::default()
     }
 
-    fn supported(key: &str, kind: ContentKind) -> bool {
-        kind != ContentKind::Mods || !key.starts_with("vanilna")
+    /// Build `key` runs `client` now (a loader put on it or taken off).
+    pub fn set_client(&mut self, key: &str, client: &str) {
+        self.clients.insert(key.to_string(), client.to_string());
+        // A build that had none keeps none: a new loader brings no mods.
+        self.lists.entry((key.to_string(), ContentKind::Mods)).or_default();
+    }
+
+    fn supported(&self, key: &str, kind: ContentKind) -> bool {
+        kind != ContentKind::Mods
+            || self.clients.get(key).map_or(!key.starts_with("vanilna"), |c| mods_supported(Some(c)))
     }
 
     fn items(&mut self, key: &str, kind: ContentKind) -> &mut Vec<ContentItem> {
-        let supported = Self::supported(key, kind);
+        let supported = self.supported(key, kind);
         self.lists
             .entry((key.to_string(), kind))
             .or_insert_with(|| if supported { sample(kind) } else { Vec::new() })
     }
 
     pub fn list(&mut self, key: &str, kind: ContentKind) -> ContentList {
-        ContentList { kind, supported: Self::supported(key, kind), items: self.items(key, kind).clone() }
+        ContentList { kind, supported: self.supported(key, kind), items: self.items(key, kind).clone() }
     }
 
     /// Switches `file` to `enable`; an item already so stays (like the backend).
@@ -300,6 +311,16 @@ mod tests {
         assert!(!has(&mut m));
         let again = m.restore("aeronautics", ContentKind::Mods, sodium).unwrap_err();
         assert_eq!(again.code, ErrorCode::BackupNotFound);
+    }
+
+    #[test]
+    fn a_vanilla_build_runs_mods_once_it_has_a_loader() {
+        let mut m = MockContent::new();
+        m.set_client("vanilna_1_20_1", "Fabric");
+        let mods = m.list("vanilna_1_20_1", ContentKind::Mods);
+        assert!(mods.supported && mods.items.is_empty(), "a new loader brings no mods");
+        m.set_client("aeronautics", "Minecraft");
+        assert!(!m.list("aeronautics", ContentKind::Mods).supported);
     }
 
     #[test]

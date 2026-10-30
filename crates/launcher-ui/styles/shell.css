@@ -130,6 +130,7 @@
 .wizard__status.is-ok { background: rgba(var(--ok-rgb), 0.1); border: 1px solid rgba(var(--ok-rgb), 0.4); color: var(--ok); }
 .wizard__status.is-error { background: rgba(var(--danger-rgb), 0.1); border: 1px solid rgba(var(--danger-rgb), 0.45); color: var(--danger-text); }
 .wizard__status.is-info { background: rgba(var(--info-rgb), 0.1); border: 1px solid rgba(var(--info-rgb), 0.4); color: var(--info); }
+.wizard__status.is-warn { background: rgba(var(--warn-rgb), 0.1); border: 1px solid rgba(var(--warn-rgb), 0.45); color: var(--warn-text); }
 /* The build wizard: the first-run wizard's panel with its steps in a row across the top. */
 /* It fills the page: the steps, the title and the buttons stay put, the step's body scrolls (the
    content step's list alone). */
@@ -422,6 +423,15 @@
 .provider-held__folder code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--f-mono); color: var(--text); user-select: text; }
 .provider-held__state.is-found { color: var(--ok); }
 .content__danger { display: flex; justify-content: flex-end; padding-top: 4px; }
+/* A build without a mod loader, in its mods and shader packs: the wizard's cards and the way to one. */
+.loader-offer { width: 100%; max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.loader-offer__head { padding: 18px 18px 4px; }
+.loader-offer__head .empty__desc { max-width: 480px; }
+.loader-offer__foot { display: flex; align-items: flex-end; gap: 12px; }
+/* A build's loader: its row in the settings and the dialog that changes it. */
+.dialog--loader { width: 900px; }
+.dialog--loader .wizard__status { margin-top: 14px; }
+.build-loader__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
 /* Build settings: the section menu (sticky) and Save on the left, the section on the right. */
 .build-settings__side { position: sticky; top: 0; display: flex; flex-direction: column; gap: 10px; }
 .build-settings__side .snav { position: static; }

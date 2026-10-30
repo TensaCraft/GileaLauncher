@@ -8,5 +8,6 @@
     "tensa_optional_source": "Необов'язкові",
     "tensa_optional_installing": "Встановлення {name}…",
     "tensa_optional_installed": "{name} встановлено",
-    "tensa_optional_updated": "{name} оновлено"
+    "tensa_optional_updated": "{name} оновлено",
+    "tensa_loader_set_by_server": "Лоадер цієї збірки задає сервер: синхронізація встановлює його сама."
 }

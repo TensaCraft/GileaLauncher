@@ -15,13 +15,10 @@ use super::launch::{LaunchFlow, use_launch_flow};
 use super::{build_subtitle, check_new_name, unique_name};
 use crate::store::{AppStore, use_store};
 
-/// `(id, translation key, icon, danger)`; `None` is a separator. A build of `client` without a mod
-/// loader has no mods and shader packs.
-pub fn build_menu_items(
-    client: Option<&str>,
-) -> Vec<Option<(&'static str, &'static str, &'static str, bool)>> {
-    let loader = launcher_shared::mods_supported(client);
-    let items = vec![
+/// `(id, translation key, icon, danger)`; `None` is a separator. A build without a mod loader has
+/// them all too: its mods and shader packs offer one.
+pub fn build_menu_items() -> Vec<Option<(&'static str, &'static str, &'static str, bool)>> {
+    vec![
         Some(("play", "play", "play_arrow", false)),
         Some(("copy", "copy", "content_copy", false)),
         Some(("open", "open_directory", "folder_open", false)),
@@ -34,8 +31,7 @@ pub fn build_menu_items(
         Some(("settings", "version_settings_content_tab", "tune", false)),
         None,
         Some(("delete", "delete", "delete", true)),
-    ];
-    items.into_iter().filter(|item| loader || !matches!(item, Some(("mods" | "shaders", ..)))).collect()
+    ]
 }
 
 /// The menu of `build`: its own entries, and the modules' `actions` that apply to it before Delete.
@@ -58,7 +54,7 @@ pub fn build_menu_items_with(
     build: &BuildDto,
     actions: &[ModuleBuildAction],
 ) -> Vec<Option<(&'static str, &'static str, &'static str, bool)>> {
-    let mut items = build_menu_items(build.client.as_deref());
+    let mut items = build_menu_items();
     let own: Vec<_> = actions
         .iter()
         .filter(|action| (action.applies)(build))
@@ -303,7 +299,8 @@ mod tests {
 
     #[test]
     fn the_build_menu_matches_the_original() {
-        let items = build_menu_items(Some("Fabric"));
+        // A vanilla build's too: its mods lead to a mod loader.
+        let items = build_menu_items();
         let ids: Vec<&str> = items.iter().map(|i| i.map_or("-", |(id, ..)| id)).collect();
         assert_eq!(
             ids,
@@ -339,14 +336,6 @@ mod tests {
             ]
         );
         assert!(items.iter().flatten().all(|(id, _, _, danger)| *danger == (*id == "delete")));
-    }
-
-    #[test]
-    fn a_vanilla_build_menu_has_no_mods_or_shaders() {
-        let ids: Vec<&str> =
-            build_menu_items(Some("Minecraft")).into_iter().flatten().map(|(id, ..)| id).collect();
-        assert!(!ids.contains(&"mods") && !ids.contains(&"shaders"), "{ids:?}");
-        assert!(ids.contains(&"resourcepacks") && ids.contains(&"screenshots"));
     }
 
     #[test]

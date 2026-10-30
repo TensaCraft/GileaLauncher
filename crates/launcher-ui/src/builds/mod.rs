@@ -7,6 +7,7 @@ pub mod description;
 pub mod dialogs;
 pub mod gpu;
 pub mod launch;
+pub mod loader_pick;
 pub mod ram;
 
 pub use launcher_shared::naming::{NameProblem, check_new_name, default_build_name, unique_name};
@@ -26,15 +27,27 @@ pub fn build_subtitle(build: &BuildDto) -> String {
         .join(" ")
 }
 
-/// The loader a build runs (its component, else its client's name; plain Minecraft else), as a
-/// card's tag: its name and colour.
-pub fn loader_tag(build: &BuildDto) -> (String, TagTone) {
-    let kind = build
+/// The loader a build runs: its component's, else its client's name; plain Minecraft else.
+pub fn build_loader(build: &BuildDto) -> LoaderKind {
+    build
         .loader
         .as_deref()
         .and_then(LoaderKind::of_component)
         .or_else(|| build.client.as_deref().and_then(LoaderKind::from_client))
-        .unwrap_or(LoaderKind::Minecraft);
+        .unwrap_or(LoaderKind::Minecraft)
+}
+
+/// The Minecraft version a build runs: its own, else a plain Minecraft component's (named by its
+/// version).
+pub fn build_minecraft(build: &BuildDto) -> String {
+    let own = build.version.as_deref();
+    let plain = build.loader.as_deref().filter(|_| build_loader(build) == LoaderKind::Minecraft);
+    [own, plain].into_iter().flatten().map(str::trim).find(|v| !v.is_empty()).unwrap_or_default().to_string()
+}
+
+/// The loader a build runs (`build_loader`) as a card's tag: its name and colour.
+pub fn loader_tag(build: &BuildDto) -> (String, TagTone) {
+    let kind = build_loader(build);
     let tone = match kind {
         LoaderKind::Minecraft => TagTone::Vanilla,
         LoaderKind::Fabric => TagTone::Fabric,
@@ -223,6 +236,19 @@ mod tests {
         forge.loader = None;
         forge.client = Some("forge".into());
         assert_eq!(loader_tag(&forge).1, TagTone::Forge, "the client names it when the loader does not");
+    }
+
+    #[test]
+    fn a_build_runs_its_own_minecraft_else_its_plain_component() {
+        let mut old = build("a", "a", "A");
+        assert_eq!(build_minecraft(&old), "1.21.1");
+        old.version = None;
+        assert_eq!(build_minecraft(&old), "1.21.1", "a plain component is named by its version");
+        old.loader = Some("fabric-loader-0.16.9-1.20.1".into());
+        old.client = Some("Fabric".into());
+        assert_eq!(build_minecraft(&old), "", "a loader's component is not a version");
+        old.version = Some(" 1.20.1 ".into());
+        assert_eq!(build_minecraft(&old), "1.20.1");
     }
 
     #[test]

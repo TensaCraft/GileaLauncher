@@ -1,11 +1,11 @@
 mod support;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use launcher_core::builds::service::{BuildService, GPU_MODE_DEFAULT_KEY};
-use launcher_core::feedback::{FeedbackService, NullSink, OperationSpec};
+use launcher_core::feedback::{EventSink, FeedbackService, OperationSpec};
 use launcher_core::java::runtime::JavaRuntimes;
 use launcher_core::loaders::ComponentInstaller;
 use launcher_core::lock::Coordinator;
@@ -15,19 +15,49 @@ use launcher_core::net::downloader::{Downloader, DownloaderConfig};
 use launcher_core::net::meta::MetaClient;
 use launcher_core::storage::config::ConfigStore;
 use launcher_core::storage::versions::{Build, VersionStore};
-use launcher_shared::{BuildSettingsUpdate, ErrorCode, LoaderKind, Text};
+use launcher_shared::{
+    ActivityEntry, Alert, BuildSettingsUpdate, ErrorCode, LoaderKind, OpsSnapshot, Text, Toast,
+};
 use serde_json::json;
 use support::fake_mojang::{FakeMojang, InstallerStyle};
 use support::fake_processors::FakeRunner;
+
+/// The toasts the launcher showed.
+#[derive(Default)]
+struct Heard {
+    toasts: Mutex<Vec<Toast>>,
+}
+
+impl EventSink for Heard {
+    fn ops(&self, _: &OpsSnapshot) {}
+    fn activity(&self, _: &ActivityEntry) {}
+    fn toast(&self, toast: &Toast) {
+        self.toasts.lock().unwrap().push(toast.clone());
+    }
+    fn alert(&self, _: &Alert) {}
+}
 
 struct World {
     _tmp: tempfile::TempDir,
     games: PathBuf,
     versions: Arc<VersionStore>,
     feedback: Arc<FeedbackService>,
+    heard: Arc<Heard>,
     config: Arc<ConfigStore>,
     instances: Arc<Coordinator>,
     service: BuildService,
+}
+
+/// The parameters of the toast `key`, once shown.
+fn toast_params(w: &World, key: &str) -> Option<Vec<(String, String)>> {
+    w.heard.toasts.lock().unwrap().iter().find_map(|t| match &t.title {
+        Text::Key { key: k, params } if k == key => Some(params.clone().into_iter().collect()),
+        _ => None,
+    })
+}
+
+fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
+    list.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
 }
 
 fn world(fake: &FakeMojang) -> World {
@@ -62,7 +92,8 @@ fn world(fake: &FakeMojang) -> World {
         Arc::new(Coordinator::shared()),
     ));
     let versions = Arc::new(VersionStore::open(&state, &mc));
-    let feedback = FeedbackService::new(Arc::new(NullSink));
+    let heard = Arc::new(Heard::default());
+    let feedback = FeedbackService::new(heard.clone());
     let config = Arc::new(ConfigStore::open(state.join("config.json")));
     let instances = Arc::new(Coordinator::instances());
     let components = Arc::new(
@@ -71,7 +102,7 @@ fn world(fake: &FakeMojang) -> World {
     );
     let service =
         BuildService::new(versions.clone(), components, feedback.clone(), config.clone(), instances.clone());
-    World { _tmp: tmp, games, versions, feedback, config, instances, service }
+    World { _tmp: tmp, games, versions, feedback, heard, config, instances, service }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -508,19 +539,30 @@ async fn a_build_changes_its_component_only_after_the_install() {
     let w = world(&fake);
     let build = w.service.install_vanilla("Aero", "1.21.1").await.unwrap();
     assert_eq!(
-        w.service.change_component(&build.key, LoaderKind::Fabric, "1.21.1", None).await.unwrap_err().code,
+        w.service
+            .change_component(&build.key, LoaderKind::Fabric, "1.21.1", None, || false)
+            .await
+            .unwrap_err()
+            .code,
         ErrorCode::InvalidInput,
         "a loader needs its build"
     );
-    let failed = w.service.change_component(&build.key, LoaderKind::Fabric, "1.21.1", Some("9.9.9")).await;
+    let failed =
+        w.service.change_component(&build.key, LoaderKind::Fabric, "1.21.1", Some("9.9.9"), || false).await;
     assert!(failed.is_err());
+    let running =
+        w.service.change_component(&build.key, LoaderKind::Fabric, "1.21.1", Some("0.16.9"), || true);
+    assert_eq!(running.await.unwrap_err().code, ErrorCode::BuildRunning);
     assert_eq!(
         w.versions.get(&build.key).unwrap().loader.as_deref(),
         Some("1.21.1"),
         "still on the old component"
     );
-    let fabric =
-        w.service.change_component(&build.key, LoaderKind::Fabric, "1.21.1", Some("0.16.9")).await.unwrap();
+    let fabric = w
+        .service
+        .change_component(&build.key, LoaderKind::Fabric, "1.21.1", Some("0.16.9"), || false)
+        .await
+        .unwrap();
     assert_eq!(fabric.component.as_deref(), Some("fabric-loader-0.16.9-1.21.1"));
     let record = w.versions.get(&build.key).unwrap();
     assert_eq!(
@@ -555,14 +597,137 @@ async fn a_new_component_brings_its_own_java() {
     let mut pinned = update_from(&w.service.settings(&build.key).unwrap());
     pinned.java_path = Some(jdk8.to_string_lossy().into_owned());
     assert!(w.service.update_settings(&build.key, pinned).unwrap().java_path.is_some());
-    let changed =
-        w.service.change_component(&build.key, LoaderKind::Fabric, "1.21.1", Some("0.16.9")).await.unwrap();
+    let changed = w
+        .service
+        .change_component(&build.key, LoaderKind::Fabric, "1.21.1", Some("0.16.9"), || false)
+        .await
+        .unwrap();
     if GamePlatform::current().java_runtime_key().is_some() {
         assert_eq!(changed.java_path, None, "the new component's managed Java, shown as automatic");
         let java =
             w.versions.get(&build.key).unwrap().options["executablePath"].as_str().unwrap().to_string();
         assert!(java.contains("runtime") && PathBuf::from(&java).is_file(), "{java}");
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_vanilla_build_takes_a_loader_and_keeps_its_folder() {
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    fake.add_loader("fabric", "1.21.1", "0.16.9", true);
+    let w = world(&fake);
+    let build = w.service.install_vanilla("Aero", "1.21.1").await.unwrap();
+    let folder = w.games.join("aero");
+    std::fs::write(folder.join("options.txt"), b"fov:90").unwrap();
+    std::fs::create_dir_all(folder.join("resourcepacks")).unwrap();
+    std::fs::write(folder.join("resourcepacks").join("pack.zip"), b"pack").unwrap();
+    let settings =
+        w.service.set_loader(&build.key, LoaderKind::Fabric, Some("0.16.9"), || false).await.unwrap();
+    assert_eq!(settings.component.as_deref(), Some("fabric-loader-0.16.9-1.21.1"));
+    let record = w.versions.get(&build.key).unwrap();
+    assert_eq!(
+        (record.client.as_deref(), record.loader_version.as_deref(), record.version.as_deref()),
+        (Some("Fabric"), Some("0.16.9"), Some("1.21.1")),
+        "the build's own Minecraft"
+    );
+    assert_eq!(std::fs::read(folder.join("options.txt")).unwrap(), b"fov:90");
+    assert!(folder.join("resourcepacks").join("pack.zip").is_file(), "the game folder stays");
+    assert_eq!(
+        toast_params(&w, "build_loader_set"),
+        Some(pairs(&[("build", "Aero"), ("loader", "Fabric"), ("mc", "1.21.1"), ("version", "0.16.9")]))
+    );
+    assert!(!w.feedback.is_busy());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_loader_build_goes_back_to_vanilla_with_its_mods_left() {
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    fake.add_loader("fabric", "1.21.1", "0.16.9", true);
+    let w = world(&fake);
+    let build = w.service.install_loader("Aero", LoaderKind::Fabric, "1.21.1", "0.16.9").await.unwrap();
+    let mods = w.games.join("aero").join("mods");
+    std::fs::create_dir_all(&mods).unwrap();
+    std::fs::write(mods.join("sodium.jar"), b"jar").unwrap();
+    // Asked for vanilla, a loader build means nothing.
+    let settings =
+        w.service.set_loader(&build.key, LoaderKind::Minecraft, Some("0.16.9"), || false).await.unwrap();
+    assert_eq!(settings.component.as_deref(), Some("1.21.1"));
+    let record = w.versions.get(&build.key).unwrap();
+    assert_eq!(
+        (record.loader.as_deref(), record.client.as_deref(), record.loader_version.as_deref()),
+        (Some("1.21.1"), Some("Minecraft"), None)
+    );
+    assert!(mods.join("sodium.jar").is_file(), "nothing of the game folder is deleted");
+    assert_eq!(toast_params(&w, "build_loader_removed"), Some(pairs(&[("build", "Aero"), ("mc", "1.21.1")])));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_loader_changes_only_while_the_game_is_closed_and_nothing_else_runs() {
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    fake.add_loader("fabric", "1.21.1", "0.16.9", true);
+    let w = world(&fake);
+    let build = w.service.install_vanilla("Aero", "1.21.1").await.unwrap();
+    let (before, requests) = (w.versions.get(&build.key).unwrap(), fake.server.total_requests());
+    let set = || w.service.set_loader(&build.key, LoaderKind::Fabric, Some("0.16.9"), || false);
+    assert_eq!(
+        w.service.set_loader(&build.key, LoaderKind::Fabric, Some("0.16.9"), || true).await.unwrap_err().code,
+        ErrorCode::BuildRunning
+    );
+    // A game the launcher started before it restarted: the registry does not know it.
+    let game = open_world(&w.games.join("aero"), "World");
+    assert_eq!(set().await.unwrap_err().code, ErrorCode::BuildRunning);
+    drop(game);
+    let lease = w.instances.try_acquire(&w.games.join("aero"), "launch").unwrap();
+    assert_eq!(set().await.unwrap_err().code, ErrorCode::InstanceBusy);
+    drop(lease);
+    let other = w.feedback.begin(OperationSpec::new(Text::key("installation_started"), "install"));
+    assert_eq!(set().await.unwrap_err().code, ErrorCode::Busy);
+    other.finish();
+    assert_eq!(w.versions.get(&build.key).unwrap(), before, "nothing is written");
+    assert_eq!(fake.server.total_requests(), requests, "nothing is downloaded");
+    set().await.unwrap();
+    assert!(w.instances.active_kind(&w.games.join("aero")).is_none(), "the folder is free again");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_loader_needs_its_build_and_the_build_s_minecraft() {
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    fake.add_loader("fabric", "1.21.1", "0.16.9", true);
+    let w = world(&fake);
+    assert_eq!(
+        w.service.set_loader("ghost", LoaderKind::Fabric, Some("0.16.9"), || false).await.unwrap_err().code,
+        ErrorCode::VersionNotFound
+    );
+    let build = w.service.install_vanilla("Aero", "1.21.1").await.unwrap();
+    let before = w.versions.get(&build.key).unwrap();
+    assert_eq!(
+        w.service.set_loader(&build.key, LoaderKind::Fabric, None, || false).await.unwrap_err().code,
+        ErrorCode::InvalidInput,
+        "a loader needs its build"
+    );
+    assert!(w.service.set_loader(&build.key, LoaderKind::Fabric, Some("9.9.9"), || false).await.is_err());
+    assert_eq!(w.versions.get(&build.key).unwrap(), before, "still on the old component");
+    assert!(!w.feedback.is_busy());
+    // A build that names no Minecraft version and no component.
+    let mut bare = Build::new("Bare");
+    w.versions.create(&mut bare).unwrap();
+    assert_eq!(
+        w.service.set_loader(&bare.key, LoaderKind::Fabric, Some("0.16.9"), || false).await.unwrap_err().code,
+        ErrorCode::InvalidInput
+    );
+    // An old record names only its component: the Minecraft version comes from it.
+    let mut old = Build::new("Old");
+    old.loader = Some("1.21.1".into());
+    w.versions.create(&mut old).unwrap();
+    w.service.set_loader(&old.key, LoaderKind::Fabric, Some("0.16.9"), || false).await.unwrap();
+    let record = w.versions.get(&old.key).unwrap();
+    assert_eq!(
+        (record.loader.as_deref(), record.version.as_deref()),
+        (Some("fabric-loader-0.16.9-1.21.1"), Some("1.21.1"))
+    );
 }
 
 fn names(w: &World) -> Vec<String> {

@@ -5,6 +5,7 @@
 
 mod delete;
 mod installed;
+mod loader_offer;
 mod screenshots;
 
 use launcher_shared::{BuildDto, ContentItem, ContentKind, mods_supported};
@@ -17,6 +18,7 @@ use ui_kit::{ActionTone, ChipDef, ChipTabs, IconAction, NudgeSide, SegOption, Se
 
 use self::delete::DeletePanel;
 use self::installed::InstalledPanel;
+use self::loader_offer::LoaderOffer;
 use self::screenshots::ScreenshotsPanel;
 use crate::builds::launch::use_launch_flow;
 use crate::builds::query_escape;
@@ -93,17 +95,16 @@ pub fn tab_tone(tab: &str) -> TagTone {
     }
 }
 
-/// The tabs a build of `client` has: mods and shader packs need a mod loader (vanilla Minecraft
-/// runs neither).
-pub fn tabs_for(client: Option<&str>) -> Vec<(&'static str, &'static str, &'static str)> {
-    let loader = mods_supported(client);
-    TABS.iter().copied().filter(|(id, ..)| loader || !matches!(*id, "mods" | "shaders")).collect()
+/// Mods and shader packs need a mod loader: a build without one offers it there.
+pub fn offers_loader(tab: &str, client: Option<&str>) -> bool {
+    matches!(tab, "mods" | "shaders") && !mods_supported(client)
 }
 
-/// `tab` when a build of `client` has it, else its first tab.
+/// The tab a build of `client` opens on for `tab`: a build without a mod loader opens on its
+/// resource packs rather than on the loader its mods offer.
 pub fn tab_for(tab: &str, client: Option<&str>) -> &'static str {
-    let tabs = tabs_for(client);
-    tabs.iter().find(|(id, ..)| *id == tab).or(tabs.first()).map_or("resourcepacks", |(id, ..)| id)
+    let tab = normalize_tab(tab, &[]);
+    if offers_loader(tab, client) { "resourcepacks" } else { tab }
 }
 
 /// The content a tab lists, if it lists content.
@@ -343,25 +344,11 @@ pub fn ContentPage(key: String) -> impl IntoView {
             />
         }
     };
-    // The build's tabs: none for mods and shader packs without a mod loader. Until the build is
-    // known, every tab stays (a link to mods must not jump away on a slow start).
+    // A build without a mod loader offers one in its mods and shader packs: their panel follows
+    // the client (a memo, so the build's other changes leave the panel as it is).
     let client = Memo::new(move |_| build.with(|b| b.as_ref().map(|b| b.client.clone())));
-    Effect::new(move |_| {
-        if let Some(client) = client.get() {
-            let current = tab.get_untracked();
-            let fitting = if module_tabs().iter().any(|t| t.id == current) {
-                current
-            } else {
-                tab_for(current, client.as_deref())
-            };
-            if fitting != current {
-                tab.set(fitting);
-            }
-        }
-    });
     let chips = move || -> Vec<ChipDef> {
-        let tabs = client.with(|c| c.as_ref().map_or_else(|| TABS.to_vec(), |c| tabs_for(c.as_deref())));
-        with_module_tabs(tabs, &module_tabs())
+        with_module_tabs(TABS.to_vec(), &module_tabs())
             .into_iter()
             .map(|(id, icon, label)| {
                 let module_tone = module_tabs().into_iter().find(|m| m.id == id).map(|m| m.tone);
@@ -379,6 +366,10 @@ pub fn ContentPage(key: String) -> impl IntoView {
             "delete" => Some(view! { <DeletePanel current=build /> }.into_any()),
             id if module_tabs().iter().any(|t| t.id == id) => {
                 module_tabs().into_iter().find(|t| t.id == id).map(|t| (t.view)(key))
+            }
+            id if client.with(|c| c.as_ref().is_some_and(|c| offers_loader(id, c.as_deref()))) => {
+                let kind = kind_of_tab(id).unwrap_or(ContentKind::Mods);
+                Some(view! { <LoaderOffer key=key kind=kind current=build /> }.into_any())
             }
             id => {
                 let kind = kind_of_tab(id).unwrap_or(ContentKind::Mods);
@@ -479,15 +470,17 @@ mod tests {
     #[test]
     fn a_module_tab_goes_after_the_tab_it_names() {
         let extra = [backups_tab()];
-        let ids =
-            |client| with_module_tabs(tabs_for(client), &extra).into_iter().map(|t| t.0).collect::<Vec<_>>();
+        let ids = |tabs: Vec<(&'static str, &'static str, &'static str)>| {
+            with_module_tabs(tabs, &extra).into_iter().map(|t| t.0).collect::<Vec<_>>()
+        };
         assert_eq!(
-            ids(Some("Fabric")),
+            ids(TABS.to_vec()),
             vec!["mods", "resourcepacks", "shaders", "backups", "screenshots", "settings", "delete"]
         );
+        let without_shaders = TABS.iter().copied().filter(|(id, ..)| *id != "shaders").collect();
         assert_eq!(
-            ids(Some("Minecraft")),
-            vec!["resourcepacks", "backups", "screenshots", "settings", "delete"],
+            ids(without_shaders),
+            vec!["mods", "resourcepacks", "backups", "screenshots", "settings", "delete"],
             "without a shaders tab it goes after the nearest tab before it"
         );
         assert_eq!(normalize_tab("backups", &extra), "backups");
@@ -549,14 +542,21 @@ mod tests {
     }
 
     #[test]
-    fn vanilla_builds_have_no_mod_or_shader_tabs() {
-        let ids = |client| tabs_for(client).iter().map(|(id, ..)| *id).collect::<Vec<_>>();
-        assert_eq!(ids(Some("Minecraft")), ["resourcepacks", "screenshots", "settings", "delete"]);
-        assert_eq!(ids(Some("Fabric")), TABS.iter().map(|(id, ..)| *id).collect::<Vec<_>>());
+    fn a_vanilla_build_opens_on_its_packs_and_its_mods_offer_a_loader() {
         assert_eq!(tab_for("mods", Some("Minecraft")), "resourcepacks");
         assert_eq!(tab_for("shaders", Some("Minecraft")), "resourcepacks");
         assert_eq!(tab_for("settings", Some("Minecraft")), "settings");
         assert_eq!(tab_for("mods", Some("NeoForge")), "mods");
+        assert_eq!(tab_for("nonsense", Some("Fabric")), "mods");
+        for (tab, client, offer) in [
+            ("mods", Some("Minecraft"), true),
+            ("shaders", None, true),
+            ("resourcepacks", Some("Minecraft"), false),
+            ("mods", Some("Fabric"), false),
+            ("shaders", Some("TensaCraft"), false),
+        ] {
+            assert_eq!(offers_loader(tab, client), offer, "{tab} of {client:?}");
+        }
     }
 
     #[test]

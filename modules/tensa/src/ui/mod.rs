@@ -1,6 +1,7 @@
 //! The server builds module's UI: cards on Home for the server builds not installed yet, the Home
-//! switch in «Інтерфейс» among Home's other settings, "Force sync" in a server build's menu, and a warning on
-//! a server build's provider tabs that what is added to the server's folders goes at its next sync.
+//! switch in «Інтерфейс» among Home's other settings, "Force sync" in a server build's menu, a warning on
+//! a server build's provider tabs that what is added to the server's folders goes at its next sync, and
+//! a server build's loader kept out of reach of its settings (the server sets it).
 
 mod home;
 mod settings;
@@ -8,7 +9,8 @@ mod settings;
 use launcher_shared::BuildDto;
 use leptos::prelude::*;
 use ui_kit::module::{
-    BuildActionRun, ModuleBuildAction, ModuleContentNotice, ModuleHomeCards, ModuleSettingsBlock, UiModule,
+    BuildActionRun, ModuleBuildAction, ModuleContentNotice, ModuleHomeCards, ModuleLoaderLock,
+    ModuleSettingsBlock, UiModule,
 };
 
 use crate::CLIENT;
@@ -52,6 +54,14 @@ impl UiModule for TensaModuleUi {
         vec![ModuleContentNotice {
             module: crate::ID,
             text: "tensa_added_content_synced_away",
+            applies: is_server_build,
+        }]
+    }
+
+    fn loader_locks(&self) -> Vec<ModuleLoaderLock> {
+        vec![ModuleLoaderLock {
+            module: crate::ID,
+            reason: "tensa_loader_set_by_server",
             applies: is_server_build,
         }]
     }
@@ -121,6 +131,21 @@ mod tests {
         );
         assert!((notices[0].applies)(&build(Some("TensaCraft"))));
         assert!(!(notices[0].applies)(&build(Some("Fabric"))) && !(notices[0].applies)(&build(None)));
+    }
+
+    #[test]
+    fn the_server_sets_its_builds_loader() {
+        let locks = TensaModuleUi.loader_locks();
+        assert_eq!(
+            locks.iter().map(|l| (l.module, l.reason)).collect::<Vec<_>>(),
+            [(crate::ID, "tensa_loader_set_by_server")]
+        );
+        assert!((locks[0].applies)(&build(Some("TensaCraft"))));
+        assert!(!(locks[0].applies)(&build(Some("Fabric"))));
+        for raw in [include_str!("../../locales/uk_UA.json"), include_str!("../../locales/en_US.json")] {
+            let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(raw).unwrap();
+            assert!(map.contains_key("tensa_loader_set_by_server"));
+        }
     }
 
     #[test]

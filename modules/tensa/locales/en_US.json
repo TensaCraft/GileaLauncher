@@ -8,5 +8,6 @@
     "tensa_optional_source": "Optional",
     "tensa_optional_installing": "Installing {name}…",
     "tensa_optional_installed": "{name} is installed",
-    "tensa_optional_updated": "{name} is updated"
+    "tensa_optional_updated": "{name} is updated",
+    "tensa_loader_set_by_server": "The server sets this build's loader: the sync installs it."
 }
