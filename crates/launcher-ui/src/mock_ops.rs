@@ -52,6 +52,7 @@ pub fn run(title: Text, kind: &str, status: Text, seconds: u32, done: impl FnOnc
             progress: Some(0.0),
             total: Some(100.0),
             visible: true,
+            build: None,
         });
         id
     });

@@ -301,8 +301,10 @@ impl ModrinthService {
         };
         let title =
             if pending.len() > 1 { "installing_modrinth_dependencies" } else { installing_key(args.kind) };
-        let op =
-            self.deps.feedback.begin(OperationSpec::new(Text::key(title).param("name", &name), "modrinth"));
+        let op = self
+            .deps
+            .feedback
+            .begin(OperationSpec::new(Text::key(title).param("name", &name), "modrinth").on_build(&args.key));
         match self.apply(&target, args.kind, &pending, &op).await {
             Ok(()) => {
                 op.finish();

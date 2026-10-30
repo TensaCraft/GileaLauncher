@@ -296,7 +296,9 @@ impl LaunchService {
                 }
             }
         };
-        let op = d.feedback.begin(OperationSpec::new(Text::key("syncing_files_check"), "launch").hidden());
+        let op = d
+            .feedback
+            .begin(OperationSpec::new(Text::key("syncing_files_check"), "launch").hidden().on_build(&key));
         let result = self.start(&build, &request, &key, &op).await;
         op.finish();
         drop(lease);

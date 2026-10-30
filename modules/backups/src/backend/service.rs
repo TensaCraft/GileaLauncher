@@ -151,10 +151,10 @@ impl BackupsService {
             );
         }
         let lease = self.deps.instances.try_acquire(&game, "world_backup")?;
-        let op = self
-            .deps
-            .feedback
-            .begin(OperationSpec::new(Text::key("world_backup_creating").param("world", world), "backup"));
+        let op = self.deps.feedback.begin(
+            OperationSpec::new(Text::key("world_backup_creating").param("world", world), "backup")
+                .on_build(key),
+        );
         let (store, name) = (self.store(), world.to_string());
         let made = blocking(move || store.create(&build, &game, &name, Kind::Manual, Utc::now())).await;
         drop(lease);
@@ -177,10 +177,10 @@ impl BackupsService {
         let game = self.game(&build);
         let archive = self.store().zip_path(&build_folder(&build), world, zip_name)?;
         let lease = self.deps.instances.try_acquire(&game, "world_restore")?;
-        let op = self
-            .deps
-            .feedback
-            .begin(OperationSpec::new(Text::key("world_backup_restoring").param("world", world), "backup"));
+        let op = self.deps.feedback.begin(
+            OperationSpec::new(Text::key("world_backup_restoring").param("world", world), "backup")
+                .on_build(key),
+        );
         let (saves, name) = (game.join("saves"), world.to_string());
         let done = blocking(move || restore(&archive, &saves, &name)).await;
         drop(lease);

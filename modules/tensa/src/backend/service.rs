@@ -49,7 +49,8 @@ pub async fn force_sync(deps: &Deps, key: &str) -> AppResult<Synced> {
     let _lease = deps.instances.try_acquire(&game, LEASE)?;
     let op = deps.feedback.begin(
         OperationSpec::new(Text::key("tensacraft_force_sync_of").param("version", &build.name), "sync")
-            .status(Text::key("tensacraft_force_sync_running")),
+            .status(Text::key("tensacraft_force_sync_running"))
+            .on_build(&build.key),
     );
     let sync_deps = SyncDeps {
         api: &deps.api,

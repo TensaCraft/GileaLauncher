@@ -349,9 +349,10 @@ impl BuildService {
         if running() || game_open(&from) {
             return Err(running_error(&source));
         }
-        let op = self
-            .feedback
-            .begin(OperationSpec::new(Text::key("copy_in_progress").param("version", &source.name), "copy"));
+        let op = self.feedback.begin(
+            OperationSpec::new(Text::key("copy_in_progress").param("version", &source.name), "copy")
+                .on_build(key),
+        );
         let result = self.copy_and_register(&source, name, &from).await;
         drop(lease);
         match result {
@@ -577,7 +578,7 @@ impl BuildService {
                     .param("version", mc),
             ),
         };
-        let op = self.feedback.begin(OperationSpec::new(title, "install").status(status));
+        let op = self.feedback.begin(OperationSpec::new(title, "install").status(status).on_build(key));
         let progress = |p: InstallProgress| {
             let bytes = p.download.map(|d| (d.bytes_done as f64, d.bytes_total as f64));
             op.update(Some(p.status), bytes.map(|b| b.0), bytes.map(|b| b.1));

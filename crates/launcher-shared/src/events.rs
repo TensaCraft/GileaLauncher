@@ -38,6 +38,9 @@ pub struct OperationDto {
     pub progress: Option<f64>,
     pub total: Option<f64>,
     pub visible: bool,
+    /// The build it works on (its key), when it works on one: that build's settings wait for it.
+    #[serde(default)]
+    pub build: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

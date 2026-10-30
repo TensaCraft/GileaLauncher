@@ -183,9 +183,10 @@ pub async fn install(deps: &Deps, args: &InstallArgs) -> AppResult<InstallAnswer
         .try_acquire(&target.game, LEASE)
         .map_err(|e| e.with_param("version", target.build.name.clone()))?;
     let name = mine.item.title.clone();
-    let op = deps
-        .feedback
-        .begin(OperationSpec::new(Text::key("tensa_optional_installing").param("name", &name), "tensa"));
+    let op = deps.feedback.begin(
+        OperationSpec::new(Text::key("tensa_optional_installing").param("name", &name), "tensa")
+            .on_build(&target.build.key),
+    );
     let loader = target.pack.loader.as_deref().and_then(LoaderKind::from_client);
     match put_in(deps, &target.game, &mine, loader, &op).await {
         Ok(()) => {

@@ -366,6 +366,7 @@ mod tests {
             progress: None,
             total: None,
             visible,
+            build: None,
         };
         let snapshot = OpsSnapshot {
             busy: true,

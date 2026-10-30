@@ -93,11 +93,19 @@ pub struct OperationSpec {
     pub kind: String,
     pub status: Option<Text>,
     pub visible: bool,
+    /// The build it works on (its key).
+    pub build: Option<String>,
 }
 
 impl OperationSpec {
     pub fn new(title: Text, kind: impl Into<String>) -> Self {
-        Self { title, kind: kind.into(), status: None, visible: true }
+        Self { title, kind: kind.into(), status: None, visible: true, build: None }
+    }
+
+    /// It works on build `key`: the window keeps that build's settings from saving meanwhile.
+    pub fn on_build(mut self, key: &str) -> Self {
+        self.build = Some(key.to_string());
+        self
     }
 
     pub fn hidden(mut self) -> Self {
@@ -181,6 +189,7 @@ impl FeedbackService {
                     progress: None,
                     total: None,
                     visible: spec.visible,
+                    build: spec.build.clone(),
                 },
             );
             st.ops_dirty = true;
@@ -664,6 +673,17 @@ mod tests {
         second.finish();
         assert!(!fb.is_busy());
         assert!(fb.snapshot().operations.is_empty());
+    }
+
+    #[test]
+    fn an_operation_names_the_build_it_works_on() {
+        let (fb, _rec, _c) = setup();
+        let loader = fb.begin(spec("build_loader_installing").on_build("aero"));
+        let other = fb.begin(spec("installation_started"));
+        let builds: Vec<Option<String>> = fb.snapshot().operations.into_iter().map(|op| op.build).collect();
+        assert_eq!(builds, [Some("aero".to_string()), None]);
+        loader.finish();
+        other.finish();
     }
 
     #[test]

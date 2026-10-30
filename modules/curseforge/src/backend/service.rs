@@ -394,8 +394,9 @@ impl CurseForgeService {
         };
         let title =
             if pending.len() > 1 { "installing_modrinth_dependencies" } else { installing_key(args.kind) };
-        let op =
-            self.deps.feedback.begin(OperationSpec::new(Text::key(title).param("name", &name), "curseforge"));
+        let op = self.deps.feedback.begin(
+            OperationSpec::new(Text::key(title).param("name", &name), "curseforge").on_build(&args.key),
+        );
         match self.apply(&target, args.kind, &pending, &plan.found, &op).await {
             Ok(()) => {
                 op.finish();

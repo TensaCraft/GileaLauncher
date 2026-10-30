@@ -1,10 +1,12 @@
 //! Build settings, a tab of the build's content page: General (name, loader,
 //! icon, quick-join server), Runtime (Java, GPU, memory) and JVM arguments, saved together.
 
+use std::collections::BTreeSet;
+
 use launcher_shared::args;
 use launcher_shared::{
     AccountKind, AppError, BuildDto, BuildSettingsDto, BuildSettingsUpdate, CatalogVersion, ErrorCode,
-    JavaList, Level, LoaderKind, MemoryInfo, ProfileDto,
+    JavaList, Level, LoaderKind, MemoryInfo, OpsSnapshot, ProfileDto,
 };
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -252,6 +254,12 @@ pub fn minecraft_options(versions: &[CatalogVersion], current: &str, snapshot: &
     options
 }
 
+/// An operation works on build `key` (a loader change, a sync, an install into it) or its launch is
+/// being started: its settings wait to be saved.
+pub fn build_busy(ops: &OpsSnapshot, launching: &BTreeSet<String>, key: &str) -> bool {
+    launching.contains(key) || ops.operations.iter().any(|op| op.build.as_deref() == Some(key))
+}
+
 /// The pick is what the build has: installing it would change nothing.
 pub fn same_pick(build: &BuildDto, kind: LoaderKind, mc: &str, loader_version: &str) -> bool {
     build_loader(build) == kind
@@ -484,6 +492,10 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
     let port_error = RwSignal::new(None::<String>);
     let icon_error = RwSignal::new(None::<String>);
     let saving = RwSignal::new(false);
+    // Saved while an operation changes the build, the page would write over it: Save waits.
+    let busy = Memo::new(move |_| {
+        store.ops.with(|ops| store.launching.with(|launching| build_busy(ops, launching, &key())))
+    });
     let change_open = RwSignal::new(false);
     let memory = RwSignal::new(None::<MemoryInfo>);
     let javas = RwSignal::new(JavaList::default());
@@ -779,6 +791,7 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                     icon="save"
                     class="build-settings__save"
                     loading=Signal::derive(move || saving.get())
+                    disabled=Signal::derive(move || busy.get())
                     on_click=move |_| save()
                 >
                     {move || i18n.t("save")}
@@ -911,6 +924,27 @@ mod tests {
             "a server's build names the loader it runs"
         );
         assert_eq!(line(&build_of("Forge", "1.20.1-forge-47.4.10", None)).0, "Forge");
+    }
+
+    #[test]
+    fn the_settings_wait_for_an_operation_on_their_build() {
+        let op = |id: u64, build: Option<&str>| launcher_shared::OperationDto {
+            id,
+            parent_id: None,
+            title: launcher_shared::Text::key("build_loader_installing"),
+            kind: "install".into(),
+            status: None,
+            progress: None,
+            total: None,
+            visible: true,
+            build: build.map(str::to_string),
+        };
+        let ops = OpsSnapshot { busy: true, operations: vec![op(1, Some("aero")), op(2, None)], revision: 2 };
+        let none = BTreeSet::new();
+        assert!(build_busy(&ops, &none, "aero"), "its loader changes");
+        assert!(!build_busy(&ops, &none, "other"), "another build's, or no build's, operation");
+        let launching = BTreeSet::from(["other".to_string()]);
+        assert!(build_busy(&OpsSnapshot::default(), &launching, "other"), "its launch is being started");
     }
 
     #[test]

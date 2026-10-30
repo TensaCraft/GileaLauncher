@@ -193,6 +193,7 @@ mod kind_tests {
             progress: None,
             total: None,
             visible,
+            build: None,
         };
         let ids: Vec<u64> = listed(&[op(1, true), op(2, false)]).iter().map(|o| o.id).collect();
         assert_eq!(ids, [1]);
@@ -209,6 +210,7 @@ mod kind_tests {
             progress,
             total,
             visible: true,
+            build: None,
         };
         // Two builds synced at once: 37 % and 29 % of their own bytes.
         let two = [op(1, Some(37.0), Some(100.0)), op(2, Some(290.0), Some(1000.0))];

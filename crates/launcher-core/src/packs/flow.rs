@@ -250,7 +250,8 @@ pub async fn update_pack(
         AppError::new(ErrorCode::InvalidInput, format!("the build is not a {} modpack's", kind.provider))
     })?;
     let spec = OperationSpec::new(Text::key("installation_started"), "install")
-        .status(Text::key("modpack_updating").param("name", &build.name));
+        .status(Text::key("modpack_updating").param("name", &build.name))
+        .on_build(&build.key);
     let op = deps.feedback.begin(spec);
     match refill(deps, kind, source, &build, &game, &record, args, &op).await {
         Ok((Swapped { number, backups, folder }, skipped)) => {
