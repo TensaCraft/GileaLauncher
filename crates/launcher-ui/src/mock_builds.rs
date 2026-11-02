@@ -284,6 +284,7 @@ impl MockBuilds {
     }
 
     /// A build a module's game runs (`engine`), as the Horizon module's `create` makes one.
+    #[cfg(feature = "mod-horizon")]
     pub fn create_engine(
         &mut self,
         name: &str,
