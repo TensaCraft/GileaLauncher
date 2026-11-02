@@ -1,7 +1,8 @@
 //! A Horizon build's start: only for a Microsoft account that owns Java Edition (Horizon's rule:
-//! it reads the player's own Minecraft files and never downloads Mojang's). First the player's
-//! Minecraft 26.3 and its server jar, then Horizon's build, then the resources prepared from them;
-//! then `horizon-client` with the options its build offers and the session on its input.
+//! it reads the player's own Minecraft files and never downloads Mojang's). First Horizon's build
+//! and what its programs take, then the player's Minecraft 26.3 and its server jar, then the
+//! resources prepared from them; then `horizon-client` with the options its build offers and the
+//! session on its input.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
@@ -71,10 +72,16 @@ impl GameEngine for HorizonEngine {
     }
 }
 
-/// Everything the build's game needs, then its command.
+/// Everything the build's game needs, then its command, in the order of Horizon's guide for other
+/// launchers: its build, what both its programs take, the player's files, the resources.
 async fn ready(core: &CoreApp, ctx: &EngineContext<'_>, op: &OperationHandle) -> AppResult<GameCommand> {
     let minecraft = &core.paths.minecraft_dir;
     let report = op.progress_reporter();
+    op.status(Text::key("horizon_step_download"));
+    let horizon = install::ensure(core, &report).await?;
+    let offered = launch_api(&horizon.client).await?;
+    // A build older than the preparer's `--launch-api` answers nothing: it takes every option.
+    let prepares = launch_api(&horizon.prepare).await.ok();
     op.status(Text::key("horizon_step_minecraft"));
     let progress = |p: InstallProgress| {
         if let Some(d) = p.download {
@@ -83,21 +90,21 @@ async fn ready(core: &CoreApp, ctx: &EngineContext<'_>, op: &OperationHandle) ->
     };
     let vanilla = core.components.ensure(MINECRAFT, None, false, &progress).await?;
     let server_jar = server_jar(core, minecraft).await?;
-    op.status(Text::key("horizon_step_download"));
-    let horizon = install::ensure(core, &report).await?;
     let resources = install::root(minecraft).join("prepared");
     if !prepared(&horizon, &resources).await {
         op.status(Text::key("horizon_step_prepare"));
         // The Java home: `<home>/bin/java`.
         let java_home =
             vanilla.java.as_deref().and_then(Path::parent).and_then(Path::parent).map(Path::to_path_buf);
-        // A build older than the preparer's `--launch-api` answers nothing: it takes every option.
-        let offered = launch_api(&horizon.prepare).await.ok();
-        let args =
-            args::prepare_args(&resources, minecraft, &server_jar, java_home.as_deref(), offered.as_deref())?;
+        let args = args::prepare_args(
+            &resources,
+            minecraft,
+            &server_jar,
+            java_home.as_deref(),
+            prepares.as_deref(),
+        )?;
         prepare(horizon.prepare.clone(), args, op.progress_reporter()).await?;
     }
-    let offered = launch_api(&horizon.client).await?;
     let start = Start {
         resources: &resources,
         game_dir: ctx.game_dir,
