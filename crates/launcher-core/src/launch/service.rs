@@ -17,6 +17,7 @@ use super::ledger::{AdoptedProcess, Entry, Ledger, kill_process, process_started
 use super::monitor::{EARLY_EXIT, POLL, Watch, watch_game};
 use super::options::{
     OptionsInput, assigned_profile, component_id, game_dir, launch_options, planned_heap_gb, resolve_java,
+    server_address,
 };
 use super::process::{GameCommand, SharedProcess, Spawner, prepare_launch_log};
 use super::registry::{LAUNCH_COOLDOWN, LaunchRegistry};
@@ -392,13 +393,13 @@ impl LaunchService {
             let identity = d.auth.launch_identity(request.profile_key.as_deref().or(assigned)).await?;
             let folder = game_dir(build, &d.mc_dir);
             fs::create_dir_all(&folder).map_err(|e| failed(format!("{}: {e}", folder.display())))?;
-            let ctx = EngineContext {
-                build,
-                game_dir: &folder,
-                identity: &identity,
-                join: request.join.as_ref(),
-                op,
-            };
+            // Where Play asked to go, else the build's own server, as for a Java game.
+            let join = request
+                .join
+                .clone()
+                .or_else(|| server_address(&build.options).map(|(host, port)| Join::Server { host, port }));
+            let ctx =
+                EngineContext { build, game_dir: &folder, identity: &identity, join: join.as_ref(), op };
             let command = engine.command(&ctx).await?;
             self.before_launch(build, &folder).await;
             return self.spawned(build, key, command, &folder, &format!("engine={id}"));

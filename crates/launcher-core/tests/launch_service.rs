@@ -1062,6 +1062,43 @@ async fn a_build_of_a_module_s_engine_starts_through_it_with_no_java_step() {
     assert!(!launcher.is_running(&key));
 }
 
+/// An engine that keeps where each start was told to go, then starts nothing.
+#[derive(Default)]
+struct WhereEngine(Mutex<Vec<Option<Join>>>);
+
+impl GameEngine for WhereEngine {
+    fn id(&self) -> &'static str {
+        "where"
+    }
+
+    fn command<'a>(&'a self, ctx: &'a EngineContext<'a>) -> EngineFuture<'a> {
+        Box::pin(async move {
+            self.0.lock().unwrap().push(ctx.join.cloned());
+            Err(AppError::internal("nothing to start"))
+        })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_engine_goes_to_the_build_s_own_server_unless_play_asks_elsewhere() {
+    let w = world().await;
+    w.auth.create_offline("Steve").unwrap();
+    let mut build = Build::new("Сервер");
+    build.version = Some("26.3".into());
+    build.options.insert(ENGINE_OPTION.into(), json!("where"));
+    build.options.insert("server".into(), json!("play.example.net:25570"));
+    w.versions.create(&mut build).unwrap();
+    let engine = Arc::new(WhereEngine::default());
+    let launcher = LaunchService::new(LaunchDeps { engines: vec![engine.clone()], ..w.deps.clone() });
+    let _ = launcher.launch(request(&build.key)).await;
+    let world = Join::World { folder: "Мій світ".into() };
+    let _ = launcher.launch(LaunchRequest { join: Some(world.clone()), ..request(&build.key) }).await;
+    assert_eq!(
+        *engine.0.lock().unwrap(),
+        [Some(Join::Server { host: "play.example.net".into(), port: 25570 }), Some(world)]
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_build_whose_engine_is_not_there_does_not_start() {
     let w = world().await;
