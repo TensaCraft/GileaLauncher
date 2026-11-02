@@ -477,6 +477,13 @@ pub fn install() {
             sync.borrow_mut().handle(args["command"].as_str().unwrap_or_default(), &args["args"])
         }
         #[cfg(feature = "mod-backups")]
+        "module_invoke" if args["module"] == "horizon" && args["command"] == "create" => {
+            let name = args["args"]["name"].as_str().unwrap_or_default();
+            let mut builds = builds.borrow_mut();
+            let build = builds.create_engine(name, "Horizon", "26.3", "horizon")?;
+            builds.emit_builds();
+            Ok(json!({"key": build.key, "name": build.name}))
+        }
         "module_invoke" if args["module"] == "backups" => {
             backups.borrow_mut().handle(args["command"].as_str().unwrap_or_default(), &args["args"])
         }

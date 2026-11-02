@@ -4,12 +4,15 @@
 use launcher_shared::{CatalogVersion, LoaderKind};
 use leptos::prelude::*;
 use ui_kit::i18n::use_i18n;
-use ui_kit::{Button, Checkbox, ChoiceCards, Field, Icon, Select, SelectOption, TextInput, Variant};
+use ui_kit::{
+    Button, Checkbox, ChoiceCards, ChoiceOption, Field, Icon, Select, SelectOption, TextInput, Variant,
+};
 
 use super::Wizard;
 use crate::builds::loader_pick::{
     build_options, follow, loader_cards, loader_of, loader_value, unread_loaders,
 };
+use crate::modules::use_module_parts;
 use crate::store::use_store;
 
 /// The name's problem, said once the versions came: until then the wizard has given no name.
@@ -77,6 +80,27 @@ pub fn Basics(wizard: Wizard, name_problem: Memo<Option<&'static str>>) -> impl 
     });
     let on_build = Callback::new(move |picked: String| wizard.state.update(|s| s.loader_version = picked));
     let is_loader = move || wizard.state.with(|s| s.loader != LoaderKind::Minecraft);
+    // Kinds of build modules offer (another game): each card opens its module's own dialog.
+    let kinds: Vec<_> = use_module_parts()
+        .with_untracked(|p| p.build_kinds.clone())
+        .into_iter()
+        .map(|kind| (kind, RwSignal::new(false)))
+        .collect();
+    let kind_options = Signal::stored(
+        kinds
+            .iter()
+            .map(|(k, _)| ChoiceOption::new(k.id, i18n.t(k.title), k.icon).with_desc(i18n.t(k.desc)))
+            .collect::<Vec<_>>(),
+    );
+    let kind_picked = RwSignal::new(String::new());
+    let kind_dialogs = kinds.iter().map(|(k, open)| (k.dialog)(*open)).collect_view();
+    let has_kinds = !kinds.is_empty();
+    let on_kind = Callback::new(move |id: String| {
+        if let Some((_, open)) = kinds.iter().find(|(k, _)| k.id == id) {
+            open.set(true);
+        }
+        kind_picked.set(String::new());
+    });
 
     view! {
         <div class="build-wizard__basics">
@@ -117,6 +141,11 @@ pub fn Basics(wizard: Wizard, name_problem: Memo<Option<&'static str>>) -> impl 
                     </div>
                 }
             })}
+            {has_kinds.then(|| view! {
+                <div class="wizard__ask">{move || i18n.t("wizard_more_kinds")}</div>
+                <ChoiceCards options=kind_options value=kind_picked on_change=on_kind columns=5 label=t("wizard_more_kinds") />
+            })}
+            {kind_dialogs}
             <Show when=is_loader>
                 <button type="button" class="build-wizard__more" on:click=move |_| advanced.update(|a| *a = !*a)>
                     {move || view! { <Icon name=if advanced.get() { "expand_less" } else { "expand_more" } /> }}

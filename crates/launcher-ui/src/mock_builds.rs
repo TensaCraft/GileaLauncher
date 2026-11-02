@@ -283,6 +283,22 @@ impl MockBuilds {
         }
     }
 
+    /// A build a module's game runs (`engine`), as the Horizon module's `create` makes one.
+    pub fn create_engine(
+        &mut self,
+        name: &str,
+        client: &str,
+        mc: &str,
+        engine: &str,
+    ) -> Result<BuildDto, AppError> {
+        let build = self.create(name, mc)?;
+        let stored = self.builds.iter_mut().find(|b| b.key == build.key).expect("just created");
+        stored.client = Some(client.into());
+        stored.loader = None;
+        stored.engine = Some(engine.into());
+        Ok(stored.clone())
+    }
+
     pub fn create_loader(
         &mut self,
         name: &str,

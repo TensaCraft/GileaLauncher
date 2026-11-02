@@ -136,6 +136,19 @@ pub struct ModuleBuildBadge {
     pub view: fn(String) -> AnyView,
 }
 
+/// Another kind of build a module offers in the creation wizard, beside vanilla and the mod
+/// loaders: its card (translation keys of its title and the line under it), and the dialog that
+/// makes one, shown while `open` is.
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleBuildKind {
+    pub module: &'static str,
+    pub id: &'static str,
+    pub title: &'static str,
+    pub desc: &'static str,
+    pub icon: &'static str,
+    pub dialog: fn(RwSignal<bool>) -> AnyView,
+}
+
 /// A button a module adds to an alert the user can report, before «Open Discord».
 #[derive(Debug, Clone, Copy)]
 pub struct ModuleAlertAction {
@@ -297,6 +310,11 @@ pub trait UiModule: 'static {
 
     /// Marks on a build's card and row.
     fn build_badges(&self) -> Vec<ModuleBuildBadge> {
+        Vec::new()
+    }
+
+    /// Kinds of build it offers in the creation wizard.
+    fn build_kinds(&self) -> Vec<ModuleBuildKind> {
         Vec::new()
     }
 }

@@ -95,6 +95,12 @@ pub fn tab_tone(tab: &str) -> TagTone {
     }
 }
 
+/// Whether a build has tab `id`: one a module's game runs (`engine`) has no mods or shader packs
+/// (its game takes no Java mods or shaders).
+pub fn tab_shown(id: &str, engine: bool) -> bool {
+    !(engine && matches!(id, "mods" | "shaders"))
+}
+
 /// Mods and shader packs need a mod loader: a build without one offers it there, unless a module
 /// keeps its loader (`kept`, the backend's say).
 pub fn offers_loader(tab: &str, client: Option<&str>, kept: bool) -> bool {
@@ -239,6 +245,12 @@ pub fn ContentPage(key: String) -> impl IntoView {
         let key = key.clone();
         Memo::new(move |_| store.builds.with(|b| b.iter().find(|b| b.key == key).cloned())).into()
     };
+    let engine = Memo::new(move |_| build.with(|b| b.as_ref().is_some_and(|b| b.engine.is_some())));
+    Effect::new(move |_| {
+        if !tab_shown(tab.get(), engine.get()) {
+            tab.set("resourcepacks");
+        }
+    });
     // The address and the open tab agree: a link to another tab of this build (the crash
     // dialog's, say) opens it, and a picked tab replaces the address.
     Effect::new(move |_| {
@@ -368,6 +380,7 @@ pub fn ContentPage(key: String) -> impl IntoView {
     let chips = move || -> Vec<ChipDef> {
         with_module_tabs(TABS.to_vec(), &module_tabs())
             .into_iter()
+            .filter(|(id, ..)| tab_shown(id, engine.get()))
             .map(|(id, icon, label)| {
                 let module_tone = module_tabs().into_iter().find(|m| m.id == id).map(|m| m.tone);
                 ChipDef { id, icon, label: t(label), tone: module_tone.unwrap_or_else(|| tab_tone(id)) }
@@ -528,6 +541,8 @@ mod tests {
             ("drop_mods", &["jar"][..])
         );
         assert_eq!(texts(ContentKind::ResourcePacks).endings, ["zip"]);
+        assert!(!tab_shown("mods", true) && !tab_shown("shaders", true));
+        assert!(tab_shown("resourcepacks", true) && tab_shown("mods", false));
         assert_eq!(
             (texts(ContentKind::ShaderPacks).drop, texts(ContentKind::ShaderPacks).endings),
             ("drop_shaderpacks", &["zip"][..])

@@ -483,6 +483,12 @@ struct SaveArgs {
 }
 
 /// The settings' sections: id, icon, label.
+/// The sections a build's settings have: one a module's game runs (`engine`) takes no Java
+/// arguments.
+pub fn sections_of(engine: bool) -> Vec<(&'static str, &'static str, &'static str)> {
+    SECTIONS.iter().copied().filter(|(id, ..)| !engine || *id != "arguments").collect()
+}
+
 pub const SECTIONS: [(&str, &str, &str); 3] = [
     ("general", "tune", "version_section_general"),
     ("runtime", "coffee", "version_section_runtime"),
@@ -536,6 +542,8 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
     let memory = RwSignal::new(None::<MemoryInfo>);
     let javas = RwSignal::new(JavaList::default());
     let build = Memo::new(move |_| store.builds.with(|b| b.iter().find(|b| b.key == key()).cloned()));
+    // A game a module brings (not Java): no Java, memory, GPU, arguments or loader to pick.
+    let java_build = move || build.with(|b| b.as_ref().is_none_or(|b| b.engine.is_none()));
     // A build whose loader a module keeps (a server's), as the backend says: why, in place of
     // "Change".
     let loader_kept = Memo::new(move |_| build.with(|b| b.as_ref().and_then(|b| b.loader_kept.clone())));
@@ -718,6 +726,7 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                     <TextInput value=name invalid=Signal::derive(move || name_error.get().is_some()) />
                 </Field>
                 <DescriptionField value=description />
+                <Show when=java_build>
                 <Field
                     label=t("build_loader_label")
                     hint=Signal::derive(move || loader_kept.get().map(|reason| i18n.t(&reason)))
@@ -740,6 +749,7 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                         }
                     })}
                 </Field>
+                </Show>
                 <Field label=t("build_account_label") hint=t("build_account_hint")>
                     <Select options=account_options value=profile />
                 </Field>
@@ -783,7 +793,12 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
     };
     let runtime = move || {
         view! {
-            <Section icon="coffee" title=t("version_section_runtime") desc=t("version_section_runtime_desc")>
+            <Section
+                icon="coffee"
+                title=t("version_section_runtime")
+                desc=Signal::derive(move || i18n.t(if java_build() { "version_section_runtime_desc" } else { "version_section_runtime_engine_desc" }))
+            >
+                <Show when=java_build>
                 <SettingRow title=t("java_label") desc=t("java_selection_hint") stacked=true>
                     <Select options=java_options value=java />
                     <div class="hint">{move || format!("{}: {}", i18n.t("java_path_label"), effective_java())}</div>
@@ -791,9 +806,11 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                 <SettingRow title=t("gpu_mode_label")>
                     <GpuChoice value=gpu />
                 </SettingRow>
+                </Show>
                 <SettingRow title=t("screen_mode_label") desc=t("screen_mode_desc")>
                     <Segmented options=screen_options value=fullscreen />
                 </SettingRow>
+                <Show when=java_build>
                 <RamSetting
                     title=t("max_ram_label")
                     auto_label=Signal::derive(auto_label)
@@ -801,6 +818,7 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
                     ram=ram
                     memory=memory
                 />
+                </Show>
             </Section>
         }
     };
@@ -821,8 +839,10 @@ pub fn BuildSettingsPanel(key: String) -> impl IntoView {
         }
     };
 
-    let nav: Vec<NavEntry> =
-        SECTIONS.iter().map(|&(id, icon, label)| NavEntry::Item { id, icon, label: t(label) }).collect();
+    let nav: Vec<NavEntry> = sections_of(!java_build())
+        .into_iter()
+        .map(|(id, icon, label)| NavEntry::Item { id, icon, label: t(label) })
+        .collect();
 
     view! {
         // Like the launcher's settings: the sections in a side menu, Save under it.
@@ -867,6 +887,9 @@ mod tests {
         let ids: Vec<&str> = SECTIONS.iter().map(|(id, ..)| *id).collect();
         assert_eq!(ids, ["general", "runtime", "arguments"]);
         assert_eq!(SECTIONS[1].2, "version_section_runtime");
+        let engine: Vec<&str> = sections_of(true).iter().map(|(id, ..)| *id).collect();
+        assert_eq!(engine, ["general", "runtime"], "a game a module brings takes no Java arguments");
+        assert_eq!(sections_of(false).len(), 3);
     }
 
     #[test]

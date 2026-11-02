@@ -48,6 +48,10 @@ pub fn build_minecraft(build: &BuildDto) -> String {
 
 /// The loader a build runs (`build_loader`) as a card's tag: its name and colour.
 pub fn loader_tag(build: &BuildDto) -> (String, TagTone) {
+    // A game a module brings: its client's name, experimental.
+    if let (Some(engine), client) = (&build.engine, build.client.as_deref()) {
+        return (client.filter(|c| !c.trim().is_empty()).unwrap_or(engine).to_string(), TagTone::Beta);
+    }
     let kind = build_loader(build);
     let tone = match kind {
         LoaderKind::Minecraft => TagTone::Vanilla,

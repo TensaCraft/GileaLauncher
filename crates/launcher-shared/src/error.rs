@@ -75,10 +75,12 @@ pub enum ErrorCode {
     AuthServerInvalid,
     /// A module keeps the build's loader (a server's build): it is not changed by hand.
     LoaderKept,
+    /// The game plays only with a Microsoft account that owns Minecraft: Java Edition.
+    MicrosoftRequired,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 60] = [
+    pub const ALL: [ErrorCode; 61] = [
         ErrorCode::Internal,
         ErrorCode::Io,
         ErrorCode::InvalidInput,
@@ -139,6 +141,7 @@ impl ErrorCode {
         ErrorCode::AuthCodeRequired,
         ErrorCode::AuthServerInvalid,
         ErrorCode::LoaderKept,
+        ErrorCode::MicrosoftRequired,
     ];
 
     pub fn i18n_key(self) -> &'static str {
@@ -203,6 +206,7 @@ impl ErrorCode {
             ErrorCode::AuthCodeRequired => "auth_code_required",
             ErrorCode::AuthServerInvalid => "auth_server_invalid",
             ErrorCode::LoaderKept => "build_loader_kept",
+            ErrorCode::MicrosoftRequired => "error_microsoft_required",
         }
     }
 
@@ -311,7 +315,8 @@ impl ErrorCode {
             | LowMemory
             | FileNameInvalid
             | FileNameTaken
-            | LoaderKept => false,
+            | LoaderKept
+            | MicrosoftRequired => false,
         }
     }
 }
