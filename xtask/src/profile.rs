@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 pub const KNOWN_MODULES: &[&str] =
-    &["tensa", "modrinth", "curseforge", "backups", "sync", "skins", "reports", "diagnostics"];
+    &["tensa", "modrinth", "curseforge", "backups", "sync", "skins", "reports", "horizon", "diagnostics"];
 /// Modules put off until after the release: `--modules all` leaves them out; named, they are
 /// built in (`--modules diagnostics`).
 pub const POSTPONED_MODULES: &[&str] = &["diagnostics"];
@@ -311,7 +311,7 @@ mod tests {
         let spec = parse_profile(STANDARD).unwrap();
         assert_eq!(
             spec.features_arg(),
-            "mod-modrinth,mod-curseforge,mod-backups,mod-sync,mod-skins,mod-reports"
+            "mod-modrinth,mod-curseforge,mod-backups,mod-sync,mod-skins,mod-reports,mod-horizon"
         );
         assert!(spec.env.contains(&("LAUNCHER_PROFILE".into(), "standard".into())));
         let issues = spec.env.iter().find(|(k, _)| k == "LAUNCHER_ISSUES_URL").map(|(_, v)| v.as_str());
@@ -340,9 +340,9 @@ mod tests {
 
     #[test]
     fn rejects_unknown_duplicate_modules_and_bad_repo() {
-        let unknown = STANDARD.replace("\"reports\"]", "\"reports\", \"forge\"]");
+        let unknown = STANDARD.replace("\"horizon\"]", "\"horizon\", \"forge\"]");
         assert!(parse_profile(&unknown).is_err());
-        let dup = STANDARD.replace("\"reports\"]", "\"reports\", \"reports\"]");
+        let dup = STANDARD.replace("\"horizon\"]", "\"horizon\", \"reports\"]");
         assert!(parse_profile(&dup).is_err());
         let bad_repo = with_repo_line(STANDARD, "update_repo = \"not-a-repo\"");
         assert!(parse_profile(&bad_repo).is_err());

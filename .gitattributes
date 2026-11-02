@@ -9,3 +9,5 @@
 *.wav binary
 *.woff2 binary
 *.ttf binary
+# Signed bytes: kept exactly as signed.
+modules/horizon/fixtures/** -text

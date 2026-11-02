@@ -133,6 +133,8 @@ pub fn ui_modules() -> Vec<Box<dyn UiModule>> {
     modules.push(module_skins::ui::ui_module());
     #[cfg(feature = "mod-reports")]
     modules.push(module_reports::ui::ui_module());
+    #[cfg(feature = "mod-horizon")]
+    modules.push(module_horizon::ui::ui_module());
     #[cfg(feature = "mod-diagnostics")]
     modules.push(module_diagnostics::ui::ui_module());
     modules

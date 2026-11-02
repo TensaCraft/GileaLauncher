@@ -1,0 +1,19 @@
+{
+    "module_horizon_name": "Horizon",
+    "module_horizon_desc": "Експериментальні збірки Horizon: Minecraft 26.3, переписаний на Rust",
+    "horizon_kind_title": "Horizon 26.3",
+    "horizon_kind_desc": "Експериментально: Minecraft, переписаний на Rust",
+    "horizon_dialog_subtitle": "Експериментальна збірка",
+    "horizon_dialog_about": "Horizon — це Minecraft 26.3, переписаний на Rust окремою командою. Моди й шейдери Java в ньому не працюють; ресурспаки й світи — так. Перший запуск завантажить гру й підготує її з вашого Minecraft, це може тривати кілька хвилин.",
+    "horizon_dialog_account": "Грати можна лише з акаунтом Microsoft, у якого є Minecraft: Java Edition.",
+    "horizon_site": "Сайт Horizon",
+    "horizon_source": "Код на GitHub",
+    "horizon_default_name": "Horizon 26.3",
+    "horizon_create": "Створити",
+    "horizon_created": "Збірку Horizon створено. Натисніть «Грати», щоб завантажити й запустити гру.",
+    "horizon_preparing": "Готуємо Horizon…",
+    "horizon_step_minecraft": "Перевіряємо Minecraft 26.3",
+    "horizon_step_download": "Завантажуємо Horizon",
+    "horizon_step_prepare": "Готуємо файли гри (це може тривати кілька хвилин)",
+    "horizon_prepare_failed": "Не вдалося підготувати Horizon для «{version}»: {error}"
+}

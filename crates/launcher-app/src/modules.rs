@@ -21,6 +21,8 @@ pub fn backend_modules() -> Vec<Box<dyn Module>> {
     modules.push(module_skins::backend::module());
     #[cfg(feature = "mod-reports")]
     modules.push(module_reports::backend::module());
+    #[cfg(feature = "mod-horizon")]
+    modules.push(module_horizon::backend::module());
     #[cfg(feature = "mod-diagnostics")]
     modules.push(module_diagnostics::backend::module());
     modules
