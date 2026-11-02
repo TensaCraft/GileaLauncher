@@ -91,10 +91,13 @@ async fn ready(core: &CoreApp, ctx: &EngineContext<'_>, op: &OperationHandle) ->
         // The Java home: `<home>/bin/java`.
         let java_home =
             vanilla.java.as_deref().and_then(Path::parent).and_then(Path::parent).map(Path::to_path_buf);
-        let args = args::prepare_args(&resources, minecraft, &server_jar, java_home.as_deref());
+        // A build older than the preparer's `--launch-api` answers nothing: it takes every option.
+        let offered = launch_api(&horizon.prepare).await.ok();
+        let args =
+            args::prepare_args(&resources, minecraft, &server_jar, java_home.as_deref(), offered.as_deref())?;
         prepare(horizon.prepare.clone(), args, op.progress_reporter()).await?;
     }
-    let offered = launch_api(&horizon).await?;
+    let offered = launch_api(&horizon.client).await?;
     let start = Start {
         resources: &resources,
         game_dir: ctx.game_dir,
@@ -233,19 +236,21 @@ async fn prepare(
     .await
 }
 
-/// The options `horizon`'s client offers (its `--launch-api` reply, kept beside it once asked).
-async fn launch_api(horizon: &Installed) -> AppResult<Vec<String>> {
-    let client = horizon.client.clone();
-    let kept = client.with_file_name("launch-api.json");
+/// The options one of Horizon's programs offers (its `--launch-api` reply, kept beside it once
+/// asked).
+async fn launch_api(program: &Path) -> AppResult<Vec<String>> {
+    let program = program.to_path_buf();
+    let stem = program.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    let kept = program.with_file_name(format!("{stem}.launch-api.json"));
     let reply = blocking(move || {
         if let Ok(reply) = fs::read_to_string(&kept) {
             return Ok(reply);
         }
-        let out = quiet(&client)
+        let out = quiet(&program)
             .arg("--launch-api")
             .stderr(Stdio::null())
             .output()
-            .map_err(|e| AppError::new(ErrorCode::LaunchFailed, format!("{}: {e}", client.display())))?;
+            .map_err(|e| AppError::new(ErrorCode::LaunchFailed, format!("{}: {e}", program.display())))?;
         let reply = String::from_utf8_lossy(&out.stdout).into_owned();
         if out.status.success() {
             let _ = fs::write(&kept, &reply);

@@ -36,13 +36,23 @@ pub fn progress(line: &str) -> Progress {
 }
 
 /// `horizon-prepare`'s arguments that turn the player's Minecraft (`minecraft`, the official
-/// launcher's layout) into the resources in `output`.
+/// launcher's layout) into the resources in `output`: only the options its build `offered`, all of
+/// them for a build that cannot tell (one older than `horizon-prepare --launch-api`).
 pub fn prepare_args(
     output: &Path,
     minecraft: &Path,
     server_jar: &Path,
     java_home: Option<&Path>,
-) -> Vec<String> {
+    offered: Option<&[String]>,
+) -> AppResult<Vec<String>> {
+    let has = |option: &str| offered.is_none_or(|o| o.iter().any(|x| x == option));
+    let needed = ["--prepare", "--output", "--minecraft-dir", "--server-jar", "--complete", "--progress"];
+    if let Some(missing) = needed.into_iter().find(|o| !has(o)) {
+        return Err(AppError::new(
+            ErrorCode::LaunchFailed,
+            format!("this Horizon build cannot prepare without {missing}"),
+        ));
+    }
     let path = |p: &Path| p.to_string_lossy().into_owned();
     let mut args = vec![
         "--prepare".into(),
@@ -53,15 +63,15 @@ pub fn prepare_args(
         "--server-jar".into(),
         path(server_jar),
     ];
-    if let Some(home) = java_home {
+    if let Some(home) = java_home.filter(|_| has("--java-home")) {
         args.extend(["--java-home".into(), path(home)]);
     }
     args.extend(["--complete".into(), "--progress".into(), "json".into()]);
-    args
+    Ok(args)
 }
 
-/// The options `horizon-client --launch-api`'s reply lists; a build of another Launch API line is
-/// refused.
+/// The options a `--launch-api` reply (the client's or the preparer's) lists; a build of another
+/// Launch API line, or of another Minecraft than the module's, is refused.
 pub fn offered(reply: &str) -> AppResult<Vec<String>> {
     let refused = |why: String| AppError::new(ErrorCode::LaunchFailed, why);
     let reply: Value = serde_json::from_str(reply).map_err(|e| refused(format!("--launch-api: {e}")))?;
@@ -70,6 +80,9 @@ pub fn offered(reply: &str) -> AppResult<Vec<String>> {
         return Err(refused(format!(
             "Horizon's Launch API {line:?}; this launcher speaks {LAUNCH_API_LINE}"
         )));
+    }
+    if let Some(game) = reply["minecraft"].as_str().filter(|g| *g != crate::MINECRAFT) {
+        return Err(refused(format!("this Horizon build plays Minecraft {game}, not {}", crate::MINECRAFT)));
     }
     Ok(reply["options"]
         .as_array()
@@ -153,6 +166,16 @@ mod tests {
         {"name":"--session-stdin","value":null},{"name":"--quickPlaySingleplayer","value":"WORLD"},
         {"name":"--quickPlayMultiplayer","value":"HOST[:PORT]"},{"name":"--launch-api","value":null}]}"#;
 
+    /// `horizon-prepare --launch-api` of Launch API 0.1.0 (their `crates/horizon-prepare/src/launch_api.rs`).
+    const PREPARE_REPLY: &str = r#"{"launch_api":"0.1.0","horizon":"0.2.37","minecraft":"26.3","java_major":25,
+        "schema":7,"output_version":3,"options":[{"name":"--prepare","value":null},
+        {"name":"--server-jar","value":"PATH"},{"name":"--minecraft-dir","value":"PATH"},
+        {"name":"--version-json","value":"PATH"},{"name":"--client-jar","value":"PATH"},
+        {"name":"--libraries-dir","value":"PATH"},{"name":"--assets-dir","value":"PATH"},
+        {"name":"--java-home","value":"PATH"},{"name":"--root","value":"PATH"},{"name":"--output","value":"PATH"},
+        {"name":"--check","value":null},{"name":"--complete","value":null},{"name":"--progress","value":"json"},
+        {"name":"--launch-api","value":null}],"exit_codes":[0,1,2]}"#;
+
     #[test]
     fn preparing_reports_its_fraction_its_words_and_its_error() {
         assert_eq!(progress(r#"{"fraction": 0.25}"#), Progress::Fraction(0.25));
@@ -171,7 +194,7 @@ mod tests {
         let (out, mc, jar, java) =
             (PathBuf::from("out"), PathBuf::from("mc"), PathBuf::from("server.jar"), PathBuf::from("jre"));
         assert_eq!(
-            prepare_args(&out, &mc, &jar, Some(&java)),
+            prepare_args(&out, &mc, &jar, Some(&java), None).unwrap(),
             [
                 "--prepare",
                 "--output",
@@ -187,7 +210,23 @@ mod tests {
                 "json"
             ]
         );
-        assert!(!prepare_args(&out, &mc, &jar, None).contains(&"--java-home".to_string()));
+        assert!(!prepare_args(&out, &mc, &jar, None, None).unwrap().contains(&"--java-home".to_string()));
+    }
+
+    #[test]
+    fn preparing_passes_only_what_the_preparer_offers() {
+        let (out, mc, jar, java) =
+            (PathBuf::from("out"), PathBuf::from("mc"), PathBuf::from("server.jar"), PathBuf::from("jre"));
+        let all = offered(PREPARE_REPLY).unwrap();
+        assert_eq!(prepare_args(&out, &mc, &jar, Some(&java), Some(&all)).unwrap().len(), 12);
+        let no_java: Vec<String> = all.iter().filter(|o| *o != "--java-home").cloned().collect();
+        let args = prepare_args(&out, &mc, &jar, Some(&java), Some(&no_java)).unwrap();
+        assert!(!args.iter().any(|a| a == "--java-home" || a == "jre"));
+        let no_complete: Vec<String> = all.iter().filter(|o| *o != "--complete").cloned().collect();
+        assert_eq!(
+            prepare_args(&out, &mc, &jar, None, Some(&no_complete)).unwrap_err().code,
+            ErrorCode::LaunchFailed
+        );
     }
 
     #[test]
@@ -197,6 +236,8 @@ mod tests {
         let newer = REPLY.replace("\"0.1.0\"", "\"0.2.0\"");
         assert_eq!(offered(&newer).unwrap_err().code, ErrorCode::LaunchFailed);
         assert_eq!(offered("not json").unwrap_err().code, ErrorCode::LaunchFailed);
+        let other_game = REPLY.replace("\"26.3\"", "\"26.4\"");
+        assert_eq!(offered(&other_game).unwrap_err().code, ErrorCode::LaunchFailed);
     }
 
     #[test]
