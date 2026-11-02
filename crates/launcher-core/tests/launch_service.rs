@@ -11,12 +11,13 @@ use launcher_core::feedback::{EventSink, FeedbackService, OperationSpec};
 use launcher_core::java::gpu::GpuPreferenceStore;
 use launcher_core::java::memory::{GIB, MemoryLimits};
 use launcher_core::java::runtime::JavaRuntimes;
+use launcher_core::launch::engine::{ENGINE_OPTION, EngineContext, EngineFuture, GameEngine};
 use launcher_core::launch::hooks::{
     GameWatch, GameWatcher, HookFuture, LaunchContext, LaunchHook, PrepareContext, WatchedGame,
 };
 use launcher_core::launch::ledger::{Entry, LEDGER_FILE, Ledger, process_started};
 use launcher_core::launch::options::game_dir;
-use launcher_core::launch::process::{LAUNCH_LOG, SystemSpawner, launch_log};
+use launcher_core::launch::process::{GameCommand, LAUNCH_LOG, SystemSpawner, launch_log};
 use launcher_core::launch::service::{LaunchDeps, LaunchRequest, LaunchService, LaunchTimings};
 use launcher_core::loaders::ComponentInstaller;
 use launcher_core::lock::Coordinator;
@@ -25,7 +26,7 @@ use launcher_core::minecraft::platform::GamePlatform;
 use launcher_core::net::downloader::{Downloader, DownloaderConfig};
 use launcher_core::net::meta::MetaClient;
 use launcher_core::storage::config::ConfigStore;
-use launcher_core::storage::versions::VersionStore;
+use launcher_core::storage::versions::{Build, VersionStore};
 use launcher_shared::branding::MS_CLIENT_ID;
 use launcher_shared::recent::Join;
 use launcher_shared::{
@@ -181,6 +182,7 @@ async fn world_with(
         hooks: hooks(recorder.clone()),
         downloader,
         watchers,
+        engines: Vec::new(),
         timings: LaunchTimings {
             // Long enough that a slow machine still sees the second launch throttled.
             cooldown: Duration::from_secs(10),
@@ -1011,4 +1013,61 @@ async fn a_launch_still_refuses_a_build_an_install_holds() {
     let refused = w.launcher.launch(request(&key)).await.unwrap_err();
     assert_eq!(refused.code, launcher_shared::ErrorCode::InstanceBusy);
     assert!(asked.elapsed() < Duration::from_secs(2), "refused at once, not after a wait");
+}
+
+/// A game a module brings (not Minecraft's Java edition): it gives the command; the launcher
+/// starts and watches it as any game.
+struct FakeEngine;
+
+impl GameEngine for FakeEngine {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+
+    fn command<'a>(&'a self, ctx: &'a EngineContext<'a>) -> EngineFuture<'a> {
+        Box::pin(async move {
+            let argv = vec![fake_game().to_string_lossy().into_owned(), "-Dfake.stdin".into()];
+            Ok(GameCommand {
+                stdin: Some(ctx.identity.username.clone().into_bytes()),
+                ..GameCommand::new(argv, ctx.game_dir, Vec::new(), None)
+            })
+        })
+    }
+}
+
+/// A build of version 26.3 that engine `engine` runs: no Minecraft of that version is installed.
+fn engine_build(w: &World, engine: &str) -> String {
+    let mut build = Build::new("Двигун");
+    build.client = Some("Horizon".into());
+    build.version = Some("26.3".into());
+    build.options.insert(ENGINE_OPTION.into(), json!(engine));
+    w.versions.create(&mut build).unwrap();
+    build.key
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_of_a_module_s_engine_starts_through_it_with_no_java_step() {
+    let w = world().await;
+    w.auth.create_offline("Steve").unwrap();
+    let key = engine_build(&w, "fake");
+    let launcher = LaunchService::new(LaunchDeps { engines: vec![Arc::new(FakeEngine)], ..w.deps.clone() });
+    let started = launcher.launch(request(&key)).await.unwrap();
+    w.wait_for(finished);
+    assert_eq!(
+        std::fs::read(started.game_dir.join("fake-stdin.txt")).unwrap(),
+        b"Steve",
+        "its command, its input"
+    );
+    assert!(matches!(w.recorder.games.lock().unwrap().first(), Some(GameState::Started { .. })));
+    assert!(!launcher.is_running(&key));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_whose_engine_is_not_there_does_not_start() {
+    let w = world().await;
+    w.auth.create_offline("Steve").unwrap();
+    let key = engine_build(&w, "fake");
+    let err = w.launcher.launch(request(&key)).await.unwrap_err();
+    assert_eq!((err.code, err.params["version"].as_str()), (ErrorCode::Unsupported, "Двигун"));
+    assert!(w.recorder.games.lock().unwrap().is_empty());
 }

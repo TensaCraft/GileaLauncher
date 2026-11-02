@@ -17,6 +17,7 @@ use serde_json::Value;
 use crate::builds::service::LoaderKeeper;
 use crate::core_app::CoreApp;
 use crate::feedback::FeedbackService;
+use crate::launch::engine::GameEngine;
 use crate::launch::hooks::{GameWatcher, LaunchHook};
 use crate::paths::LauncherPaths;
 use crate::providers::{ContentProvider, require};
@@ -64,6 +65,11 @@ pub trait Module: Send + Sync + 'static {
 
     /// Its eye on every started game, if it has one.
     fn game_watcher(&self) -> Option<Arc<dyn GameWatcher>> {
+        None
+    }
+
+    /// A game it brings (not Minecraft's Java edition), for the builds that name it.
+    fn game_engine(&self) -> Option<Arc<dyn GameEngine>> {
         None
     }
 
@@ -167,6 +173,11 @@ impl ModuleRegistry {
     /// The modules' eyes on every started game, in registration order.
     pub fn game_watchers(&self) -> Vec<Arc<dyn GameWatcher>> {
         self.modules.iter().filter_map(|m| m.game_watcher()).collect()
+    }
+
+    /// The games the modules bring.
+    pub fn game_engines(&self) -> Vec<Arc<dyn GameEngine>> {
+        self.modules.iter().filter_map(|m| m.game_engine()).collect()
     }
 
     /// The modules' say over which builds keep their loader, in registration order.

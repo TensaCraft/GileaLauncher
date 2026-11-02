@@ -227,6 +227,7 @@ impl BuildService {
             loader_kept: self.kept_loader(build).map(str::to_string),
             last_loader: last_loader(build),
             leftover_mods: u32::try_from(leftover).unwrap_or(u32::MAX),
+            engine: crate::launch::engine::engine_of(&build.options).map(str::to_string),
         }
     }
 

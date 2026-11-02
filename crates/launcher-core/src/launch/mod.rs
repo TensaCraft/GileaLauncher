@@ -2,6 +2,7 @@
 //! monitor and the launch service.
 
 pub mod alive;
+pub mod engine;
 pub mod hooks;
 pub mod ledger;
 pub mod monitor;

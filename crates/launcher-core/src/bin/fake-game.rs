@@ -2,7 +2,7 @@
 //! `fake-game.json` in its working directory, prints a line, then exits with the code of
 //! `-Dfake.exit=N` after `-Dfake.after=MS` milliseconds (default: code 0 at once); `-Dfake.say=TEXT`
 //! prints TEXT as a line of its output first; `-Dfake.log` keeps `logs/latest.log` open to write
-//! while it runs, as a real game does.
+//! while it runs, as a real game does; `-Dfake.stdin` copies its standard input to `fake-stdin.txt`.
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -21,6 +21,11 @@ fn main() {
         let _ = std::fs::create_dir_all("logs");
         std::fs::File::create("logs/latest.log")
     });
+    if args.iter().any(|a| a == "-Dfake.stdin") {
+        let mut input = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut input);
+        let _ = std::fs::write("fake-stdin.txt", input);
+    }
     println!("fake game started");
     if let Some(said) = args.iter().find_map(|a| a.strip_prefix("-Dfake.say=")) {
         println!("{said}");

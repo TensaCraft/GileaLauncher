@@ -266,6 +266,7 @@ impl CoreApp {
             hooks: modules.launch_hooks(),
             downloader: downloader.clone(),
             watchers: modules.game_watchers(),
+            engines: modules.game_engines(),
             timings: LaunchTimings::default(),
             ledger: Some(paths.app_state_dir.join(LEDGER_FILE)),
             memory: Arc::new(crate::java::memory::MemoryLimits::detect),

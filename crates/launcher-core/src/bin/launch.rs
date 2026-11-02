@@ -125,6 +125,7 @@ async fn main() {
         hooks: Vec::new(),
         downloader: files.clone(),
         watchers: Vec::new(),
+        engines: Vec::new(),
         timings: LaunchTimings::default(),
         ledger: None,
         memory: Arc::new(launcher_core::java::memory::MemoryLimits::detect),

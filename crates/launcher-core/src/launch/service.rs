@@ -11,6 +11,7 @@ use launcher_shared::recent::Join;
 use launcher_shared::{AppError, AppResult, ErrorCode, GameEvent, GameStartAction, GameState, Text};
 
 use super::alive::{game_open, game_processes};
+use super::engine::{EngineContext, GameEngine, engine_of};
 use super::hooks::{GameWatcher, LaunchContext, LaunchHook, PrepareContext, WatchedGame};
 use super::ledger::{AdoptedProcess, Entry, Ledger, kill_process, process_started};
 use super::monitor::{EARLY_EXIT, POLL, Watch, watch_game};
@@ -81,6 +82,8 @@ pub struct LaunchDeps {
     pub downloader: Arc<Downloader>,
     /// Modules' eyes on every started game.
     pub watchers: Vec<Arc<dyn GameWatcher>>,
+    /// Games modules bring (`GameEngine`), for the builds that name one.
+    pub engines: Vec<Arc<dyn GameEngine>>,
     pub timings: LaunchTimings,
     /// The file of the games started (`ledger::LEDGER_FILE` in the state folder): a launcher
     /// that restarts takes them back (`adopt`). None: they are known only while this one runs.
@@ -281,7 +284,7 @@ impl LaunchService {
         if d.feedback.is_busy() {
             return Err(AppError::new(ErrorCode::Busy, "another operation is running"));
         }
-        if !request.allow_low_memory && self.registry.any_active() {
+        if !request.allow_low_memory && engine_of(&build.options).is_none() && self.registry.any_active() {
             let limits = (d.memory)();
             let heap = planned_heap_gb(&build, &d.config, &limits);
             if let Some(available) = limits.available_gb.filter(|free| *free < heap + LOW_MEMORY_RESERVE_GB) {
@@ -386,6 +389,26 @@ impl LaunchService {
         let assigned = assigned_profile(&build.options).filter(|key| d.auth.has_profile(key));
         let failed =
             |why: String| AppError::new(ErrorCode::LaunchFailed, why).with_param("version", &build.name);
+        // A game a module brings: it gives the command; nothing of Java applies.
+        if let Some(id) = engine_of(&build.options) {
+            let engine = d.engines.iter().find(|e| e.id() == id).ok_or_else(|| {
+                AppError::new(ErrorCode::Unsupported, format!("no game engine {id}"))
+                    .with_param("version", &build.name)
+            })?;
+            let identity = d.auth.launch_identity(request.profile_key.as_deref().or(assigned)).await?;
+            let folder = game_dir(build, &d.mc_dir);
+            fs::create_dir_all(&folder).map_err(|e| failed(format!("{}: {e}", folder.display())))?;
+            let ctx = EngineContext {
+                build,
+                game_dir: &folder,
+                identity: &identity,
+                join: request.join.as_ref(),
+                op,
+            };
+            let command = engine.command(&ctx).await?;
+            self.before_launch(build, &folder).await;
+            return self.spawned(build, key, command, &folder, &format!("engine={id}"));
+        }
         let component = component_id(build)
             .ok_or_else(|| failed("the build names no Minecraft version".into()))?
             .to_string();
@@ -440,21 +463,7 @@ impl LaunchService {
         apply_join(&mut options, request.join.as_ref());
         fs::create_dir_all(&options.game_dir)
             .map_err(|e| failed(format!("{}: {e}", options.game_dir.display())))?;
-        let ctx = LaunchContext {
-            build,
-            game_dir: &options.game_dir,
-            mc_dir: &d.mc_dir,
-            config: &d.config,
-            feedback: &d.feedback,
-        };
-        for hook in &d.hooks {
-            if let Err(e) = hook.before_launch(&ctx).await {
-                tracing::warn!("A step before launching {} failed: {}", build.name, e.detail);
-                d.feedback.warning(
-                    Text::key("launch_hook_failed").param("version", &build.name).param("error", e.detail),
-                );
-            }
-        }
+        self.before_launch(build, &options.game_dir).await;
         if let (Some(name), Some(_)) = (&info.asset_index_name, &info.asset_index) {
             let assets = d.mc_dir.join("assets");
             let (index, target) = (index_path(&assets, name), options.game_dir.clone());
@@ -483,15 +492,47 @@ impl LaunchService {
             .inspect_err(|e| tracing::warn!("Unable to start the launch log of {}: {e}", build.name))
             .ok();
         let command = GameCommand::new(argv, &options.game_dir, env, log);
+        self.spawned(build, key, command, &options.game_dir, &format!("component={component}"))
+    }
+
+    /// The modules' steps right before the game of `build` starts in `game_dir`: a failed one is
+    /// only warned about.
+    async fn before_launch(&self, build: &Build, game_dir: &Path) {
+        let d = &self.deps;
+        let ctx =
+            LaunchContext { build, game_dir, mc_dir: &d.mc_dir, config: &d.config, feedback: &d.feedback };
+        for hook in &d.hooks {
+            if let Err(e) = hook.before_launch(&ctx).await {
+                tracing::warn!("A step before launching {} failed: {}", build.name, e.detail);
+                d.feedback.warning(
+                    Text::key("launch_hook_failed").param("version", &build.name).param("error", e.detail),
+                );
+            }
+        }
+    }
+
+    /// Starts `command`, the game of `build` in `game_dir` (`what` names it in the log), and
+    /// watches it on a thread of its own.
+    fn spawned(
+        &self,
+        build: &Build,
+        key: &str,
+        command: GameCommand,
+        game_dir: &Path,
+        what: &str,
+    ) -> AppResult<LaunchStarted> {
+        let d = &self.deps;
+        let failed =
+            |why: String| AppError::new(ErrorCode::LaunchFailed, why).with_param("version", &build.name);
         let launched_at = SystemTime::now();
         let process =
             d.spawner.spawn(&command).map_err(|e| failed(format!("{}: {e}", command.program.display())))?;
         let pid = process.pid();
         tracing::info!(
-            "Minecraft started: pid={pid} build={} component={component} java={} dir={}",
+            "Minecraft started: pid={pid} build={} {what} program={} dir={}",
             build.name,
-            java.display(),
-            options.game_dir.display()
+            command.program.display(),
+            game_dir.display()
         );
         let shared: SharedProcess = Arc::new(Mutex::new(process));
         self.registry.register(key, shared.clone());
@@ -516,7 +557,7 @@ impl LaunchService {
             key: key.to_string(),
             build_key: build.key.clone(),
             build_name: build.name.clone(),
-            game_dir: options.game_dir.clone(),
+            game_dir: game_dir.to_path_buf(),
             launched_at,
             // The launcher goes (quits or hides in the tray) once the game runs.
             close_launcher: crate::settings::game_start_action(&d.config) != GameStartAction::Nothing,
@@ -526,7 +567,7 @@ impl LaunchService {
         let game = WatchedGame {
             build_key: build.key.clone(),
             build_name: build.name.clone(),
-            game_dir: options.game_dir.clone(),
+            game_dir: game_dir.to_path_buf(),
             launched_at,
         };
         let watches = d.watchers.iter().map(|w| w.watch(&game)).collect();
@@ -541,6 +582,6 @@ impl LaunchService {
                 }
             })
             .map_err(|e| failed(e.to_string()))?;
-        Ok(LaunchStarted { pid, java, game_dir: options.game_dir })
+        Ok(LaunchStarted { pid, java: command.program, game_dir: game_dir.to_path_buf() })
     }
 }

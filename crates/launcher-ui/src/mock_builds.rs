@@ -31,6 +31,7 @@ fn mock_build(key: &str, name: &str, version: &str) -> BuildDto {
         loader_kept: None,
         last_loader: None,
         leftover_mods: 0,
+        engine: None,
     }
 }
 

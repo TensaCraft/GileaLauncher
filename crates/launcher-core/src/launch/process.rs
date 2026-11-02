@@ -32,6 +32,9 @@ pub struct GameCommand {
     pub env: Vec<(String, String)>,
     /// Output is appended here; `None` discards it.
     pub log: Option<PathBuf>,
+    /// Written to the game's standard input, which is then closed (a session it must not get on
+    /// its command line); `None`: no input.
+    pub stdin: Option<Vec<u8>>,
 }
 
 impl GameCommand {
@@ -44,7 +47,7 @@ impl GameCommand {
     ) -> GameCommand {
         let mut argv = argv.into_iter();
         let program = PathBuf::from(argv.next().unwrap_or_default());
-        GameCommand { program, args: argv.collect(), cwd: cwd.to_path_buf(), env, log }
+        GameCommand { program, args: argv.collect(), cwd: cwd.to_path_buf(), env, log, stdin: None }
     }
 }
 
@@ -83,7 +86,8 @@ impl GameProcess for SystemProcess {
 impl Spawner for SystemSpawner {
     fn spawn(&self, c: &GameCommand) -> io::Result<Box<dyn GameProcess>> {
         let mut command = Command::new(&c.program);
-        command.args(&c.args).current_dir(&c.cwd).stdin(Stdio::null());
+        command.args(&c.args).current_dir(&c.cwd);
+        command.stdin(if c.stdin.is_some() { Stdio::piped() } else { Stdio::null() });
         // The game opens folders and links itself (xdg-open): not with the AppImage's environment.
         crate::platform::child_env::clean(&mut command);
         for (key, value) in &c.env {
@@ -107,7 +111,15 @@ impl Spawner for SystemSpawner {
             // CREATE_NO_WINDOW: no console window for java.exe.
             command.creation_flags(0x0800_0000);
         }
-        Ok(Box::new(SystemProcess(command.spawn()?)))
+        let mut child = command.spawn()?;
+        if let (Some(input), Some(mut pipe)) = (&c.stdin, child.stdin.take()) {
+            // Dropping the pipe closes it: the game reads to the end.
+            if let Err(e) = pipe.write_all(input) {
+                let _ = child.kill();
+                return Err(e);
+            }
+        }
+        Ok(Box::new(SystemProcess(child)))
     }
 }
 

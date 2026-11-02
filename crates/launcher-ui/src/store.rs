@@ -178,6 +178,7 @@ mod tests {
             loader_kept: None,
             last_loader: None,
             leftover_mods: 0,
+            engine: None,
         }
     }
 

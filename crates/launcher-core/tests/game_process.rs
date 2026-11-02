@@ -166,3 +166,21 @@ fn a_crash_of_java_itself_is_explained_by_its_error_file() {
         .unwrap();
     assert_eq!(crash_artifact(game, launched), Some(fresh));
 }
+
+/// What a game reads on its standard input (an account's session, which never goes on its command
+/// line or the disk) arrives whole, and the input is closed after it.
+#[test]
+fn a_game_gets_its_input_and_the_end_of_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let argv = vec![fake_game().to_string_lossy().into_owned(), "-Dfake.stdin".into()];
+    let command = GameCommand {
+        stdin: Some(br#"{"name":"Alex","access_token":"secret"}"#.to_vec()),
+        ..GameCommand::new(argv, dir.path(), Vec::new(), None)
+    };
+    let mut process = SystemSpawner.spawn(&command).unwrap();
+    assert_eq!(wait(&mut process), Some(0), "the game stops waiting once the input ends");
+    assert_eq!(
+        std::fs::read(dir.path().join("fake-stdin.txt")).unwrap(),
+        br#"{"name":"Alex","access_token":"secret"}"#
+    );
+}

@@ -423,6 +423,9 @@ pub struct BuildDto {
     /// Mod files left in its mods folder while it has no mod loader.
     #[serde(default)]
     pub leftover_mods: u32,
+    /// The game a module brings that runs it (`"horizon"`); `None`: Minecraft's Java edition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
 }
 
 /// Every build in the order the user put them (the rest by name) (`app://builds`).

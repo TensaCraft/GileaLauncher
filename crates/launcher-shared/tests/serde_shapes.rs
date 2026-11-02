@@ -294,6 +294,7 @@ fn build_and_java_dtos_keep_their_wire_shape() {
         loader_kept: None,
         last_loader: Some(LoaderKind::Fabric),
         leftover_mods: 3,
+        engine: None,
     };
     assert_eq!(
         serde_json::to_value(BuildsSnapshot { builds: vec![build] }).unwrap(),
