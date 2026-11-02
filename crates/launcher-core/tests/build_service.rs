@@ -952,3 +952,30 @@ async fn a_build_keeps_the_description_it_is_given() {
     assert_eq!(cut.description.chars().count(), 300);
     assert_eq!(w.service.settings(&build.key).unwrap().description.chars().count(), 300);
 }
+
+/// The launcher's own short holds at its start (moving files, the daily clean) are waited out: a
+/// build made right then still gets its settings. Another hold (the build's game, a content change)
+/// refuses at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_wait_out_the_launcher_s_own_short_holds() {
+    let fake = FakeMojang::start().await;
+    fake.add_vanilla("1.21.1");
+    let w = world(&fake);
+    let build = w.service.install_vanilla("Aero", "1.21.1").await.unwrap();
+    let folder = w.games.join(&build.id);
+    let mut update = update_from(&w.service.settings(&build.key).unwrap());
+    update.max_ram_gb = Some(6);
+    let held = w.instances.try_acquire(&folder, "layout").unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        drop(held);
+    });
+    let saved = w.service.update_settings(&build.key, update.clone(), || false).unwrap();
+    release.join().unwrap();
+    assert_eq!(saved.max_ram_gb, Some(6));
+    let _content = w.instances.try_acquire(&folder, "content").unwrap();
+    let started = std::time::Instant::now();
+    let busy = w.service.update_settings(&build.key, update, || false).unwrap_err();
+    assert_eq!(busy.code, ErrorCode::InstanceBusy);
+    assert!(started.elapsed() < Duration::from_secs(1), "no wait for a hold that is not the launcher's own");
+}

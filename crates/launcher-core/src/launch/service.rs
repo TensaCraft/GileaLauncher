@@ -25,7 +25,7 @@ use crate::feedback::{EventSink, FeedbackService, OperationHandle, OperationSpec
 use crate::java::gpu::{GPU_WRITTEN_KEY, GpuPreferenceStore, apply_gpu_mode, nvidia_driver_loaded};
 use crate::java::memory::MemoryLimits;
 use crate::loaders::{ComponentInstaller, ComponentSpec};
-use crate::lock::{Coordinator, path_key};
+use crate::lock::{Coordinator, launchers_own, path_key};
 use crate::minecraft::InstallProgress;
 use crate::minecraft::assets::{AssetIndex, index_path};
 use crate::minecraft::command::{LaunchOptions, build_command};
@@ -39,12 +39,6 @@ use crate::storage::versions::{Build, VersionStore};
 
 /// How long a launch waits for the launcher's own hold on its build to end.
 const HOLD_WAIT: Duration = Duration::from_secs(60);
-
-/// Holds a launch waits out instead of refusing: the launcher's own, which end by themselves — a
-/// sync pass, and the start's file move and daily clean (a shortcut's launch comes right then).
-fn waits_out(kind: &str) -> bool {
-    matches!(kind, "sync" | "layout" | "storage" | "settings")
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LaunchTimings {
@@ -309,7 +303,7 @@ impl LaunchService {
             match d.instances.try_acquire(&folder, "launch") {
                 Ok(lease) => break lease,
                 Err(_)
-                    if d.instances.active_kind(&folder).as_deref().is_some_and(waits_out)
+                    if d.instances.active_kind(&folder).as_deref().is_some_and(launchers_own)
                         && waited.elapsed() < HOLD_WAIT =>
                 {
                     tokio::time::sleep(Duration::from_millis(200)).await;

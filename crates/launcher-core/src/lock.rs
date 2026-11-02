@@ -7,6 +7,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde::{Deserialize, Serialize};
@@ -147,6 +148,13 @@ impl Drop for Lease {
     }
 }
 
+/// Holds the launcher puts on a build's folder by itself, which end by themselves soon: a sync
+/// pass, the start's file move and daily clean, a settings save. A launch or a settings save waits
+/// them out instead of refusing.
+pub fn launchers_own(kind: &str) -> bool {
+    matches!(kind, "sync" | "layout" | "storage" | "settings")
+}
+
 /// Non-blocking, non-reentrant locks for one namespace. Nested operations receive the `Lease`
 /// they run under instead of acquiring again. Lock order: instance → shared → process registry.
 pub struct Coordinator {
@@ -182,6 +190,23 @@ impl Coordinator {
         AppError::new(self.busy, format!("{} is busy with {kind}", path.display()))
             .with_param("version", name)
             .with_param("kind", kind)
+    }
+
+    /// `try_acquire`, waiting up to `limit` while the folder is held by one of the launcher's own
+    /// short holds (`launchers_own`); any other hold refuses at once.
+    pub fn acquire_waiting(&self, path: &Path, kind: &str, limit: Duration) -> AppResult<Lease> {
+        let started = Instant::now();
+        loop {
+            match self.try_acquire(path, kind) {
+                Err(_)
+                    if self.active_kind(path).as_deref().is_some_and(launchers_own)
+                        && started.elapsed() < limit =>
+                {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                held => return held,
+            }
+        }
     }
 
     pub fn try_acquire(&self, path: &Path, kind: &str) -> AppResult<Lease> {

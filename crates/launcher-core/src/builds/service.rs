@@ -174,6 +174,9 @@ fn copy_below(from: &Path, to: &Path, prefix: &str, skip: &dyn Fn(&str) -> bool)
     Ok(())
 }
 
+/// How long a settings save waits out the launcher's own holds on the build (`launchers_own`).
+const SETTINGS_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub struct BuildService {
     versions: Arc<VersionStore>,
     components: Arc<ComponentInstaller>,
@@ -440,7 +443,8 @@ impl BuildService {
         running: impl Fn() -> bool,
     ) -> AppResult<BuildSettingsDto> {
         let folder = game_dir(&self.find(key)?, self.versions.minecraft_dir());
-        let _lease = self.instances.try_acquire(&folder, "settings")?;
+        // A build made right after the start meets the start's own holds: they end soon.
+        let _lease = self.instances.acquire_waiting(&folder, "settings", SETTINGS_WAIT)?;
         let mut build = self.find(key)?;
         let name = update.name.trim().to_string();
         if name.is_empty() {
