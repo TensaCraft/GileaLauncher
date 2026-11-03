@@ -131,13 +131,27 @@ pub async fn ensure(core: &CoreApp, report: &(dyn Fn(f64, f64) + Send + Sync)) -
         .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "Horizon's archive has no game in it"))
 }
 
+/// The nightly's checksums and their signature.
+const INDEX: [&str; 2] = ["SHA256SUMS", "SHA256SUMS.sig"];
+
+/// The downloads of the nightly's checksums into `index`, yesterday's copies gone first: the
+/// downloader skips a file already there that names no size or hash.
+fn index_tasks(index: &Path) -> Vec<DownloadTask> {
+    INDEX
+        .iter()
+        .map(|name| {
+            let _ = fs::remove_file(index.join(name));
+            DownloadTask::new(format!("{NIGHTLY}/{name}"), index.join(name)).transient()
+        })
+        .collect()
+}
+
 /// This computer's archive of the newest nightly and its SHA-256, from checksums Horizon signed.
 async fn signed_nightly(core: &CoreApp, root: &Path) -> AppResult<Current> {
     let archive = release::archive_for(std::env::consts::OS, std::env::consts::ARCH)
         .ok_or_else(|| AppError::new(ErrorCode::Unsupported, "Horizon has no build for this computer"))?;
     let index = root.join("index");
-    for name in ["SHA256SUMS", "SHA256SUMS.sig"] {
-        let task = DownloadTask::new(format!("{NIGHTLY}/{name}"), index.join(name)).transient();
+    for task in index_tasks(&index) {
         core.downloader.download_one(task, &|_| {}).await?;
     }
     let sums = fs::read(index.join("SHA256SUMS")).map_err(|e| io_error(&index, e))?;
@@ -232,6 +246,18 @@ mod tests {
     use std::io::Write;
 
     use super::*;
+
+    #[test]
+    fn each_look_at_the_nightly_fetches_its_checksums_anew() {
+        let index = tempfile::tempdir().unwrap();
+        for name in INDEX {
+            fs::write(index.path().join(name), "yesterday's").unwrap();
+        }
+        assert_eq!(index_tasks(index.path()).len(), 2);
+        for name in INDEX {
+            assert!(!index.path().join(name).exists(), "{name} kept: the downloader would skip it");
+        }
+    }
 
     fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(io::Cursor::new(Vec::new()));
