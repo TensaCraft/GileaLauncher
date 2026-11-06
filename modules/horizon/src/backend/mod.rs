@@ -1,10 +1,11 @@
 //! The Horizon module's backend: the signed nightly build, preparing it from the player's own
-//! Minecraft, and starting it as a build's game.
+//! Minecraft, starting it as a build's game, and Horizon's registry as its builds' content source.
 
 pub mod args;
 pub mod create;
 pub mod engine;
 pub mod install;
+pub mod registry;
 pub mod release;
 
 use std::sync::{Arc, OnceLock, Weak};
@@ -12,7 +13,9 @@ use std::sync::{Arc, OnceLock, Weak};
 use launcher_core::core_app::CoreApp;
 use launcher_core::launch::engine::GameEngine;
 use launcher_core::modules::{Module, ModuleFuture};
-use launcher_shared::{AppError, ErrorCode};
+use launcher_core::providers::ContentProvider;
+use launcher_shared::provider::ProviderInfo;
+use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde_json::{Value, json};
 
 use crate::dto::CreateArgs;
@@ -41,6 +44,14 @@ impl Module for HorizonModule {
 
     fn game_engine(&self) -> Option<Arc<dyn GameEngine>> {
         Some(Arc::new(engine::HorizonEngine { core: self.core.clone() }))
+    }
+
+    fn provider_info(&self) -> Option<ProviderInfo> {
+        Some(crate::provider_info())
+    }
+
+    fn provider(&self, core: &Arc<CoreApp>) -> AppResult<Arc<dyn ContentProvider>> {
+        Ok(Arc::new(registry::Registry::new(core.clone())))
     }
 
     fn changes_builds(&self, command: &str) -> bool {

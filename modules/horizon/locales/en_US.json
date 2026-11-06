@@ -4,7 +4,7 @@
     "horizon_kind_title": "Horizon 26.3",
     "horizon_kind_desc": "Experimental: Minecraft rewritten in Rust",
     "horizon_dialog_subtitle": "An experimental build",
-    "horizon_dialog_about": "Horizon is Minecraft 26.3 rewritten in Rust by its own team. Java mods and shaders do not run in it; resource packs and worlds do. The first start downloads the game and prepares it from your Minecraft, which may take a few minutes.",
+    "horizon_dialog_about": "Horizon is Minecraft 26.3 rewritten in Rust by its own team. Java mods and shaders do not run in it; its own shaders, resource packs and worlds do. The first start downloads the game and prepares it from your Minecraft, which may take a few minutes.",
     "horizon_dialog_account": "It plays only with a Microsoft account that owns Minecraft: Java Edition.",
     "horizon_site": "Horizon's site",
     "horizon_source": "Code on GitHub",
@@ -15,5 +15,7 @@
     "horizon_step_minecraft": "Checking Minecraft 26.3",
     "horizon_step_download": "Downloading Horizon",
     "horizon_step_prepare": "Preparing the game's files (this may take a few minutes)",
-    "horizon_prepare_failed": "Unable to get Horizon ready for “{version}”: {error}"
+    "horizon_prepare_failed": "Unable to get Horizon ready for “{version}”: {error}",
+    "horizon_registry_source": "Horizon registry",
+    "horizon_shader_installed": "Shader {name} is installed. To turn it on, click Options › Video Settings › Shaders in the game."
 }

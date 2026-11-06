@@ -11,6 +11,8 @@ mod mock_components;
 mod mock_content;
 #[cfg(feature = "mod-diagnostics")]
 mod mock_diagnostics;
+#[cfg(feature = "mod-horizon")]
+mod mock_horizon;
 #[cfg(feature = "mod-modrinth")]
 mod mock_modrinth;
 #[cfg(feature = "mod-tensa")]

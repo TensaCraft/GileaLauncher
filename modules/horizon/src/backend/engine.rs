@@ -243,12 +243,17 @@ async fn prepare(
     .await
 }
 
+/// Where one of Horizon's programs' `--launch-api` reply is kept, beside it.
+pub fn kept_reply(program: &Path) -> PathBuf {
+    let stem = program.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    program.with_file_name(format!("{stem}.launch-api.json"))
+}
+
 /// The options one of Horizon's programs offers (its `--launch-api` reply, kept beside it once
 /// asked).
 async fn launch_api(program: &Path) -> AppResult<Vec<String>> {
     let program = program.to_path_buf();
-    let stem = program.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-    let kept = program.with_file_name(format!("{stem}.launch-api.json"));
+    let kept = kept_reply(&program);
     let reply = blocking(move || {
         if let Ok(reply) = fs::read_to_string(&kept) {
             return Ok(reply);

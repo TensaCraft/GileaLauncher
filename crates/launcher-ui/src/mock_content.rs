@@ -179,6 +179,23 @@ impl MockContent {
         self.lists.entry((key.to_string(), ContentKind::Mods)).or_default();
     }
 
+    /// Build `key` runs a module's game: no mods, and no shader packs until its own source brings
+    /// them.
+    #[cfg(feature = "mod-horizon")]
+    pub fn set_engine(&mut self, key: &str, client: &str) {
+        self.set_client(key, client);
+        self.lists.entry((key.to_string(), ContentKind::ShaderPacks)).or_default();
+    }
+
+    /// A provider put `item` into build `key` (in place of a file of its name).
+    #[cfg(feature = "mod-horizon")]
+    pub fn put(&mut self, key: &str, kind: ContentKind, item: ContentItem) {
+        let items = self.items(key, kind);
+        items.retain(|i| i.file != item.file);
+        items.push(item);
+        items.sort_by_key(|i| i.filename.to_lowercase());
+    }
+
     fn supported(&self, key: &str, kind: ContentKind) -> bool {
         kind != ContentKind::Mods
             || self.clients.get(key).map_or(!key.starts_with("vanilna"), |c| mods_supported(Some(c)))

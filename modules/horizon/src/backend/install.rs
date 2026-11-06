@@ -78,6 +78,12 @@ fn installed(root: &Path, current: &Current) -> Option<Installed> {
     })
 }
 
+/// The build here now under the Minecraft folder `minecraft`, nothing looked at or downloaded.
+pub fn present(minecraft: &Path) -> Option<Installed> {
+    let root = root(minecraft);
+    installed(&root, &read_state(&root)?)
+}
+
 fn read_state(root: &Path) -> Option<Current> {
     serde_json::from_slice(&fs::read(root.join(STATE)).ok()?).ok()
 }

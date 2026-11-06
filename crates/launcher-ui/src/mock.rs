@@ -212,6 +212,8 @@ fn preview_providers() -> Vec<launcher_shared::provider::ProviderInfo> {
     list.push(module_curseforge::types::provider_info());
     #[cfg(feature = "mod-tensa")]
     list.push(module_tensa::provider_info());
+    #[cfg(feature = "mod-horizon")]
+    list.push(module_horizon::provider_info());
     list
 }
 
@@ -332,6 +334,8 @@ pub fn install() {
         query_value("tensa").as_deref() == Some("error"),
         builds.clone(),
     )));
+    #[cfg(feature = "mod-horizon")]
+    let horizon = Rc::new(RefCell::new(crate::mock_horizon::MockHorizon::new(content.clone())));
     #[cfg(feature = "mod-modrinth")]
     let modrinth = Rc::new(RefCell::new(crate::mock_modrinth::MockModrinth::new(
         query_value("modrinth").as_deref() == Some("error"),
@@ -460,6 +464,10 @@ pub fn install() {
         cmd if cmd.starts_with("provider_") && args["provider"] == module_tensa::ID => {
             tensa.borrow_mut().handle_provider(cmd, &args)
         }
+        #[cfg(feature = "mod-horizon")]
+        cmd if cmd.starts_with("provider_") && args["provider"] == module_horizon::ID => {
+            horizon.borrow_mut().handle(cmd, &args)
+        }
         #[cfg(feature = "mod-modrinth")]
         cmd if cmd.starts_with("provider_") => modrinth.borrow_mut().handle(cmd, &args),
         #[cfg(feature = "mod-skins")]
@@ -480,7 +488,9 @@ pub fn install() {
         "module_invoke" if args["module"] == "horizon" && args["command"] == "create" => {
             let name = args["args"]["name"].as_str().unwrap_or_default();
             let mut builds = builds.borrow_mut();
-            let build = builds.create_engine(name, "Horizon", "26.3", "horizon")?;
+            let build =
+                builds.create_engine(name, module_horizon::CLIENT, module_horizon::MINECRAFT, "horizon")?;
+            content.borrow_mut().set_engine(&build.key, module_horizon::CLIENT);
             builds.emit_builds();
             Ok(json!({"key": build.key, "name": build.name}))
         }

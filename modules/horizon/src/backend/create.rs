@@ -10,10 +10,8 @@ use launcher_core::storage::versions::Build;
 use launcher_shared::AppResult;
 use serde_json::json;
 
+use crate::CLIENT;
 use crate::dto::CreateArgs;
-
-/// The build's client, as cards and lists name it.
-pub const CLIENT: &str = "Horizon";
 
 pub fn create(core: &CoreApp, args: &CreateArgs) -> AppResult<Build> {
     let id = core.versions.claim_folder(args.name.trim())?;
