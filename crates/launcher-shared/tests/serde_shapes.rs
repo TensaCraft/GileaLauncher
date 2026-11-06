@@ -551,6 +551,14 @@ fn only_loader_builds_run_mods() {
 }
 
 #[test]
+fn a_module_s_game_takes_its_own_shader_packs_too() {
+    assert_eq!(ContentKind::Mods.endings(false), ["jar"]);
+    assert_eq!(ContentKind::ResourcePacks.endings(true), ["zip"]);
+    assert_eq!(ContentKind::ShaderPacks.endings(false), ["zip"], "a Java build: Iris packs alone");
+    assert_eq!(ContentKind::ShaderPacks.endings(true), ["zip", "hshader"]);
+}
+
+#[test]
 fn modrinth_install_errors_have_their_texts() {
     assert_eq!(ErrorCode::NoCompatibleVersion.i18n_key(), "no_compatible_version");
     assert_eq!(ErrorCode::NoFileFound.i18n_key(), "no_file_found");

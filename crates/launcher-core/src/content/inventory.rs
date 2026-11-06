@@ -1,6 +1,7 @@
 //! What a build has installed: mods (`.jar` on, `.jar.disabled` off),
-//! resource and shader packs (`.zip`, `.zip.disabled` or folders). Links are never listed, so
-//! nothing outside the build's content folders is shown or changed.
+//! resource and shader packs (`.zip`, `.zip.disabled` or folders; a module's game's own shader
+//! packs too, `ContentKind::endings`). Links are never listed, so nothing outside the build's
+//! content folders is shown or changed.
 
 use std::collections::HashMap;
 use std::fs;
@@ -8,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-use launcher_shared::{ContentItem, LoaderKind};
+use launcher_shared::{ContentItem, ContentKind, LoaderKind};
 
 use super::jar::{ModDescriptor, inspect_mod_jar};
 use super::packs::{RESOURCE_PACKS, read_options_list, read_properties, resourcepack_entry};
@@ -160,9 +161,9 @@ pub fn scan_mods(
     entries
 }
 
-/// The packs in `dir` — `.zip` / `.zip.disabled` files and folders (hidden ones skipped) — by
-/// name; `on` says which are switched on.
-fn scan_packs(dir: &Path, on: impl Fn(&str) -> bool, toggle_supported: bool) -> Vec<Entry> {
+/// The packs in `dir` — files of one of `endings` (`.zip` / `.zip.disabled`) and folders (hidden
+/// ones skipped) — by name; `on` says which are switched on.
+fn scan_packs(dir: &Path, endings: &[&str], on: impl Fn(&str) -> bool, toggle_supported: bool) -> Vec<Entry> {
     let mut entries: Vec<Entry> = children(dir)
         .into_iter()
         .filter_map(|(path, name, meta)| {
@@ -172,7 +173,7 @@ fn scan_packs(dir: &Path, on: impl Fn(&str) -> bool, toggle_supported: bool) -> 
                 }
                 (name.clone(), true, true, dir_size(&path))
             } else if meta.is_file() {
-                let (base, on_disk) = split_disabled(&name, ".zip")?;
+                let (base, on_disk) = endings.iter().find_map(|e| split_disabled(&name, &format!(".{e}")))?;
                 (base.to_string(), false, on_disk, meta.len())
             } else {
                 return None;
@@ -204,20 +205,32 @@ pub fn scan_resource_packs(game_dir: &Path, legacy: bool) -> Vec<Entry> {
     let listed = read_options_list(&options_path(game_dir), RESOURCE_PACKS);
     scan_packs(
         &game_dir.join("resourcepacks"),
+        ContentKind::ResourcePacks.endings(false),
         |name| listed.contains(&resourcepack_entry(name, legacy)),
         true,
     )
 }
 
 /// Shader packs: with Iris they switch, and the one `iris.properties` names is on while
-/// `enableShaders=true`.
-pub fn scan_shader_packs(game_dir: &Path, loader: Option<LoaderKind>, cache: &MetadataCache) -> Vec<Entry> {
+/// `enableShaders=true`. A module's game (`engine`) picks one among them itself: none is off and
+/// none switches here.
+pub fn scan_shader_packs(
+    game_dir: &Path,
+    loader: Option<LoaderKind>,
+    cache: &MetadataCache,
+    engine: bool,
+) -> Vec<Entry> {
+    let dir = game_dir.join("shaderpacks");
+    if engine {
+        return scan_packs(&dir, ContentKind::ShaderPacks.endings(true), |_| true, false);
+    }
     let iris = has_iris(&game_dir.join("mods"), loader, cache);
     let properties = if iris { read_properties(&iris_properties(game_dir)) } else { HashMap::new() };
     // Iris counts a missing switch as on.
     let shaders_on = properties.get("enableShaders").is_none_or(|v| v.eq_ignore_ascii_case("true"));
     let chosen = properties.get("shaderPack").cloned();
-    scan_packs(&game_dir.join("shaderpacks"), |name| shaders_on && chosen.as_deref() == Some(name), iris)
+    let on = |name: &str| shaders_on && chosen.as_deref() == Some(name);
+    scan_packs(&dir, ContentKind::ShaderPacks.endings(false), on, iris)
 }
 
 /// Iris is installed: an enabled `.jar` named `iris…` or `…iris-shaders…`, or whose metadata says
@@ -343,13 +356,13 @@ mod tests {
         fs::create_dir_all(game.path().join("config")).unwrap();
         fs::write(iris_properties(game.path()), "enableShaders=true\nshaderPack=BSL.zip\n").unwrap();
         let cache = MetadataCache::default();
-        let without = scan_shader_packs(game.path(), None, &cache);
+        let without = scan_shader_packs(game.path(), None, &cache, false);
         assert!(without.iter().all(|e| !e.item.toggle_supported && !e.item.enabled));
         let mods = game.path().join("mods");
         fs::create_dir_all(&mods).unwrap();
         jar(&mods.join("renderer.jar"), r#"{"id":"iris","name":"Iris"}"#);
         assert!(has_iris(&mods, None, &cache), "by its metadata id");
-        let with: Vec<(String, bool)> = scan_shader_packs(game.path(), None, &cache)
+        let with: Vec<(String, bool)> = scan_shader_packs(game.path(), None, &cache, false)
             .into_iter()
             .map(|e| (e.item.file, e.item.enabled))
             .collect();
@@ -372,7 +385,7 @@ mod tests {
         fs::write(iris_properties(game.path()), "shaderPack=BSL.zip\n").unwrap();
         let cache = MetadataCache::default();
         let on: Vec<bool> =
-            scan_shader_packs(game.path(), None, &cache).into_iter().map(|e| e.item.enabled).collect();
+            scan_shader_packs(game.path(), None, &cache, false).into_iter().map(|e| e.item.enabled).collect();
         assert_eq!(on, [true]);
     }
 }

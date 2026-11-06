@@ -265,6 +265,38 @@ fn shader_packs_switch_through_iris() {
 }
 
 #[test]
+fn a_module_s_game_lists_and_takes_its_own_shader_packs() {
+    let w = world();
+    let mut horizon = Build::new("Horizon");
+    horizon.client = Some("Horizon".into());
+    horizon.version = Some("26.3".into());
+    horizon.options.insert("engine".into(), "horizon".into());
+    w.versions.create(&mut horizon).unwrap();
+    let shaders = game_dir(&horizon, w.versions.minecraft_dir()).join("shaderpacks");
+    fs::create_dir_all(&shaders).unwrap();
+    fs::write(shaders.join("daybreak-0.1.1.hshader"), b"h").unwrap();
+    fs::write(shaders.join("Folder.zip"), b"z").unwrap();
+    fs::write(shaders.join("daybreak.txt"), b"options").unwrap();
+    let radiant = outside(&w, "radiant-1.0.0.hshader", b"r");
+    let list = w.service.add(&horizon.key, ContentKind::ShaderPacks, &radiant, false).unwrap();
+    assert_eq!(
+        files(&list.items),
+        [("daybreak-0.1.1.hshader", true), ("Folder.zip", true), ("radiant-1.0.0.hshader", true)],
+        "the game picks among them itself: none is off"
+    );
+    assert!(list.items.iter().all(|i| !i.toggle_supported));
+    w.service.delete(&horizon.key, ContentKind::ShaderPacks, "daybreak-0.1.1.hshader").unwrap();
+    assert!(!shaders.join("daybreak-0.1.1.hshader").exists());
+    assert!(!shaders.parent().unwrap().join("config").exists(), "no Iris settings appear");
+
+    let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);
+    fs::write(dir.join("shaderpacks/daybreak-0.1.1.hshader"), b"h").unwrap();
+    assert!(w.service.list(&key, ContentKind::ShaderPacks).unwrap().items.is_empty(), "Iris reads none");
+    let err = w.service.add(&key, ContentKind::ShaderPacks, &radiant, false).unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidInput);
+}
+
+#[test]
 fn broken_jars_never_break_the_list() {
     let w = world();
     let (key, dir) = build(&w, "Aero", "Fabric", FABRIC);

@@ -23,6 +23,7 @@ use super::screenshots::{SCREENSHOTS, ScreenshotFile, find_screenshot, list_scre
 use super::thumbs::Thumbs;
 use crate::backups::{BackupsRoot, BuildBackups};
 use crate::feedback::FeedbackService;
+use crate::launch::engine::engine_of;
 use crate::launch::options::{component_id, game_dir};
 use crate::lock::Coordinator;
 use crate::storage::versions::{Build, VersionStore};
@@ -121,6 +122,11 @@ fn toggle_shader_pack(game: &Path, entry: &Entry) -> AppResult<bool> {
     Ok(true)
 }
 
+/// A module's game runs the build (its own shader packs among its content).
+fn runs_engine(build: &Build) -> bool {
+    engine_of(&build.options).is_some()
+}
+
 /// Deletes the file, or the folder with its legacy `.disabled` marker.
 fn remove(entry: &Entry) -> AppResult<()> {
     let result = if entry.item.folder {
@@ -182,7 +188,9 @@ impl ContentService {
             ContentKind::ResourcePacks => {
                 (true, scan_resource_packs(&dir, legacy_pack_names(build.version.as_deref())))
             }
-            ContentKind::ShaderPacks => (true, scan_shader_packs(&dir, loader, &self.cache)),
+            ContentKind::ShaderPacks => {
+                (true, scan_shader_packs(&dir, loader, &self.cache, runs_engine(build)))
+            }
         }
     }
 
@@ -308,7 +316,8 @@ impl ContentService {
                 ContentKind::ResourcePacks => {
                     unlist_resource_pack(&options_path(game), &entry.item.filename, legacy)?;
                 }
-                ContentKind::ShaderPacks if entry.item.enabled => {
+                // Only Iris switches a pack on: a module's game keeps its own choice.
+                ContentKind::ShaderPacks if entry.item.enabled && entry.item.toggle_supported => {
                     let properties = iris_properties(game);
                     write_properties(&properties, &[("enableShaders", "false")])
                         .map_err(|e| io_error(&properties, e))?;
@@ -346,9 +355,12 @@ impl ContentService {
     /// or off as it was. The list after it.
     pub fn add(&self, key: &str, kind: ContentKind, from: &Path, replace: bool) -> AppResult<ContentList> {
         let name = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let ending = if kind == ContentKind::Mods { ".jar" } else { ".zip" };
+        let build = self.build(key)?;
         let lower = name.to_lowercase();
-        if lower.len() <= ending.len() || !lower.ends_with(ending) {
+        let taken = kind.endings(runs_engine(&build)).iter().any(|e| {
+            lower.strip_suffix(e).and_then(|rest| rest.strip_suffix('.')).is_some_and(|stem| !stem.is_empty())
+        });
+        if !taken {
             return Err(AppError::new(
                 ErrorCode::InvalidInput,
                 format!("{name} is no {} file", kind.folder()),
@@ -361,7 +373,6 @@ impl ContentService {
             return Err(AppError::new(ErrorCode::InvalidInput, format!("{name} is no file or an empty one"))
                 .with_param("name", name));
         }
-        let build = self.build(key)?;
         if kind == ContentKind::Mods && !mods_supported(build.client.as_deref()) {
             return Err(AppError::new(ErrorCode::Unsupported, "the build runs no mods")
                 .with_param("version", build.name.clone()));
