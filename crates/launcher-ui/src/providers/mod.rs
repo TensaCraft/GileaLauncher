@@ -29,13 +29,17 @@ pub fn providers(info: Option<&AppInfo>) -> Vec<ProviderInfo> {
     info.map(|i| i.providers.clone()).unwrap_or_default()
 }
 
-/// Who offers `kind` for a build of `client` — mods and shader packs need a mod loader.
+/// Who offers `kind` for a build of `client` — mods and shader packs need a mod loader, unless the
+/// source is made for builds of that client (Horizon's registry for its builds' shader packs).
 pub fn content_providers(all: &[ProviderInfo], kind: ContentKind, client: Option<&str>) -> Vec<ProviderInfo> {
-    if kind != ContentKind::ResourcePacks && !mods_supported(client) {
-        return Vec::new();
-    }
-    let mut offered: Vec<ProviderInfo> =
-        all.iter().filter(|p| p.offers(Need::Content(kind)) && p.serves(client)).cloned().collect();
+    let loader = kind == ContentKind::ResourcePacks || mods_supported(client);
+    let mut offered: Vec<ProviderInfo> = all
+        .iter()
+        .filter(|p| {
+            p.offers(Need::Content(kind)) && p.serves(client) && (loader || !p.content_clients.is_empty())
+        })
+        .cloned()
+        .collect();
     // A source made for this kind of build (a server's own mods) comes first.
     offered.sort_by_key(|p| p.content_clients.is_empty());
     offered
@@ -170,6 +174,22 @@ mod tests {
         };
         assert_eq!(ids(Some("TensaCraft")), ["tensa", "modrinth"], "the build's own source first");
         assert_eq!(ids(Some("neoforge")), ["modrinth"]);
+    }
+
+    #[test]
+    fn a_source_made_for_a_build_s_client_serves_it_without_a_loader() {
+        let mut horizon =
+            provider("horizon", vec![ContentKind::ShaderPacks, ContentKind::ResourcePacks], false);
+        horizon.content_clients = vec!["Horizon".into()];
+        let all = vec![provider("modrinth", ContentKind::ALL.to_vec(), true), horizon];
+        let ids = |kind, client| {
+            content_providers(&all, kind, client).into_iter().map(|p| p.id).collect::<Vec<_>>()
+        };
+        assert_eq!(ids(ContentKind::ShaderPacks, Some("Horizon")), ["horizon"], "its registry alone");
+        assert_eq!(ids(ContentKind::ResourcePacks, Some("Horizon")), ["horizon", "modrinth"]);
+        assert!(ids(ContentKind::Mods, Some("Horizon")).is_empty(), "no Java mods");
+        assert_eq!(ids(ContentKind::ShaderPacks, Some("Fabric")), ["modrinth"], "other builds as before");
+        assert!(ids(ContentKind::ShaderPacks, Some("Minecraft")).is_empty());
     }
 
     #[test]

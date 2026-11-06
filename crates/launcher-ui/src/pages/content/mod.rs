@@ -95,23 +95,23 @@ pub fn tab_tone(tab: &str) -> TagTone {
     }
 }
 
-/// Whether a build has tab `id`: one a module's game runs (`engine`) has no mods or shader packs
-/// (its game takes no Java mods or shaders).
-pub fn tab_shown(id: &str, engine: bool) -> bool {
-    !(engine && matches!(id, "mods" | "shaders"))
+/// Whether a build has tab `id`: one a module's game runs (`engine`) takes no Java mods or
+/// shaders, so it has those tabs only where a source made for it serves them (`served`).
+pub fn tab_shown(id: &str, engine: bool, served: bool) -> bool {
+    !engine || served || !matches!(id, "mods" | "shaders")
 }
 
 /// Mods and shader packs need a mod loader: a build without one offers it there, unless a module
-/// keeps its loader (`kept`, the backend's say).
-pub fn offers_loader(tab: &str, client: Option<&str>, kept: bool) -> bool {
-    matches!(tab, "mods" | "shaders") && !mods_supported(client) && !kept
+/// keeps its loader (`kept`, the backend's say) or runs its game (`engine`), where no loader runs.
+pub fn offers_loader(tab: &str, client: Option<&str>, kept: bool, engine: bool) -> bool {
+    matches!(tab, "mods" | "shaders") && !mods_supported(client) && !kept && !engine
 }
 
 /// The tab a build of `client` opens on for `tab`: a build without a mod loader opens on its
 /// resource packs rather than on the loader its mods offer.
 pub fn tab_for(tab: &str, client: Option<&str>) -> &'static str {
     let tab = normalize_tab(tab, &[]);
-    if offers_loader(tab, client, false) { "resourcepacks" } else { tab }
+    if offers_loader(tab, client, false, false) { "resourcepacks" } else { tab }
 }
 
 /// The content a tab lists, if it lists content.
@@ -130,10 +130,9 @@ pub struct TabTexts {
     pub enable: &'static str,
     pub disable: &'static str,
     pub confirm_delete: &'static str,
-    /// What the veil over the tab says while files from the system are dragged over it.
+    /// What the veil over the tab says while files from the system are dragged over it (the files
+    /// it takes: `ContentKind::endings`).
     pub drop: &'static str,
-    /// The endings of the files the tab takes from a drop.
-    pub endings: &'static [&'static str],
 }
 
 pub fn texts(kind: ContentKind) -> TabTexts {
@@ -145,7 +144,6 @@ pub fn texts(kind: ContentKind) -> TabTexts {
             disable: "disable_mod",
             confirm_delete: "confirm_delete_mod",
             drop: "drop_mods",
-            endings: &["jar"],
         },
         ContentKind::ResourcePacks => TabTexts {
             search: "search_resourcepacks",
@@ -154,7 +152,6 @@ pub fn texts(kind: ContentKind) -> TabTexts {
             disable: "disable_resourcepack",
             confirm_delete: "confirm_delete_resourcepack",
             drop: "drop_resourcepacks",
-            endings: &["zip"],
         },
         ContentKind::ShaderPacks => TabTexts {
             search: "search_shaders",
@@ -163,7 +160,6 @@ pub fn texts(kind: ContentKind) -> TabTexts {
             disable: "disable_shaderpack",
             confirm_delete: "confirm_delete_shaderpack",
             drop: "drop_shaderpacks",
-            endings: &["zip"],
         },
     }
 }
@@ -246,8 +242,18 @@ pub fn ContentPage(key: String) -> impl IntoView {
         Memo::new(move |_| store.builds.with(|b| b.iter().find(|b| b.key == key).cloned())).into()
     };
     let engine = Memo::new(move |_| build.with(|b| b.as_ref().is_some_and(|b| b.engine.is_some())));
+    // Whether the build has tab `id`: a content tab some source serves counts as served.
+    let shown = move |id: &str| {
+        let served = kind_of_tab(id).is_some_and(|kind| {
+            let client = build.with(|b| b.as_ref().and_then(|b| b.client.clone()));
+            store
+                .info
+                .with(|i| !content_providers(&providers(i.as_ref()), kind, client.as_deref()).is_empty())
+        });
+        tab_shown(id, engine.get(), served)
+    };
     Effect::new(move |_| {
-        if !tab_shown(tab.get(), engine.get()) {
+        if !shown(tab.get()) {
             tab.set("resourcepacks");
         }
     });
@@ -380,7 +386,7 @@ pub fn ContentPage(key: String) -> impl IntoView {
     let chips = move || -> Vec<ChipDef> {
         with_module_tabs(TABS.to_vec(), &module_tabs())
             .into_iter()
-            .filter(|(id, ..)| tab_shown(id, engine.get()))
+            .filter(|(id, ..)| shown(id))
             .map(|(id, icon, label)| {
                 let module_tone = module_tabs().into_iter().find(|m| m.id == id).map(|m| m.tone);
                 ChipDef { id, icon, label: t(label), tone: module_tone.unwrap_or_else(|| tab_tone(id)) }
@@ -398,8 +404,9 @@ pub fn ContentPage(key: String) -> impl IntoView {
             id if module_tabs().iter().any(|t| t.id == id) => {
                 module_tabs().into_iter().find(|t| t.id == id).map(|t| (t.view)(key))
             }
-            id if client
-                .with(|c| c.as_ref().is_some_and(|(c, kept)| offers_loader(id, c.as_deref(), *kept))) =>
+            id if client.with(|c| {
+                c.as_ref().is_some_and(|(c, kept)| offers_loader(id, c.as_deref(), *kept, engine.get()))
+            }) =>
             {
                 let kind = kind_of_tab(id).unwrap_or(ContentKind::Mods);
                 Some(view! { <LoaderOffer key=key kind=kind current=build /> }.into_any())
@@ -536,16 +543,25 @@ mod tests {
         assert_eq!(texts(ContentKind::ShaderPacks).confirm_delete, "confirm_delete_shaderpack");
         assert_eq!(texts(ContentKind::ResourcePacks).empty, "no_resourcepacks_installed");
         assert_eq!(texts(ContentKind::Mods).enable, "enable_mod");
-        assert_eq!(
-            (texts(ContentKind::Mods).drop, texts(ContentKind::Mods).endings),
-            ("drop_mods", &["jar"][..])
+        assert_eq!(texts(ContentKind::Mods).drop, "drop_mods");
+        assert_eq!(texts(ContentKind::ShaderPacks).drop, "drop_shaderpacks");
+    }
+
+    #[test]
+    fn an_engine_build_has_only_the_tabs_a_source_serves_and_never_a_loader_offer() {
+        assert!(!tab_shown("mods", true, false) && !tab_shown("shaders", true, false));
+        assert!(tab_shown("shaders", true, true), "its own registry's shader packs");
+        assert!(tab_shown("resourcepacks", true, false) && tab_shown("settings", true, false));
+        assert!(
+            tab_shown("mods", false, false) && tab_shown("shaders", false, false),
+            "other builds keep theirs"
         );
-        assert_eq!(texts(ContentKind::ResourcePacks).endings, ["zip"]);
-        assert!(!tab_shown("mods", true) && !tab_shown("shaders", true));
-        assert!(tab_shown("resourcepacks", true) && tab_shown("mods", false));
-        assert_eq!(
-            (texts(ContentKind::ShaderPacks).drop, texts(ContentKind::ShaderPacks).endings),
-            ("drop_shaderpacks", &["zip"][..])
+        for tab in ["mods", "shaders"] {
+            assert!(!offers_loader(tab, Some("Horizon"), false, true), "{tab}");
+        }
+        assert!(
+            offers_loader("shaders", Some("Minecraft"), false, false),
+            "a vanilla build still offers one"
         );
     }
 
@@ -605,9 +621,9 @@ mod tests {
             ("mods", Some("Fabric"), false),
             ("shaders", Some("TensaCraft"), false),
         ] {
-            assert_eq!(offers_loader(tab, client, false), offer, "{tab} of {client:?}");
+            assert_eq!(offers_loader(tab, client, false, false), offer, "{tab} of {client:?}");
         }
-        assert!(!offers_loader("mods", Some("Minecraft"), true), "a module keeps its loader");
+        assert!(!offers_loader("mods", Some("Minecraft"), true, false), "a module keeps its loader");
     }
 
     #[test]

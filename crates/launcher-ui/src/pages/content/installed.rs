@@ -201,6 +201,11 @@ pub fn InstalledPanel(
     let replace_text =
         Signal::derive(move || i18n.tp("content_replace_ask", &[("names", taken.with(|p| file_names(p)))]));
     let unsupported = Signal::derive(move || list.with(|l| matches!(l, Some(Ok(l)) if !l.supported)));
+    // A module's game takes its own kind of shader packs too.
+    let endings = Signal::derive(move || {
+        let engine = build.with(|b| b.as_ref().is_some_and(|b| b.engine.is_some()));
+        kind.endings(engine).iter().map(|e| e.to_string()).collect::<Vec<_>>()
+    });
 
     let delete_of = RwSignal::new(None::<ContentItem>);
     let delete_open = RwSignal::new(false);
@@ -419,7 +424,7 @@ pub fn InstalledPanel(
     };
 
     view! {
-        <DropZone accept=texts.endings label=t(texts.drop) on_drop=on_dropped disabled=unsupported class="content-drop">
+        <DropZone accept=endings label=t(texts.drop) on_drop=on_dropped disabled=unsupported class="content-drop">
             <div class="create__bar">
                 // At the right, in this order: the search, where to look, refresh, updates and the folder.
                 <div class="create__tools">
