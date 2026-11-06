@@ -12,7 +12,7 @@ use launcher_core::net::downloader::{DownloadProgress, DownloadTask, ExpectedHas
 use launcher_shared::{AppError, AppResult, ErrorCode};
 use serde::{Deserialize, Serialize};
 
-use super::release::{self, NIGHTLY, NIGHTLY_TAG};
+use super::release::{self, NIGHTLY, NIGHTLY_RELEASE};
 
 /// How long a look at the nightly holds.
 const DAY: u64 = 24 * 60 * 60;
@@ -131,32 +131,21 @@ pub async fn ensure(core: &CoreApp, report: &(dyn Fn(f64, f64) + Send + Sync)) -
         .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "Horizon's archive has no game in it"))
 }
 
-/// The nightly's checksums and their signature.
-const INDEX: [&str; 2] = ["SHA256SUMS", "SHA256SUMS.sig"];
-
-/// The downloads of the nightly's checksums into `index`, yesterday's copies gone first: the
-/// downloader skips a file already there that names no size or hash.
-fn index_tasks(index: &Path) -> Vec<DownloadTask> {
-    INDEX
-        .iter()
-        .map(|name| {
-            let _ = fs::remove_file(index.join(name));
-            DownloadTask::new(format!("{NIGHTLY}/{name}"), index.join(name)).transient()
-        })
-        .collect()
-}
-
 /// This computer's archive of the newest nightly and its SHA-256, from checksums Horizon signed.
 async fn signed_nightly(core: &CoreApp, root: &Path) -> AppResult<Current> {
     let archive = release::archive_for(std::env::consts::OS, std::env::consts::ARCH)
         .ok_or_else(|| AppError::new(ErrorCode::Unsupported, "Horizon has no build for this computer"))?;
-    let index = root.join("index");
-    for task in index_tasks(&index) {
-        core.downloader.download_one(task, &|_| {}).await?;
+    // Where 0.1.2 and before kept the checksums.
+    let _ = fs::remove_dir_all(root.join("index"));
+    let title =
+        core.meta.get_json(NIGHTLY_RELEASE).await.ok().and_then(|r| r["name"].as_str().map(str::to_string));
+    let sums = core.meta.get_bytes(&format!("{NIGHTLY}/SHA256SUMS")).await?;
+    let mut signatures = Vec::new();
+    for name in ["SHA256SUMS.v2.sig", "SHA256SUMS.sig"] {
+        let sig = core.meta.get_bytes(&format!("{NIGHTLY}/{name}")).await.ok();
+        signatures.push(sig.map(|s| String::from_utf8_lossy(&s).into_owned()));
     }
-    let sums = fs::read(index.join("SHA256SUMS")).map_err(|e| io_error(&index, e))?;
-    let sig = fs::read_to_string(index.join("SHA256SUMS.sig")).map_err(|e| io_error(&index, e))?;
-    if !release::signed(NIGHTLY_TAG, &sums, &sig) {
+    if !release::nightly_signed(title.as_deref(), &sums, signatures[0].as_deref(), signatures[1].as_deref()) {
         return Err(AppError::new(
             ErrorCode::IntegrityMismatch,
             "Horizon's checksums carry no signature of Horizon's",
@@ -246,18 +235,6 @@ mod tests {
     use std::io::Write;
 
     use super::*;
-
-    #[test]
-    fn each_look_at_the_nightly_fetches_its_checksums_anew() {
-        let index = tempfile::tempdir().unwrap();
-        for name in INDEX {
-            fs::write(index.path().join(name), "yesterday's").unwrap();
-        }
-        assert_eq!(index_tasks(index.path()).len(), 2);
-        for name in INDEX {
-            assert!(!index.path().join(name).exists(), "{name} kept: the downloader would skip it");
-        }
-    }
 
     fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(io::Cursor::new(Vec::new()));
