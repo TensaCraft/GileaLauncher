@@ -559,6 +559,11 @@ fn a_module_s_game_takes_its_own_shader_packs_too() {
 }
 
 #[test]
+fn a_module_s_game_takes_its_own_content_mods_alone() {
+    assert_eq!(ContentKind::Mods.endings(true), ["hmod"], "no Java mods");
+}
+
+#[test]
 fn modrinth_install_errors_have_their_texts() {
     assert_eq!(ErrorCode::NoCompatibleVersion.i18n_key(), "no_compatible_version");
     assert_eq!(ErrorCode::NoFileFound.i18n_key(), "no_file_found");

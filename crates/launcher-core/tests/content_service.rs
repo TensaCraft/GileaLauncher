@@ -7,6 +7,7 @@ use launcher_core::backups::BuildBackups;
 use launcher_core::content::backups;
 use launcher_core::content::service::ContentService;
 use launcher_core::feedback::{FeedbackService, NullSink};
+use launcher_core::launch::engine::EngineContent;
 use launcher_core::launch::options::game_dir;
 use launcher_core::lock::Coordinator;
 use launcher_core::storage::versions::{Build, VersionStore};
@@ -35,7 +36,8 @@ fn world() -> World {
         FeedbackService::new(Arc::new(NullSink)),
         tmp.path().join("cache").join("thumbs"),
         Arc::new(move || root.clone()),
-    );
+    )
+    .with_engine_content(vec![(ENGINE, GAME)]);
     World { _tmp: tmp, versions, instances, service, backups }
 }
 
@@ -294,6 +296,238 @@ fn a_module_s_game_lists_and_takes_its_own_shader_packs() {
     assert!(w.service.list(&key, ContentKind::ShaderPacks).unwrap().items.is_empty(), "Iris reads none");
     let err = w.service.add(&key, ContentKind::ShaderPacks, &radiant, false).unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidInput);
+}
+
+/// How the test's own game (`ENGINE`) keeps its content: a module tells its game's.
+const GAME: EngineContent = EngineContent {
+    mods: "game-mods",
+    mods_list: "game-mods.txt",
+    mod_manifest: "game-mod.toml",
+    graphics: "game-graphics.txt",
+    shader_pick: "pickedShaderPack",
+};
+const ENGINE: &str = "game";
+
+/// A build engine `ENGINE` runs, and its game folder.
+fn engine_build(w: &World) -> (String, PathBuf) {
+    let mut b = Build::new("Двигун");
+    b.client = Some("Двигун".into());
+    b.version = Some("26.3".into());
+    b.options.insert("engine".into(), ENGINE.into());
+    w.versions.create(&mut b).unwrap();
+    let dir = game_dir(&b, w.versions.minecraft_dir());
+    fs::create_dir_all(dir.join(GAME.mods)).unwrap();
+    (b.key, dir)
+}
+
+/// A content mod of the test's game at `path`: a zip with its manifest at the root.
+fn game_mod(path: &Path, manifest: &str) {
+    let mut zip = zip::ZipWriter::new(fs::File::create(path).unwrap());
+    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file(GAME.mod_manifest, options).unwrap();
+    zip.write_all(manifest.as_bytes()).unwrap();
+    zip.start_file("assets/x/lang/en_us.json", options).unwrap();
+    zip.write_all(b"{}").unwrap();
+    zip.finish().unwrap();
+}
+
+fn manifest(id: &str, name: &str, version: &str) -> String {
+    format!(
+        "id = \"{id}\"\nname = \"{name}\"\nversion = \"{version}\"\ndescription = \"{name} does it\"\napi = \"0.2\"\nside = \"both\"\n"
+    )
+}
+
+#[test]
+fn a_module_s_game_lists_switches_and_deletes_its_own_mods() {
+    let w = world();
+    let (key, dir) = engine_build(&w);
+    let mods = dir.join(GAME.mods);
+    game_mod(&mods.join("flesh_to_leather.hmod"), &manifest("flesh_to_leather", "Flesh to Leather", "1.0.0"));
+    game_mod(&mods.join("lights.hmod"), &manifest("additional_lights", "Additional Lights", "3.1.4"));
+    fs::write(mods.join("broken.hmod"), b"not a zip").unwrap();
+    fs::write(mods.join("sodium.jar"), b"java").unwrap();
+    fs::create_dir_all(mods.join(".horizon-mod-data")).unwrap();
+    let list_file = dir.join(GAME.mods_list);
+    fs::write(&list_file, "# the player's\nmod.additional_lights:true\nmod.gone:true\n").unwrap();
+
+    let list = w.service.list(&key, ContentKind::Mods).unwrap();
+    assert!(list.supported, "its game's own mods, no loader");
+    let view: Vec<String> = list
+        .items
+        .iter()
+        .map(|i| format!("{} {} {:?} {:?} {:?}", i.file, i.enabled, i.name, i.version, i.mod_id))
+        .collect();
+    assert_eq!(
+        view,
+        [
+            r#"lights.hmod true Some("Additional Lights") Some("3.1.4") Some("additional_lights")"#,
+            r#"broken.hmod false None None Some("broken")"#,
+            r#"flesh_to_leather.hmod false Some("Flesh to Leather") Some("1.0.0") Some("flesh_to_leather")"#,
+        ],
+        "by name; on by its line, a mod without one is off"
+    );
+    assert!(list.items.iter().all(|i| i.toggle_supported && !i.has_backup));
+    assert_eq!(w.service.dir(&key, ContentKind::Mods).unwrap(), mods, "Open folder gets its game's");
+
+    let on = w.service.toggle(&key, ContentKind::Mods, "flesh_to_leather.hmod", true).unwrap();
+    assert!(
+        on.items.iter().any(|i| i.file == "flesh_to_leather.hmod" && i.enabled),
+        "the file keeps its name"
+    );
+    w.service.toggle(&key, ContentKind::Mods, "lights.hmod", false).unwrap();
+    assert_eq!(
+        fs::read_to_string(&list_file).unwrap(),
+        "# the player's\nmod.additional_lights:false\nmod.gone:true\nmod.flesh_to_leather:true\n",
+        "only its own line"
+    );
+    assert!(mods.join("lights.hmod").exists() && !mods.join("lights.hmod.disabled").exists());
+
+    let left = w.service.delete(&key, ContentKind::Mods, "flesh_to_leather.hmod").unwrap();
+    assert_eq!(files(&left.items), [("lights.hmod", false), ("broken.hmod", false)]);
+    assert!(!mods.join("flesh_to_leather.hmod").exists());
+    assert_eq!(
+        fs::read_to_string(&list_file).unwrap(),
+        "# the player's\nmod.additional_lights:false\nmod.gone:true\n",
+        "its line goes with it"
+    );
+    assert_eq!(
+        w.service.toggle(&key, ContentKind::Mods, "sodium.jar", false).unwrap_err().code,
+        ErrorCode::NotFound,
+        "no Java mods"
+    );
+}
+
+#[test]
+fn a_dropped_mod_of_a_module_s_game_is_saved_by_its_id_and_on() {
+    let w = world();
+    let (key, dir) = engine_build(&w);
+    let dropped = w._tmp.path().join("outside");
+    fs::create_dir_all(&dropped).unwrap();
+    let flesh = dropped.join("flesh_to_leather-1.0.0.hmod");
+    game_mod(&flesh, &manifest("flesh_to_leather", "Flesh to Leather", "1.0.0"));
+    let list = w.service.add(&key, ContentKind::Mods, &flesh, false).unwrap();
+    assert_eq!(files(&list.items), [("flesh_to_leather.hmod", true)], "saved as <id>.hmod and on");
+    assert_eq!(fs::read_to_string(dir.join(GAME.mods_list)).unwrap(), "mod.flesh_to_leather:true\n");
+    assert!(flesh.exists(), "the dropped file stays");
+    let twin = w.service.add(&key, ContentKind::Mods, &flesh, false).unwrap_err();
+    assert_eq!(twin.code, ErrorCode::ContentConflict, "the same mod asks first");
+    w.service.toggle(&key, ContentKind::Mods, "flesh_to_leather.hmod", false).unwrap();
+    let again = w.service.add(&key, ContentKind::Mods, &flesh, true).unwrap();
+    assert_eq!(files(&again.items), [("flesh_to_leather.hmod", true)], "a dropped mod is on");
+
+    let no_manifest = outside(&w, "plain.hmod", b"not a zip");
+    let bad_id = dropped.join("bad.hmod");
+    game_mod(&bad_id, &manifest("../evil", "Evil", "1"));
+    for (file, why) in [(&no_manifest, "no manifest"), (&bad_id, "an id that is no plain name")] {
+        assert_eq!(
+            w.service.add(&key, ContentKind::Mods, file, false).unwrap_err().code,
+            ErrorCode::InvalidInput,
+            "{why}"
+        );
+    }
+    let java = outside(&w, "sodium.jar", b"PK");
+    assert_eq!(
+        w.service.add(&key, ContentKind::Mods, &java, false).unwrap_err().code,
+        ErrorCode::InvalidInput
+    );
+
+    let (fabric, _) = build(&w, "Aero", "Fabric", FABRIC);
+    let err = w.service.add(&fabric, ContentKind::Mods, &flesh, false).unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidInput, "a Java build takes jars alone");
+}
+
+#[test]
+fn a_module_s_game_switches_its_shader_pack_and_resource_packs() {
+    let w = world();
+    let (key, dir) = engine_build(&w);
+    let shaders = dir.join("shaderpacks");
+    fs::create_dir_all(&shaders).unwrap();
+    fs::write(shaders.join("daybreak-0.1.1.hshader"), b"h").unwrap();
+    fs::write(shaders.join("bsl.zip"), b"z").unwrap();
+    fs::write(shaders.join("daybreak-0.1.1.hshader.txt"), b"sunPath=30").unwrap();
+    let graphics = dir.join(GAME.graphics);
+    let list = w.service.list(&key, ContentKind::ShaderPacks).unwrap();
+    assert_eq!(files(&list.items), [("bsl.zip", false), ("daybreak-0.1.1.hshader", false)], "none picked");
+    assert!(list.items.iter().all(|i| i.toggle_supported), "no Iris needed");
+    w.service.toggle(&key, ContentKind::ShaderPacks, "daybreak-0.1.1.hshader", true).unwrap();
+    assert_eq!(
+        fs::read_to_string(&graphics).unwrap(),
+        "pickedShaderPack:daybreak-0.1.1.hshader
+",
+        "made when missing"
+    );
+    fs::write(
+        &graphics,
+        "renderDistance:12
+pickedShaderPack:daybreak-0.1.1.hshader
+fov:90
+",
+    )
+    .unwrap();
+    let on = w.service.toggle(&key, ContentKind::ShaderPacks, "bsl.zip", true).unwrap();
+    assert_eq!(files(&on.items), [("bsl.zip", true), ("daybreak-0.1.1.hshader", false)], "one at a time");
+    assert_eq!(
+        fs::read_to_string(&graphics).unwrap(),
+        "renderDistance:12
+pickedShaderPack:bsl.zip
+fov:90
+"
+    );
+    let off = w.service.toggle(&key, ContentKind::ShaderPacks, "bsl.zip", false).unwrap();
+    assert!(off.items.iter().all(|i| !i.enabled));
+    assert_eq!(
+        fs::read_to_string(&graphics).unwrap(),
+        "renderDistance:12
+pickedShaderPack:
+fov:90
+"
+    );
+    w.service.toggle(&key, ContentKind::ShaderPacks, "daybreak-0.1.1.hshader", true).unwrap();
+    w.service.delete(&key, ContentKind::ShaderPacks, "daybreak-0.1.1.hshader").unwrap();
+    assert_eq!(
+        fs::read_to_string(&graphics).unwrap(),
+        "renderDistance:12
+pickedShaderPack:
+fov:90
+",
+        "the picked pack's deletion clears the pick"
+    );
+    assert_eq!(
+        fs::read(shaders.join("daybreak-0.1.1.hshader.txt")).unwrap(),
+        b"sunPath=30",
+        "its options stay"
+    );
+    assert!(!dir.join("config").exists(), "no Iris settings appear");
+
+    let packs = dir.join("resourcepacks");
+    fs::create_dir_all(packs.join("Folder")).unwrap();
+    fs::write(packs.join("Folder").join("pack.mcmeta"), b"{}").unwrap();
+    fs::write(packs.join("panorama.zip"), b"z").unwrap();
+    let options = dir.join("options.txt");
+    fs::write(
+        &options,
+        "resourcePacks:[\"vanilla\"]
+lang:uk_ua
+",
+    )
+    .unwrap();
+    let on = w.service.toggle(&key, ContentKind::ResourcePacks, "panorama.zip", true).unwrap();
+    assert_eq!(files(&on.items), [("Folder", false), ("panorama.zip", true)]);
+    assert!(on.items.iter().all(|i| i.toggle_supported));
+    assert_eq!(
+        fs::read_to_string(&options).unwrap(),
+        "resourcePacks:[\"vanilla\",\"file/panorama.zip\"]
+lang:uk_ua
+",
+        "as vanilla lists them"
+    );
+    w.service.toggle(&key, ContentKind::ResourcePacks, "panorama.zip", false).unwrap();
+    assert_eq!(
+        fs::read_to_string(&options).unwrap(),
+        "resourcePacks:[\"vanilla\"]
+lang:uk_ua
+"
+    );
 }
 
 #[test]

@@ -1,7 +1,8 @@
 //! The game's own files that say which packs are on: `options.txt`
-//! (`resourcePacks:["file/<name>",…]`) and Iris' `config/iris.properties`.
+//! (`resourcePacks:["file/<name>",…]`) and Iris' `config/iris.properties`; and a module's
+//! game's own lists of the same `key:value` lines (`EngineContent`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -109,11 +110,7 @@ fn escape(value: &str) -> String {
 
 /// The JSON list after `key:` on the first such line; missing or unreadable is empty.
 pub fn read_options_list(path: &Path, key: &str) -> Vec<String> {
-    let prefix = format!("{key}:");
-    let lines = lines_of(path).unwrap_or_default();
-    let Some(raw) = lines.into_iter().find_map(|line| line.strip_prefix(&prefix).map(str::to_string)) else {
-        return Vec::new();
-    };
+    let Some(raw) = read_option(path, key) else { return Vec::new() };
     match serde_json::from_str::<Value>(raw.trim()) {
         Ok(Value::Array(items)) => {
             items.into_iter().map(|v| if let Value::String(s) = v { s } else { v.to_string() }).collect()
@@ -122,25 +119,62 @@ pub fn read_options_list(path: &Path, key: &str) -> Vec<String> {
     }
 }
 
-/// Sets the `key:` line to `values` as compact JSON: the first such line is replaced, others
-/// dropped, and the line added when missing; every other line stays.
+/// Sets the `key:` line to `values` as compact JSON (see `write_option`).
 pub fn write_options_list(path: &Path, key: &str, values: &[String]) -> io::Result<()> {
+    write_option(path, key, Some(&serde_json::to_string(values).map_err(io::Error::other)?))
+}
+
+/// What follows `key:` on the first such line.
+pub fn read_option(path: &Path, key: &str) -> Option<String> {
     let prefix = format!("{key}:");
-    let replacement = format!("{prefix}{}", serde_json::to_string(values).map_err(io::Error::other)?);
+    lines_of(path)
+        .unwrap_or_default()
+        .into_iter()
+        .find_map(|line| line.strip_prefix(&prefix).map(str::to_string))
+}
+
+/// Sets the `key:` line to `value`, or drops it (`None`): the first such line is replaced, others
+/// dropped, and the line added when missing; every other line stays. Nothing to drop writes
+/// nothing.
+pub fn write_option(path: &Path, key: &str, value: Option<&str>) -> io::Result<()> {
+    let prefix = format!("{key}:");
+    let lines = lines_of(path)?;
+    if value.is_none() && !lines.iter().any(|l| l.starts_with(&prefix)) {
+        return Ok(());
+    }
     let mut output = Vec::new();
     let mut replaced = false;
-    for line in lines_of(path)? {
+    for line in lines {
         if !line.starts_with(&prefix) {
             output.push(line);
         } else if !replaced {
-            output.push(replacement.clone());
+            output.extend(value.map(|v| format!("{prefix}{v}")));
             replaced = true;
         }
     }
     if !replaced {
-        output.push(replacement);
+        output.extend(value.map(|v| format!("{prefix}{v}")));
     }
     atomic_write_text(path, &format!("{}\n", output.join("\n")))
+}
+
+/// The ids of the mods a game's list (`EngineContent::mods_list`) turns on: a `mod.<id>:true`
+/// line, the first of an id counting; a mod without one is off.
+pub fn mods_on(path: &Path) -> HashSet<String> {
+    let mut seen = HashSet::new();
+    let lines = lines_of(path).unwrap_or_default();
+    lines
+        .iter()
+        .filter_map(|line| line.strip_prefix("mod.")?.split_once(':'))
+        .filter(|(id, _)| seen.insert(id.to_string()))
+        .filter(|(_, on)| on.trim() == "true")
+        .map(|(id, _)| id.to_string())
+        .collect()
+}
+
+/// Turns mod `id` on or off in a game's list, or drops its line (`None`).
+pub fn set_mod(path: &Path, id: &str, on: Option<bool>) -> io::Result<()> {
+    write_option(path, &format!("mod.{id}"), on.map(|on| if on { "true" } else { "false" }))
 }
 
 /// Drops `entry` from the `key:` list; nothing is written when the list does not have it.
@@ -281,6 +315,37 @@ mod tests {
         assert!(!missing.exists(), "nothing to remove writes nothing");
         fs::write(&options, "resourcePacks:not json\n").unwrap();
         assert!(read_options_list(&options, RESOURCE_PACKS).is_empty());
+    }
+
+    #[test]
+    fn mod_switches_change_only_their_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let list = dir.path().join("game-mods.txt");
+        assert!(mods_on(&list).is_empty(), "no file: none is on");
+        set_mod(&list, "flesh", None).unwrap();
+        assert!(!list.exists(), "nothing to drop writes nothing");
+        fs::write(
+            &list,
+            "# kept\r\nmod.flesh:true\nmod.flesh_more:false\nother:1\nmod.lights:true\nmod.flesh:false\n",
+        )
+        .unwrap();
+        assert_eq!(
+            mods_on(&list),
+            HashSet::from(["flesh", "lights"].map(String::from)),
+            "the first line counts"
+        );
+        set_mod(&list, "flesh", Some(false)).unwrap();
+        assert_eq!(
+            fs::read_to_string(&list).unwrap(),
+            "# kept\nmod.flesh:false\nmod.flesh_more:false\nother:1\nmod.lights:true\n"
+        );
+        set_mod(&list, "gems", Some(true)).unwrap();
+        set_mod(&list, "lights", None).unwrap();
+        assert_eq!(
+            fs::read_to_string(&list).unwrap(),
+            "# kept\nmod.flesh:false\nmod.flesh_more:false\nother:1\nmod.gems:true\n"
+        );
+        assert_eq!(mods_on(&list), HashSet::from(["gems".to_string()]));
     }
 
     #[test]

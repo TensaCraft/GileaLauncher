@@ -1,7 +1,7 @@
 //! What a build has installed: mods (`.jar` on, `.jar.disabled` off),
 //! resource and shader packs (`.zip`, `.zip.disabled` or folders; a module's game's own shader
-//! packs too, `ContentKind::endings`). Links are never listed, so nothing outside the build's
-//! content folders is shown or changed.
+//! packs too, `ContentKind::endings`), and a module's game's own mods (`EngineContent`). Links are
+//! never listed, so nothing outside the build's content folders is shown or changed.
 
 use std::collections::HashMap;
 use std::fs;
@@ -11,9 +11,12 @@ use std::time::SystemTime;
 
 use launcher_shared::{ContentItem, ContentKind, LoaderKind};
 
-use super::jar::{ModDescriptor, inspect_mod_jar};
-use super::packs::{RESOURCE_PACKS, read_options_list, read_properties, resourcepack_entry};
+use super::jar::{ModDescriptor, inspect_engine_mod, inspect_mod_jar};
+use super::packs::{
+    RESOURCE_PACKS, mods_on, read_option, read_options_list, read_properties, resourcepack_entry,
+};
 use crate::builds::components::dir_size;
+use crate::launch::engine::EngineContent;
 
 const DISABLED: &str = ".disabled";
 /// Jars whose metadata is kept: more than the biggest builds have.
@@ -231,6 +234,51 @@ pub fn scan_shader_packs(
     let chosen = properties.get("shaderPack").cloned();
     let on = |name: &str| shaders_on && chosen.as_deref() == Some(name);
     scan_packs(&dir, ContentKind::ShaderPacks.endings(false), on, iris)
+}
+
+/// A module's game's shader packs: the one its graphics file picks is on (`EngineContent`).
+pub fn scan_engine_shader_packs(game_dir: &Path, content: &EngineContent) -> Vec<Entry> {
+    let picked = read_option(&game_dir.join(content.graphics), content.shader_pick);
+    let on = |name: &str| picked.as_deref() == Some(name);
+    scan_packs(&game_dir.join("shaderpacks"), ContentKind::ShaderPacks.endings(true), on, true)
+}
+
+/// A module's game's own mods (`EngineContent`): its mod files, by name, with what each manifest
+/// says, on while the game's list says so. A file without a manifest goes by its file's stem.
+pub fn scan_engine_mods(game_dir: &Path, content: &EngineContent) -> Vec<Entry> {
+    let on = mods_on(&game_dir.join(content.mods_list));
+    let endings = ContentKind::Mods.endings(true);
+    let mut entries: Vec<Entry> = children(&game_dir.join(content.mods))
+        .into_iter()
+        .filter(|(_, name, meta)| {
+            meta.is_file()
+                && endings.iter().any(|e| ends_with_ci(name, &format!(".{e}")) && name.len() > e.len() + 1)
+        })
+        .map(|(path, name, meta)| {
+            let descriptor = inspect_engine_mod(&path, content.mod_manifest);
+            let stem = || Path::new(&name).file_stem().unwrap_or_default().to_string_lossy().into_owned();
+            let id = descriptor.as_ref().map_or_else(stem, |d| d.mod_id.clone());
+            let text = |pick: fn(&ModDescriptor) -> &Option<String>| {
+                descriptor.as_ref().and_then(|d| pick(d).clone())
+            };
+            let item = ContentItem {
+                name: text(|d| &d.name),
+                version: text(|d| &d.version),
+                description: text(|d| &d.description),
+                enabled: on.contains(&id),
+                mod_id: Some(id),
+                file: name.clone(),
+                filename: name,
+                size: meta.len(),
+                folder: false,
+                toggle_supported: true,
+                has_backup: false,
+            };
+            Entry { path, item }
+        })
+        .collect();
+    entries.sort_by_key(|e| e.item.name.clone().unwrap_or_else(|| e.item.filename.clone()).to_lowercase());
+    entries
 }
 
 /// Iris is installed: an enabled `.jar` named `iris…` or `…iris-shaders…`, or whose metadata says

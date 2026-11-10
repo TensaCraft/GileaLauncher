@@ -87,6 +87,31 @@ pub fn inspect_mod_jar(path: &Path, loader: Option<LoaderKind>) -> Result<ModDes
     Ok(descriptor)
 }
 
+/// An id a module's game names a mod's file and its line by: 1 to 64 lower-case ASCII letters,
+/// digits and `_`.
+pub fn plain_mod_id(id: &str) -> bool {
+    (1..=64).contains(&id.len())
+        && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+/// What a module's game's mod at `path` says of itself in its TOML `manifest` at the archive's
+/// root (`id`, `name`, `version`, `description`); only with a `plain_mod_id`.
+pub fn inspect_engine_mod(path: &Path, manifest: &'static str) -> Option<ModDescriptor> {
+    let mut archive = ZipArchive::new(BufReader::new(File::open(path).ok()?)).ok()?;
+    let payload = read_entry(&mut archive, manifest, MAX_METADATA_BYTES).ok()?;
+    let text = std::str::from_utf8(&payload).ok()?;
+    let root: toml::Table = toml::from_str(text.strip_prefix('\u{feff}').unwrap_or(text)).ok()?;
+    let id = root.get("id")?.as_str().filter(|id| plain_mod_id(id))?;
+    let text = |key: &str| clean_text(root.get(key).and_then(toml::Value::as_str));
+    Some(ModDescriptor {
+        metadata_file: manifest,
+        mod_id: id.to_string(),
+        name: text("name"),
+        version: text("version"),
+        description: text("description"),
+    })
+}
+
 fn read_entry(jar: &mut Jar, name: &str, limit: u64) -> Result<Vec<u8>, InspectError> {
     let entry = jar.by_name(name).map_err(|_| InspectError::CorruptJar)?;
     if entry.size() > limit {

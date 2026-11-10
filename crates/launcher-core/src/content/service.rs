@@ -12,18 +12,19 @@ use launcher_shared::{AppError, AppResult, ContentKind, ContentList, ErrorCode, 
 
 use super::backups::{backup_of, backups, restore};
 use super::inventory::{
-    Entry, MetadataCache, iris_properties, mods_supported, options_path, scan_mods, scan_resource_packs,
-    scan_shader_packs,
+    Entry, MetadataCache, iris_properties, mods_supported, options_path, scan_engine_mods,
+    scan_engine_shader_packs, scan_mods, scan_resource_packs, scan_shader_packs,
 };
+use super::jar::inspect_engine_mod;
 use super::packs::{
     INCOMPATIBLE_RESOURCE_PACKS, RESOURCE_PACKS, legacy_pack_names, read_options_list, remove_options_entry,
-    resourcepack_entry, write_options_list, write_properties,
+    resourcepack_entry, set_mod, write_option, write_options_list, write_properties,
 };
 use super::screenshots::{SCREENSHOTS, ScreenshotFile, find_screenshot, list_screenshots, rename_screenshot};
 use super::thumbs::Thumbs;
 use crate::backups::{BackupsRoot, BuildBackups};
 use crate::feedback::FeedbackService;
-use crate::launch::engine::engine_of;
+use crate::launch::engine::{EngineContent, engine_of};
 use crate::launch::options::{component_id, game_dir};
 use crate::lock::Coordinator;
 use crate::storage::versions::{Build, VersionStore};
@@ -38,6 +39,8 @@ pub struct ContentService {
     /// Screenshot thumbnails for the Screenshots page.
     thumbs: Thumbs,
     backups: BackupsRoot,
+    /// Where the games modules bring keep their own content, by engine.
+    engine_content: Vec<(&'static str, EngineContent)>,
 }
 
 fn io_error(path: &Path, e: io::Error) -> AppError {
@@ -127,6 +130,25 @@ fn runs_engine(build: &Build) -> bool {
     engine_of(&build.options).is_some()
 }
 
+/// Turns a module's game's mod on or off: its line in the game's list.
+fn switch_engine_mod(game: &Path, content: &EngineContent, entry: &Entry, on: bool) -> AppResult<bool> {
+    let list = game.join(content.mods_list);
+    set_mod(&list, entry.item.mod_id.as_deref().unwrap_or_default(), Some(on))
+        .map_err(|e| io_error(&list, e))?;
+    Ok(on)
+}
+
+/// Picks a module's game's shader pack, or none (`on` false): one at a time.
+fn pick_shader_pack(game: &Path, content: &EngineContent, entry: &Entry, on: bool) -> AppResult<bool> {
+    if on {
+        restore_name(entry)?;
+    }
+    let graphics = game.join(content.graphics);
+    let picked = if on { entry.item.filename.as_str() } else { "" };
+    write_option(&graphics, content.shader_pick, Some(picked)).map_err(|e| io_error(&graphics, e))?;
+    Ok(on)
+}
+
 /// Deletes the file, or the folder with its legacy `.disabled` marker.
 fn remove(entry: &Entry) -> AppResult<()> {
     let result = if entry.item.folder {
@@ -158,6 +180,27 @@ impl ContentService {
             cache: MetadataCache::default(),
             backup_cache: MetadataCache::default(),
             thumbs: Thumbs::new(thumbs_dir),
+            engine_content: Vec::new(),
+        }
+    }
+
+    /// Where the games modules bring keep their own content (`GameEngine::content`), by engine.
+    pub fn with_engine_content(mut self, content: Vec<(&'static str, EngineContent)>) -> ContentService {
+        self.engine_content = content;
+        self
+    }
+
+    /// Where the game that runs `build` keeps its own content, when a module's game runs it.
+    fn content_of(&self, build: &Build) -> Option<EngineContent> {
+        let engine = engine_of(&build.options)?;
+        self.engine_content.iter().find(|(id, _)| *id == engine).map(|(_, content)| *content)
+    }
+
+    /// The folder of `kind` in `build`'s game folder.
+    fn kind_folder(&self, build: &Build, kind: ContentKind) -> &'static str {
+        match (kind, self.content_of(build)) {
+            (ContentKind::Mods, Some(content)) => content.mods,
+            _ => kind.folder(),
         }
     }
 
@@ -179,16 +222,18 @@ impl ContentService {
     fn scan(&self, build: &Build, kind: ContentKind) -> (bool, Vec<Entry>) {
         let dir = self.folder(build);
         let loader = component_id(build).and_then(LoaderKind::of_component);
-        match kind {
-            ContentKind::Mods if !mods_supported(build.client.as_deref()) => (false, Vec::new()),
-            ContentKind::Mods => {
+        match (kind, self.content_of(build)) {
+            (ContentKind::Mods, Some(content)) => (true, scan_engine_mods(&dir, &content)),
+            (ContentKind::Mods, None) if !mods_supported(build.client.as_deref()) => (false, Vec::new()),
+            (ContentKind::Mods, None) => {
                 let found = backups(&self.mod_backups(build), loader, &self.backup_cache);
                 (true, scan_mods(&dir, loader, &self.cache, &found))
             }
-            ContentKind::ResourcePacks => {
+            (ContentKind::ResourcePacks, _) => {
                 (true, scan_resource_packs(&dir, legacy_pack_names(build.version.as_deref())))
             }
-            ContentKind::ShaderPacks => {
+            (ContentKind::ShaderPacks, Some(content)) => (true, scan_engine_shader_packs(&dir, &content)),
+            (ContentKind::ShaderPacks, None) => {
                 (true, scan_shader_packs(&dir, loader, &self.cache, runs_engine(build)))
             }
         }
@@ -206,7 +251,8 @@ impl ContentService {
 
     /// The folder of `kind` in build `key`'s game folder, created when missing.
     pub fn dir(&self, key: &str, kind: ContentKind) -> AppResult<PathBuf> {
-        let dir = self.folder(&self.build(key)?).join(kind.folder());
+        let build = self.build(key)?;
+        let dir = self.folder(&build).join(self.kind_folder(&build, kind));
         fs::create_dir_all(&dir).map_err(|e| io_error(&dir, e))?;
         Ok(dir)
     }
@@ -294,35 +340,47 @@ impl ContentService {
     /// Switches `file` on (`enable`) or off; an item already so stays as it is (the page may have
     /// shown an older state). The list after it.
     pub fn toggle(&self, key: &str, kind: ContentKind, file: &str, enable: bool) -> AppResult<ContentList> {
+        let content = self.content_of(&self.build(key)?);
         self.change(key, kind, file, |game, entry, legacy| {
             if entry.item.enabled == enable {
                 return Ok(None);
             }
-            let on = match kind {
-                ContentKind::Mods => toggle_mod(entry)?,
-                ContentKind::ResourcePacks => toggle_resource_pack(game, entry, legacy)?,
-                ContentKind::ShaderPacks => toggle_shader_pack(game, entry)?,
+            let on = match (kind, content) {
+                (ContentKind::Mods, Some(content)) => switch_engine_mod(game, &content, entry, enable)?,
+                (ContentKind::Mods, None) => toggle_mod(entry)?,
+                (ContentKind::ResourcePacks, _) => toggle_resource_pack(game, entry, legacy)?,
+                (ContentKind::ShaderPacks, Some(content)) => pick_shader_pack(game, &content, entry, enable)?,
+                (ContentKind::ShaderPacks, None) => toggle_shader_pack(game, entry)?,
             };
             Ok(Some(Text::key(kind.toggled_key(on)).param("name", display_name(entry))))
         })
     }
 
     /// Deletes `file` (an enabled shader pack switches shaders off first, a resource pack leaves
-    /// `options.txt`); the list after it.
+    /// `options.txt`, a module's game's mod its list); the list after it.
     pub fn delete(&self, key: &str, kind: ContentKind, file: &str) -> AppResult<ContentList> {
+        let content = self.content_of(&self.build(key)?);
         self.change(key, kind, file, |game, entry, legacy| {
-            match kind {
-                ContentKind::Mods => {}
-                ContentKind::ResourcePacks => {
+            match (kind, content) {
+                (ContentKind::Mods, Some(content)) => {
+                    let list = game.join(content.mods_list);
+                    set_mod(&list, entry.item.mod_id.as_deref().unwrap_or_default(), None)
+                        .map_err(|e| io_error(&list, e))?;
+                }
+                (ContentKind::Mods, None) => {}
+                (ContentKind::ResourcePacks, _) => {
                     unlist_resource_pack(&options_path(game), &entry.item.filename, legacy)?;
                 }
-                // Only Iris switches a pack on: a module's game keeps its own choice.
-                ContentKind::ShaderPacks if entry.item.enabled && entry.item.toggle_supported => {
+                (ContentKind::ShaderPacks, Some(content)) if entry.item.enabled => {
+                    pick_shader_pack(game, &content, entry, false)?;
+                }
+                // Only Iris switches a pack on: a module's game it knows nothing of keeps its own.
+                (ContentKind::ShaderPacks, None) if entry.item.enabled && entry.item.toggle_supported => {
                     let properties = iris_properties(game);
                     write_properties(&properties, &[("enableShaders", "false")])
                         .map_err(|e| io_error(&properties, e))?;
                 }
-                ContentKind::ShaderPacks => {}
+                (ContentKind::ShaderPacks, _) => {}
             }
             remove(entry)?;
             Ok(Some(Text::key(kind.deleted_key()).param("name", display_name(entry))))
@@ -352,9 +410,10 @@ impl ContentService {
     /// Copies file `from` (one from outside: dropped on the build's tab) into build `key`'s folder
     /// of `kind` under its own name; `from` stays. A file of that name already there, on or
     /// switched off, is `ContentConflict` unless `replace`: the new one then takes its place, on
-    /// or off as it was. The list after it.
+    /// or off as it was. A module's game's mod is kept as `<id>.<ending>` and turned on. The list
+    /// after it.
     pub fn add(&self, key: &str, kind: ContentKind, from: &Path, replace: bool) -> AppResult<ContentList> {
-        let name = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut name = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let build = self.build(key)?;
         let lower = name.to_lowercase();
         let taken = kind.endings(runs_engine(&build)).iter().any(|e| {
@@ -367,22 +426,37 @@ impl ContentService {
             )
             .with_param("name", name));
         }
-        let relative = super::files::destination(kind, &name)?;
+        super::files::destination(kind, &name)?;
         let source = fs::metadata(from).map_err(|e| io_error(from, e))?;
         if !source.is_file() || source.len() == 0 {
             return Err(AppError::new(ErrorCode::InvalidInput, format!("{name} is no file or an empty one"))
                 .with_param("name", name));
         }
-        if kind == ContentKind::Mods && !mods_supported(build.client.as_deref()) {
+        let engine_mods = self.content_of(&build).filter(|_| kind == ContentKind::Mods);
+        if kind == ContentKind::Mods && engine_mods.is_none() && !mods_supported(build.client.as_deref()) {
             return Err(AppError::new(ErrorCode::Unsupported, "the build runs no mods")
                 .with_param("version", build.name.clone()));
         }
+        // Its game knows a mod by its id: one file, and one line, per mod.
+        let mod_id = match &engine_mods {
+            Some(content) => {
+                let id =
+                    inspect_engine_mod(from, content.mod_manifest).map(|d| d.mod_id).ok_or_else(|| {
+                        AppError::new(ErrorCode::InvalidInput, format!("{name} names no mod"))
+                            .with_param("name", &name)
+                    })?;
+                name = format!("{id}.{}", kind.endings(true)[0]);
+                Some(id)
+            }
+            None => None,
+        };
         let game = self.folder(&build);
         let _lease = self
             .instances
             .try_acquire(&game, "content")
             .map_err(|e| e.with_param("version", build.name.clone()))?;
-        let on = game.join(&relative);
+        let folder = game.join(self.kind_folder(&build, kind));
+        let on = folder.join(&name);
         let off = on.with_file_name(format!("{name}.disabled"));
         let target = match (on.exists(), off.exists()) {
             (false, false) => on,
@@ -396,7 +470,6 @@ impl ContentService {
             (true, _) => on,
             (false, true) => off,
         };
-        let folder = game.join(kind.folder());
         fs::create_dir_all(&folder).map_err(|e| io_error(&folder, e))?;
         // Copied beside it first: a copy cut short never takes the place of a whole file.
         let part = folder.join(format!(".{name}.part"));
@@ -417,6 +490,10 @@ impl ContentService {
                     .with_param("name", name));
             }
             return Err(io_error(&target, e));
+        }
+        if let (Some(content), Some(id)) = (engine_mods, mod_id) {
+            let list = game.join(content.mods_list);
+            set_mod(&list, &id, Some(true)).map_err(|e| io_error(&list, e))?;
         }
         self.feedback.info(Text::key("content_added").param("name", name));
         Ok(self.list_of(&build, kind))

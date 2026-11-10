@@ -33,12 +33,31 @@ pub struct EngineContext<'a> {
     pub op: &'a OperationHandle,
 }
 
+/// Where a game keeps what it switches on itself, in the build's game folder (`key:value` lines
+/// as `options.txt`'s): its own mods (files of `ContentKind::Mods.endings(true)`, each an archive
+/// with a TOML manifest of `id`, `name`, `version` and `description` at its root, kept as
+/// `<id>.<ending>` and on while `mods_list` has a `mod.<id>:true` line) and its shader pack pick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EngineContent {
+    pub mods: &'static str,
+    pub mods_list: &'static str,
+    pub mod_manifest: &'static str,
+    /// The file whose `<shader_pick>:<name>` line picks a pack of `shaderpacks/` (empty: none).
+    pub graphics: &'static str,
+    pub shader_pick: &'static str,
+}
+
 pub trait GameEngine: Send + Sync {
     /// The name a build's `engine` option gives.
     fn id(&self) -> &'static str;
 
     /// Brings what the build needs up to date and gives the command that starts its game.
     fn command<'a>(&'a self, ctx: &'a EngineContext<'a>) -> EngineFuture<'a>;
+
+    /// Where its game keeps its own content, when the launcher may switch it.
+    fn content(&self) -> Option<EngineContent> {
+        None
+    }
 }
 
 /// The engine build `options` name, if any.

@@ -242,13 +242,17 @@ impl CoreApp {
             .with_loader_keepers(modules.loader_keepers()),
         );
         let backups = resolver(config.clone(), paths.minecraft_dir.clone());
-        let content = Arc::new(ContentService::new(
-            versions.clone(),
-            instances.clone(),
-            feedback.clone(),
-            paths.cache_dir.join("thumbs"),
-            backups.clone(),
-        ));
+        let engines = modules.game_engines();
+        let content = Arc::new(
+            ContentService::new(
+                versions.clone(),
+                instances.clone(),
+                feedback.clone(),
+                paths.cache_dir.join("thumbs"),
+                backups.clone(),
+            )
+            .with_engine_content(engines.iter().filter_map(|e| Some((e.id(), e.content()?))).collect()),
+        );
         let component_manager =
             Arc::new(ComponentManager::new(versions.clone(), components.clone(), feedback.clone()));
         let launcher = Arc::new(LaunchService::new(LaunchDeps {
@@ -266,7 +270,7 @@ impl CoreApp {
             hooks: modules.launch_hooks(),
             downloader: downloader.clone(),
             watchers: modules.game_watchers(),
-            engines: modules.game_engines(),
+            engines,
             timings: LaunchTimings::default(),
             ledger: Some(paths.app_state_dir.join(LEDGER_FILE)),
             memory: Arc::new(crate::java::memory::MemoryLimits::detect),

@@ -770,9 +770,11 @@ impl ContentKind {
     }
 
     /// The endings of its files (lower case, without the dot); a build a module's game runs
-    /// (`engine`) also takes that game's own shader packs (Horizon's `.hshader`).
+    /// (`engine`) takes that game's own mods instead of Java's, and its own shader packs too
+    /// (Horizon's `.hmod` and `.hshader`).
     pub fn endings(self, engine: bool) -> &'static [&'static str] {
         match self {
+            ContentKind::Mods if engine => &["hmod"],
             ContentKind::Mods => &["jar"],
             ContentKind::ShaderPacks if engine => &["zip", "hshader"],
             ContentKind::ResourcePacks | ContentKind::ShaderPacks => &["zip"],
