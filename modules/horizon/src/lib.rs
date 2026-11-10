@@ -12,19 +12,19 @@ pub const MINECRAFT: &str = "26.3";
 /// A Horizon build's client, as cards and lists name it.
 pub const CLIENT: &str = "Horizon";
 
-/// Horizon's registry as a source of its builds' shader packs and resource packs: the shader packs
-/// it lists are its builds' only ones.
+/// Horizon's registry as its builds' source of their own mods, shader packs and resource packs,
+/// named just Horizon: the mods and shader packs it lists are its builds' only ones.
 pub fn provider_info() -> ProviderInfo {
     ProviderInfo {
         id: ID.into(),
         name: "Horizon".into(),
         icon: "rocket_launch".into(),
-        content: vec![ContentKind::ShaderPacks, ContentKind::ResourcePacks],
+        content: ContentKind::ALL.to_vec(),
         updates: Vec::new(),
         modpacks: false,
         modpack_updates: false,
         content_clients: vec![CLIENT.into()],
-        content_label: Some("horizon_registry_source".into()),
+        content_label: None,
         pack_file: None,
     }
 }
@@ -52,17 +52,17 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_gives_horizon_builds_shader_packs_and_resource_packs_alone() {
+    fn horizon_gives_its_builds_their_mods_shader_packs_and_resource_packs() {
         let info = provider_info();
-        assert!(info.offers(Need::Content(ContentKind::ShaderPacks)));
-        assert!(info.offers(Need::Content(ContentKind::ResourcePacks)));
-        assert!(!info.offers(Need::Content(ContentKind::Mods)) && !info.offers(Need::Modpacks));
-        assert!(info.serves(Some("Horizon")) && !info.serves(Some("Fabric")) && !info.serves(None));
-        for raw in [include_str!("../locales/uk_UA.json"), include_str!("../locales/en_US.json")] {
-            let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(raw).unwrap();
-            for key in [info.content_label.as_deref().unwrap(), "horizon_shader_installed"] {
-                assert!(map.contains_key(key), "{key}");
-            }
+        for kind in ContentKind::ALL {
+            assert!(info.offers(Need::Content(kind)), "{kind:?}");
         }
+        assert!(!info.offers(Need::Modpacks));
+        assert!(info.serves(Some("Horizon")) && !info.serves(Some("Fabric")) && !info.serves(None));
+        assert_eq!(
+            (info.name.as_str(), info.content_label.as_deref()),
+            ("Horizon", None),
+            "named just Horizon"
+        );
     }
 }

@@ -1,5 +1,6 @@
-//! Horizon's registry in the browser preview: its shader packs and a resource pack, as a Horizon
-//! build's source; an installed one lands in the build's list (the preview's content).
+//! Horizon's registry in the browser preview: its content mods, shader packs and a resource pack,
+//! as a Horizon build's source; an installed one lands in the build's list (the preview's
+//! content), a mod on, a pack off.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -28,7 +29,73 @@ type Entry = (
     u64,
 );
 
-const REGISTRY: [Entry; 6] = [
+const REGISTRY: [Entry; 12] = [
+    (
+        "additional_lights",
+        ContentKind::Mods,
+        "Additional Lights",
+        "mgen256, AdLf0208",
+        "80 decorative lamps, floor torches and wall torches with the mod's own light levels and recipes.",
+        204,
+        "3.1.4",
+        "additional_lights.hmod",
+        262_863,
+    ),
+    (
+        "factory_blocks",
+        ContentKind::Mods,
+        "Factory Blocks",
+        "slaincow, AdLf0208",
+        "49 industrial decorative blocks: panels, grates, vents, pipes and hazard stripes for Horizon.",
+        159,
+        "1.4.2",
+        "factory_blocks.hmod",
+        776_638,
+    ),
+    (
+        "mcwtrpdoors",
+        ContentKind::Mods,
+        "Macaw's Trapdoors",
+        "Sketch Macaw, Peachy Macaw, AdLf0208",
+        "All 179 of Macaw's Trapdoors: vanilla-matched woods plus glass, metal and themed sets.",
+        127,
+        "1.1.5",
+        "mcwtrpdoors.hmod",
+        605_483,
+    ),
+    (
+        "silentgems",
+        ContentKind::Mods,
+        "Silent's Gems",
+        "SilentChaos512, AdLf0208",
+        "21 gems with storage blocks and 84 ores, plus overworld, nether and end worldgen.",
+        137,
+        "5.2.0",
+        "silentgems.hmod",
+        302_704,
+    ),
+    (
+        "flesh_to_leather",
+        ContentKind::Mods,
+        "Flesh to Leather",
+        "CGRLabs",
+        "Smelt rotten flesh into leather in a furnace.",
+        115,
+        "1.0.0",
+        "flesh_to_leather.hmod",
+        812,
+    ),
+    (
+        "netherstarrecipe",
+        ContentKind::Mods,
+        "Nether Star Crafting",
+        "Mya",
+        "Adds a Netherstar Shard and a crafting recipe for the Nether Star.",
+        656,
+        "1.0.0",
+        "netherstarrecipe.hmod",
+        2_726,
+    ),
     (
         "daybreak",
         ContentKind::ShaderPacks,
@@ -180,29 +247,28 @@ impl MockHorizon {
             "provider_plan" => to_value(self.plan(&parse(args)?)?.1),
             "provider_install" => {
                 let args: InstallArgs = parse(args)?;
-                let ((_, kind, name, .., file, size), plan) = self.plan(&args)?;
+                let ((id, kind, name, _, summary, _, version, file, size), plan) = self.plan(&args)?;
                 let main = plan.main.clone().unwrap_or_else(|| unreachable!("the plan has its pack"));
                 if !plan.changes(&[]).iter().all(|c| args.approved.contains(c)) {
                     return to_value(InstallAnswer::Replanned(Box::new(plan)));
                 }
-                let shader = kind == ContentKind::ShaderPacks;
+                // A mod is on once installed (its manifest names it); a pack is switched in the list.
+                let content_mod = kind == ContentKind::Mods;
                 let item = ContentItem {
                     file: file.into(),
                     filename: file.into(),
                     size,
-                    enabled: true,
+                    enabled: content_mod,
                     folder: false,
-                    // Horizon picks its shader pack in the game.
-                    toggle_supported: !shader,
-                    name: None,
-                    version: None,
-                    description: None,
-                    mod_id: None,
+                    toggle_supported: true,
+                    name: content_mod.then(|| name.into()),
+                    version: content_mod.then(|| version.into()),
+                    description: content_mod.then(|| summary.into()),
+                    mod_id: content_mod.then(|| id.into()),
                     has_backup: false,
                 };
                 self.content.borrow_mut().put(&args.key, kind, item);
-                let done = if shader { "horizon_shader_installed" } else { installed_key(kind) };
-                toast(Level::Success, Text::key(done).param("name", name));
+                toast(Level::Success, Text::key(installed_key(kind)).param("name", name));
                 to_value(InstallAnswer::Installed(InstallOutcome {
                     project_id: main.project_id,
                     filename: main.filename,
@@ -261,9 +327,30 @@ mod tests {
             listed.items.iter().map(|i| i.file.as_str()).collect::<Vec<_>>(),
             ["daybreak-0.1.1.hshader"]
         );
+        assert!(listed.items.iter().all(|i| i.toggle_supported && !i.enabled), "switched in the list, off");
         let overview = json!({"key": "horizon", "kind": "shaderpacks", "check_updates": false});
         let overview: Overview =
             parse(&horizon.handle("provider_overview", &call(overview)).unwrap()).unwrap();
         assert_eq!(overview.notes[0].project_id, "daybreak");
+    }
+
+    #[test]
+    fn the_preview_installs_a_content_mod_on() {
+        let content = Rc::new(RefCell::new(MockContent::new()));
+        content.borrow_mut().set_engine("horizon", "Horizon");
+        let mut horizon = MockHorizon::new(content.clone());
+        let search = json!({"key": "horizon", "kind": "mods", "query": "", "offset": 0});
+        let page: SearchPage = parse(&horizon.handle("provider_search", &call(search)).unwrap()).unwrap();
+        let ids: Vec<&str> = page.hits.iter().map(|h| h.project_id.as_str()).collect();
+        assert!(ids.contains(&"flesh_to_leather") && !ids.contains(&"daybreak"), "{ids:?}");
+        let args =
+            InstallArgs::new("horizon", ContentKind::Mods, "flesh_to_leather", "flesh_to_leather", "Flesh");
+        let plan: PlanDto = parse(&horizon.handle("provider_plan", &call(json!(args))).unwrap()).unwrap();
+        let approved = InstallArgs { approved: plan.changes(&[]), ..args };
+        horizon.handle("provider_install", &call(json!(approved))).unwrap();
+        let mods = content.borrow_mut().list("horizon", ContentKind::Mods);
+        let view: Vec<(&str, bool, Option<&str>)> =
+            mods.items.iter().map(|i| (i.file.as_str(), i.enabled, i.name.as_deref())).collect();
+        assert_eq!(view, [("flesh_to_leather.hmod", true, Some("Flesh to Leather"))]);
     }
 }

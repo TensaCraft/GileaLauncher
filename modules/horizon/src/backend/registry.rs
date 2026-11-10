@@ -1,12 +1,14 @@
-//! Horizon's registry (github.com/horizon-rust/horizon-mods) as a content provider: its shader
-//! packs and resource packs made for the Horizon here, searched, planned and downloaded into a
-//! Horizon build's game folder, and known there by their SHA-256. The player picks a shader pack
-//! in the game.
+//! Horizon's registry (github.com/horizon-rust/horizon-mods) as a content provider: its content
+//! mods, shader packs and resource packs made for the Horizon here, searched, planned and
+//! downloaded into a Horizon build's game folder, and known there by their SHA-256. A mod is on
+//! once installed; packs are switched in the Installed list, as a Java build's.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use launcher_core::content::jar::plain_mod_id;
+use launcher_core::content::packs::set_mod;
 use launcher_core::core_app::CoreApp;
 use launcher_core::feedback::OperationSpec;
 use launcher_core::launch::engine::engine_of;
@@ -26,33 +28,38 @@ use serde_json::Value;
 pub const INDEX: &str = "https://horizon-rust.github.io/horizon-mods/index.json";
 /// The newest index schema read; a newer one may mean something else.
 const SCHEMA: u64 = 1;
-/// The shader API and schema a stock nightly loads (it refuses API 0.2): what a Horizon that has
-/// not said otherwise is taken to load.
+/// The shader API and schema a stock nightly loads (it refuses API 0.2), and its content mods'
+/// APIs: what a Horizon that has not said otherwise is taken to load.
 const SHADER_API: &str = "0.1";
 const SHADER_SCHEMA: u64 = 1;
+const MOD_API: [&str; 2] = ["0.2", "0.3"];
 /// The largest file the registry lists.
 const MOST_BYTES: u64 = 64 * 1024 * 1024;
 /// The registry's own repository, whose releases hold its files.
 const REGISTRY_REPO: &str = "horizon-rust/horizon-mods";
 
-/// The shader packs a Horizon loads: their shader APIs and the newest schema it reads.
+/// What a Horizon loads: its shader packs' APIs and the newest schema it reads, and its content
+/// mods' APIs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Shaders {
-    pub api: Vec<String>,
-    pub schema: u64,
+pub struct Loads {
+    pub shader_api: Vec<String>,
+    pub shader_schema: u64,
+    pub mod_api: Vec<String>,
 }
 
-/// What a client's `--launch-api` reply says it loads (`content.shader`), unknown fields aside;
-/// without a reply, or one that tells nothing, a stock nightly's.
-pub fn accepted(reply: Option<&str>) -> Shaders {
+/// What a client's `--launch-api` reply says it loads (`content.shader`, `content.mod`), unknown
+/// fields aside; without a reply, or one that tells nothing, a stock nightly's.
+pub fn accepted(reply: Option<&str>) -> Loads {
     let reply: Value = reply.and_then(|r| serde_json::from_str(r).ok()).unwrap_or_default();
-    let shader = &reply["content"]["shader"];
-    Shaders {
-        api: match shader["api"].as_array() {
-            Some(api) => api.iter().filter_map(|a| a.as_str().map(str::to_string)).collect(),
-            None => vec![SHADER_API.into()],
-        },
-        schema: shader["schema"].as_u64().unwrap_or(SHADER_SCHEMA),
+    let content = &reply["content"];
+    let api = |told: &Value, stock: &[&str]| match told.as_array() {
+        Some(api) => api.iter().filter_map(|a| a.as_str().map(str::to_string)).collect(),
+        None => stock.iter().map(|a| a.to_string()).collect(),
+    };
+    Loads {
+        shader_api: api(&content["shader"]["api"], &[SHADER_API]),
+        shader_schema: content["shader"]["schema"].as_u64().unwrap_or(SHADER_SCHEMA),
+        mod_api: api(&content["mod"]["api"], &MOD_API),
     }
 }
 
@@ -79,9 +86,12 @@ pub struct Project {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Version {
     pub version: String,
-    /// A shader pack's shader API (a resource pack's pack format).
+    /// A shader pack's shader API, a mod's API (a resource pack's pack format).
     #[serde(default)]
     pub api: String,
+    /// Where a mod runs: `client`, `server` or `both`.
+    #[serde(default)]
+    pub side: String,
     /// A shader pack's schema, when it names one.
     #[serde(default)]
     pub schema: Option<u64>,
@@ -119,7 +129,7 @@ fn kinds(kind: ContentKind) -> &'static [(&'static str, &'static str)] {
     match kind {
         ContentKind::ShaderPacks => &[("shader", "hshader"), ("shaderpack", "zip")],
         ContentKind::ResourcePacks => &[("resourcepack", "zip")],
-        ContentKind::Mods => &[],
+        ContentKind::Mods => &[("mod", "hmod")],
     }
 }
 
@@ -173,9 +183,10 @@ fn fetchable(file: &RegistryFile, kind: ContentKind, ending: &str, source: Optio
 }
 
 /// What the registry offers a Horizon build's tab of `kind`, in the index's order: each project
-/// with its newest version the game takes. Revoked files, files from elsewhere and shader packs
-/// the Horizon here does not load (`shaders`) are left out.
-pub fn offers(index: &Value, kind: ContentKind, shaders: &Shaders) -> AppResult<Vec<Offer>> {
+/// with its newest version the game takes. Revoked files, files from elsewhere, shader packs and
+/// mods the Horizon here does not load (`loads`), a server's mods and a native mod's assets are
+/// left out.
+pub fn offers(index: &Value, kind: ContentKind, loads: &Loads) -> AppResult<Vec<Offer>> {
     if index["schema"].as_u64().unwrap_or(SCHEMA) > SCHEMA {
         return Err(AppError::new(ErrorCode::Unsupported, "Horizon's registry has a newer index"));
     }
@@ -185,11 +196,28 @@ pub fn offers(index: &Value, kind: ContentKind, shaders: &Shaders) -> AppResult<
         .flatten()
         .filter_map(|r| serde_json::from_value(r.clone()).ok())
         .collect();
+    // shortcut: the index has no dependency field; use one when the index gets it
+    let natives: Vec<&str> = index["projects"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|p| p["kind"] == "native-mod")
+        .filter_map(|p| p["id"].as_str())
+        .collect();
+    // A mod whose code is native mod `<id>_…` is its assets alone: Horizon builds run no native mods.
+    let mod_alone = |id: &str| plain_mod_id(id) && !natives.iter().any(|n| n.starts_with(&format!("{id}_")));
     let takes = |project: &Project, version: &Version| {
         let ending = kinds(kind).iter().find(|(k, _)| *k == project.kind).map_or("", |(_, e)| *e);
-        let loads = shaders.api.contains(&version.api) && version.schema.is_none_or(|s| s <= shaders.schema);
+        let runs = match project.kind.as_str() {
+            "shader" => {
+                loads.shader_api.contains(&version.api)
+                    && version.schema.is_none_or(|s| s <= loads.shader_schema)
+            }
+            "mod" => loads.mod_api.contains(&version.api) && version.side != "server",
+            _ => true,
+        };
         version.game == crate::MINECRAFT
-            && (project.kind != "shader" || loads)
+            && runs
             && fetchable(&version.file, kind, ending, project.source.as_deref())
             && !revoked.iter().any(|r| match &r.sha256 {
                 Some(sha256) => sha256.eq_ignore_ascii_case(&version.file.sha256),
@@ -198,6 +226,7 @@ pub fn offers(index: &Value, kind: ContentKind, shaders: &Shaders) -> AppResult<
     };
     Ok(projects(index, kind)
         .into_iter()
+        .filter(|project| project.kind != "mod" || mod_alone(&project.id))
         .filter_map(|project| {
             let version = project.versions.iter().find(|v| takes(&project, v))?.clone();
             Some(Offer { project, version })
@@ -239,9 +268,31 @@ pub fn page(offers: &[Offer], args: &SearchArgs) -> SearchPage {
     SearchPage { hits, total: found.len() as u32, offset: args.offset, limit: args.page_size() }
 }
 
-/// Where `offer` goes in a build's game folder `game`: its kind's folder, under its own name.
+/// The folder of `kind` in a Horizon build's game folder.
+fn folder(kind: ContentKind) -> &'static str {
+    if kind == ContentKind::Mods { super::engine::CONTENT.mods } else { kind.folder() }
+}
+
+/// Where `offer` goes in a build's game folder `game`: its kind's folder, a mod as `<id>.hmod`
+/// (an update replaces it), a pack under its own name.
 fn destination(game: &Path, kind: ContentKind, offer: &Offer) -> AppResult<PathBuf> {
-    Ok(game.join(launcher_core::content::files::destination(kind, &offer.version.file.name)?))
+    let name = match kind {
+        ContentKind::Mods => format!("{}.hmod", offer.project.id),
+        _ => offer.version.file.name.clone(),
+    };
+    launcher_core::content::files::destination(kind, &name)?;
+    Ok(game.join(folder(kind)).join(name))
+}
+
+/// What installing `offer` turns on: a mod (`mod.<id>:true`); a pack stays off, as a Java
+/// build's does.
+fn turn_on(game: &Path, kind: ContentKind, offer: &Offer) -> AppResult<()> {
+    if kind != ContentKind::Mods {
+        return Ok(());
+    }
+    let list = game.join(super::engine::CONTENT.mods_list);
+    set_mod(&list, &offer.project.id, Some(true))
+        .map_err(|e| AppError::new(ErrorCode::of_io(&e), format!("{}: {e}", list.display())))
 }
 
 /// What installing at `dest` does: nothing when the file there is the one wanted (`sha256`),
@@ -256,18 +307,18 @@ fn action_of(dest: &Path, sha256: &str) -> Action {
     }
 }
 
-/// The plan of installing `offer`: the pack alone, which the player confirms first when it takes
-/// the place of a file not the registry's.
-fn plan_of(offer: &Offer, action: Action) -> PlanDto {
-    let file = &offer.version.file;
+/// The plan of installing `offer` at `dest`: the file alone, which the player confirms first when
+/// it takes the place of a file not the registry's.
+fn plan_of(offer: &Offer, dest: &Path, action: Action) -> PlanDto {
+    let name = dest.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let main = PlanItem {
         project_id: offer.project.id.clone(),
-        version_id: file.sha256.clone(),
+        version_id: offer.version.file.sha256.clone(),
         title: offer.project.name.clone(),
         version_number: offer.version.version.clone(),
-        filename: file.name.clone(),
+        filename: name.clone(),
         action,
-        current: (action == Action::Replace).then(|| file.name.clone()),
+        current: (action == Action::Replace).then_some(name),
         url: https(&offer.project.source),
         unrecognized: action == Action::Replace,
     };
@@ -338,8 +389,8 @@ impl Registry {
         self.core.meta.get_json(INDEX).await
     }
 
-    /// The registry's offers of `kind` for the Horizon here: the shader packs its client's kept
-    /// `--launch-api` reply says it loads (none yet before its first start: a stock nightly's).
+    /// The registry's offers of `kind` for the Horizon here: the shader packs and mods its client's
+    /// kept `--launch-api` reply says it loads (none yet before its first start: a stock nightly's).
     async fn offers(&self, kind: ContentKind) -> AppResult<Vec<Offer>> {
         let minecraft = self.core.paths.minecraft_dir.clone();
         let reply = blocking(move || {
@@ -381,7 +432,8 @@ impl Registry {
         let offer = self.offer(args.kind, &args.project_id).await?;
         let dest = destination(&game, args.kind, &offer)?;
         let sha256 = offer.version.file.sha256.clone();
-        let plan = plan_of(&offer, blocking(move || action_of(&dest, &sha256)).await?);
+        let at = dest.clone();
+        let plan = plan_of(&offer, &dest, blocking(move || action_of(&at, &sha256)).await?);
         Ok((build, game, offer, plan))
     }
 
@@ -415,15 +467,11 @@ impl Registry {
             .hash(ExpectedHash::sha256(&file.sha256))
             .size(file.size);
         let progress = |p: DownloadProgress| op.progress(p.bytes_done as f64, p.bytes_total.max(1) as f64);
-        match self.core.downloader.download_one(task, &progress).await {
+        let fetched = self.core.downloader.download_one(task, &progress).await;
+        match fetched.and_then(|()| turn_on(&game, args.kind, &offer)) {
             Ok(()) => {
                 op.finish();
-                let done = if args.kind == ContentKind::ShaderPacks {
-                    "horizon_shader_installed"
-                } else {
-                    installed_key(args.kind)
-                };
-                self.core.feedback.success(Text::key(done).param("name", &name));
+                self.core.feedback.success(Text::key(installed_key(args.kind)).param("name", &name));
                 Ok(InstallAnswer::Installed(outcome))
             }
             Err(e) => {
@@ -436,7 +484,7 @@ impl Registry {
     async fn overview_of(&self, args: &OverviewArgs) -> AppResult<Overview> {
         let Some((_, game)) = self.horizon_build(&args.key)? else { return Ok(Overview::default()) };
         let projects = projects(&self.index().await?, args.kind);
-        let dir = game.join(args.kind.folder());
+        let dir = game.join(folder(args.kind));
         Ok(Overview { notes: blocking(move || notes(&dir, &projects)).await?, updates: None })
     }
 }
@@ -475,6 +523,7 @@ mod tests {
     fn version(version: &str, api: &str, game: &str, name: &str, sha256: &str) -> Value {
         json!({
             "version": version, "published": "2026-11-01", "changelog": "", "api": api, "game": game,
+            "side": "both",
             "file": {
                 "name": name,
                 "url": format!("https://github.com/horizon-rust/horizon-mods/releases/download/x-{version}/{name}"),
@@ -501,17 +550,27 @@ mod tests {
     }
 
     /// What a stock nightly loads.
-    fn stock() -> Shaders {
+    fn stock() -> Loads {
         accepted(None)
+    }
+
+    fn mod_version(version: &str, api: &str, side: &str, file: &str) -> Value {
+        let mut v = self::version(version, api, "26.3", file, SHA_A);
+        v["side"] = json!(side);
+        v
     }
 
     #[test]
     fn shader_packs_are_offered_as_the_horizon_here_loads_them() {
-        assert_eq!(accepted(None), Shaders { api: vec!["0.1".into()], schema: 1 }, "a stock nightly's");
+        assert_eq!(
+            (stock().shader_api, stock().shader_schema),
+            (vec!["0.1".to_string()], 1),
+            "a stock nightly's"
+        );
         let reply = r#"{"launch_api":"1.4","options":[],"content":{"mod":{"api":["0.2","0.3"]},
             "shader":{"schema":2,"api":["0.1","0.2"],"later":true},"resourcepack":{"format":[97,1]}}}"#;
         let newer = accepted(Some(reply));
-        assert_eq!(newer, Shaders { api: vec!["0.1".into(), "0.2".into()], schema: 2 });
+        assert_eq!((newer.shader_api.clone(), newer.shader_schema), (vec!["0.1".into(), "0.2".into()], 2));
         assert_eq!(accepted(Some(r#"{"launch_api":"1.3","options":[]}"#)), stock(), "no content told");
         assert_eq!(accepted(Some("not json")), stock());
         let mut later_schema = version("0.3.0", "0.2", "26.3", "daybreak-0.3.0.hshader", SHA_B);
@@ -570,12 +629,135 @@ mod tests {
             ids(&offers(&index, ContentKind::ResourcePacks, &stock()).unwrap()),
             [("panorama", "1.0.0")]
         );
-        assert!(offers(&index, ContentKind::Mods, &stock()).unwrap().is_empty(), "no Java mods");
+        assert!(offers(&index, ContentKind::Mods, &stock()).unwrap().is_empty(), "an API it does not load");
         let newer = json!({"schema": 2, "projects": [], "revoked": []});
         assert_eq!(
             offers(&newer, ContentKind::ShaderPacks, &stock()).unwrap_err().code,
             ErrorCode::Unsupported
         );
+    }
+
+    #[test]
+    fn content_mods_are_offered_as_the_horizon_here_loads_them() {
+        assert_eq!(stock().mod_api, ["0.2", "0.3"], "a stock nightly's");
+        let reply = r#"{"launch_api":"1.4","content":{"mod":{"api":["0.3"]},"shader":{"api":["0.1"]}}}"#;
+        assert_eq!(accepted(Some(reply)).mod_api, ["0.3"]);
+        assert_eq!(accepted(Some(r#"{"content":{"shader":{"api":["0.1"]}}}"#)).mod_api, ["0.2", "0.3"]);
+        let mut old_game = mod_version("1.0.0", "0.2", "both", "old_game-1.0.0.hmod");
+        old_game["game"] = json!("26.2");
+        let index = index(
+            vec![
+                project(
+                    "flesh_to_leather",
+                    "mod",
+                    vec![mod_version("1.0.0", "0.2", "both", "flesh_to_leather-1.0.0.hmod")],
+                ),
+                project(
+                    "compass_bar",
+                    "mod",
+                    vec![mod_version("0.1.0", "0.1", "client", "compass_bar-0.1.0.hmod")],
+                ),
+                project(
+                    "server_tools",
+                    "mod",
+                    vec![mod_version("1.0.0", "0.2", "server", "server_tools.hmod")],
+                ),
+                project("old_game", "mod", vec![old_game]),
+                project("Bad.Id", "mod", vec![mod_version("1.0.0", "0.2", "both", "bad.hmod")]),
+                project("jar_mod", "mod", vec![mod_version("1.0.0", "0.2", "both", "jar_mod.jar")]),
+                project(
+                    "lights",
+                    "mod",
+                    vec![
+                        mod_version("4.0.0", "0.4", "both", "lights-4.0.0.hmod"),
+                        mod_version("3.1.4", "0.3", "client", "lights.hmod"),
+                    ],
+                ),
+                project(
+                    "daybreak",
+                    "shader",
+                    vec![version("0.1.1", "0.1", "26.3", "daybreak.hshader", SHA_A)],
+                ),
+            ],
+            json!([]),
+        );
+        assert_eq!(
+            ids(&offers(&index, ContentKind::Mods, &stock()).unwrap()),
+            [("flesh_to_leather", "1.0.0"), ("lights", "3.1.4")],
+            "its API, a client's side, its game, a plain id, a .hmod file"
+        );
+        assert_eq!(
+            ids(&offers(&index, ContentKind::Mods, &accepted(Some(reply))).unwrap()),
+            [("lights", "3.1.4")]
+        );
+    }
+
+    #[test]
+    fn a_mod_that_is_a_native_mod_s_assets_is_not_offered() {
+        let native = |id: &str| {
+            project(
+                id,
+                "native-mod",
+                vec![version("1.0.0", "native-1/a/b", "26.3", &format!("{id}-1.0.0.hnmod"), SHA_A)],
+            )
+        };
+        let content =
+            |id: &str| project(id, "mod", vec![mod_version("1.0.0", "0.2", "both", &format!("{id}.hmod"))]);
+        let index = index(
+            vec![
+                content("voltz"),
+                native("voltz_core"),
+                content("wayfarer_stones"),
+                native("wayfarer_stones_native"),
+                content("flesh"),
+                native("fleshy"),
+                content("lights"),
+            ],
+            json!([]),
+        );
+        assert_eq!(
+            ids(&offers(&index, ContentKind::Mods, &stock()).unwrap()),
+            [("flesh", "1.0.0"), ("lights", "1.0.0")],
+            "a native mod <id>_... holds its code"
+        );
+    }
+
+    #[test]
+    fn a_mod_is_saved_by_its_id_and_turned_on() {
+        let index = index(
+            vec![project(
+                "flesh_to_leather",
+                "mod",
+                vec![mod_version("1.0.0", "0.2", "both", "flesh_to_leather-1.0.0.hmod")],
+            )],
+            json!([]),
+        );
+        let offer = offers(&index, ContentKind::Mods, &stock()).unwrap().remove(0);
+        let game = tempfile::tempdir().unwrap();
+        let dest = destination(game.path(), ContentKind::Mods, &offer).unwrap();
+        assert_eq!(
+            dest,
+            game.path().join("horizon-mods").join("flesh_to_leather.hmod"),
+            "an update replaces it"
+        );
+        let main = plan_of(&offer, &dest, action_of(&dest, SHA_A)).main.unwrap();
+        assert_eq!((main.filename.as_str(), main.action), ("flesh_to_leather.hmod", Action::Install));
+        let list = game.path().join("horizon-mods.txt");
+        fs::write(&list, "mod.lights:true\n").unwrap();
+        turn_on(game.path(), ContentKind::Mods, &offer).unwrap();
+        assert_eq!(fs::read_to_string(&list).unwrap(), "mod.lights:true\nmod.flesh_to_leather:true\n");
+        let shader = index_offer("daybreak", "shader", "daybreak.hshader", ContentKind::ShaderPacks);
+        turn_on(game.path(), ContentKind::ShaderPacks, &shader).unwrap();
+        assert!(
+            !game.path().join("options.txt").exists() && !game.path().join("horizon-graphics.txt").exists(),
+            "a pack stays off, as a Java build's"
+        );
+    }
+
+    fn index_offer(id: &str, kind: &str, file: &str, tab: ContentKind) -> Offer {
+        let index =
+            index(vec![project(id, kind, vec![version("1.0.0", "0.1", "26.3", file, SHA_A)])], json!([]));
+        offers(&index, tab, &stock()).unwrap().remove(0)
     }
 
     #[test]
@@ -689,18 +871,18 @@ mod tests {
         let game = tempfile::tempdir().unwrap();
         let dest = destination(game.path(), ContentKind::ShaderPacks, &offer).unwrap();
         assert_eq!(dest, game.path().join("shaderpacks").join("daybreak.hshader"));
-        assert_eq!(plan_of(&offer, action_of(&dest, SHA_A)).main.unwrap().action, Action::Install);
+        assert_eq!(plan_of(&offer, &dest, action_of(&dest, SHA_A)).main.unwrap().action, Action::Install);
         fs::create_dir_all(dest.parent().unwrap()).unwrap();
         fs::write(&dest, b"mine").unwrap();
         let sha = launcher_core::net::downloader::hash_file(&dest, HashKind::Sha256).unwrap();
-        let main = plan_of(&offer, action_of(&dest, SHA_A)).main.unwrap();
+        let main = plan_of(&offer, &dest, action_of(&dest, SHA_A)).main.unwrap();
         assert_eq!(
             (main.action, main.unrecognized, main.current.as_deref()),
             (Action::Replace, true, Some("daybreak.hshader")),
             "the player is asked before their file goes"
         );
-        assert!(plan_of(&offer, action_of(&dest, SHA_A)).requires_confirmation());
-        assert_eq!(plan_of(&offer, action_of(&dest, &sha)).main.unwrap().action, Action::Satisfied);
+        assert!(plan_of(&offer, &dest, action_of(&dest, SHA_A)).requires_confirmation());
+        assert_eq!(plan_of(&offer, &dest, action_of(&dest, &sha)).main.unwrap().action, Action::Satisfied);
     }
 
     #[test]

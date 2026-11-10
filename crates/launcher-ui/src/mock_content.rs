@@ -2,7 +2,7 @@
 //! and shader packs for every build; mods are unsupported for the `vanilna…` builds until a
 //! loader is put on them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use launcher_shared::{
     AppError, BuildShots, ContentItem, ContentKind, ContentList, ErrorCode, Level, ScreenshotDto, ShotRef,
@@ -127,6 +127,8 @@ pub struct MockContent {
     shots: HashMap<String, Vec<ScreenshotDto>>,
     /// The client of each build whose loader changed here.
     clients: HashMap<String, String>,
+    /// The builds a module's game runs: their own mods, switched in place.
+    engines: HashSet<String>,
 }
 
 impl MockContent {
@@ -179,11 +181,11 @@ impl MockContent {
         self.lists.entry((key.to_string(), ContentKind::Mods)).or_default();
     }
 
-    /// Build `key` runs a module's game: no mods, and no shader packs until its own source brings
-    /// them.
+    /// Build `key` runs a module's game: no mods or shader packs until its own source brings them.
     #[cfg(feature = "mod-horizon")]
     pub fn set_engine(&mut self, key: &str, client: &str) {
         self.set_client(key, client);
+        self.engines.insert(key.to_string());
         self.lists.entry((key.to_string(), ContentKind::ShaderPacks)).or_default();
     }
 
@@ -198,6 +200,7 @@ impl MockContent {
 
     fn supported(&self, key: &str, kind: ContentKind) -> bool {
         kind != ContentKind::Mods
+            || self.engines.contains(key)
             || self.clients.get(key).map_or(!key.starts_with("vanilna"), |c| mods_supported(Some(c)))
     }
 
@@ -220,6 +223,7 @@ impl MockContent {
         file: &str,
         enable: bool,
     ) -> Result<(ContentList, Option<Text>), AppError> {
+        let engine = self.engines.contains(key);
         let items = self.items(key, kind);
         let at = items.iter().position(|i| i.file == file).ok_or_else(|| not_found(file))?;
         if items[at].enabled == enable {
@@ -231,7 +235,7 @@ impl MockContent {
         }
         let item = &mut items[at];
         item.enabled = on;
-        if kind == ContentKind::Mods {
+        if kind == ContentKind::Mods && !engine {
             item.file = if on { item.filename.clone() } else { format!("{}.disabled", item.filename) };
         }
         let name = item.name.clone().unwrap_or_else(|| item.filename.clone());
@@ -276,8 +280,11 @@ impl MockContent {
         replace: bool,
     ) -> Result<(ContentList, Option<Text>), AppError> {
         let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_string();
-        let ending = if kind == ContentKind::Mods { ".jar" } else { ".zip" };
-        if name.len() <= ending.len() || !name.to_lowercase().ends_with(ending) {
+        let lower = name.to_lowercase();
+        let taken = kind.endings(self.engines.contains(key)).iter().any(|e| {
+            lower.strip_suffix(e).and_then(|rest| rest.strip_suffix('.')).is_some_and(|stem| !stem.is_empty())
+        });
+        if !taken {
             return Err(AppError::new(
                 ErrorCode::InvalidInput,
                 format!("{name} is no {} file", kind.folder()),
@@ -411,6 +418,26 @@ mod tests {
             m.delete("aeronautics", ContentKind::Mods, "../x.jar").unwrap_err().code,
             ErrorCode::NotFound
         );
+    }
+
+    #[cfg(feature = "mod-horizon")]
+    #[test]
+    fn an_engine_build_switches_its_own_mods_in_place() {
+        let mut m = MockContent::new();
+        m.set_engine("horizon", "Horizon");
+        let mods = m.list("horizon", ContentKind::Mods);
+        assert!(mods.supported && mods.items.is_empty(), "its game's own mods, none yet");
+        let (list, _) =
+            m.add("horizon", ContentKind::Mods, r"C:\drops\flesh_to_leather.hmod", false).unwrap();
+        assert!(
+            list.items.iter().any(|i| i.file == "flesh_to_leather.hmod" && i.enabled),
+            "a dropped mod is on"
+        );
+        let java = m.add("horizon", ContentKind::Mods, "sodium.jar", false).unwrap_err();
+        assert_eq!(java.code, ErrorCode::InvalidInput);
+        let (off, _) = m.toggle("horizon", ContentKind::Mods, "flesh_to_leather.hmod", false).unwrap();
+        assert!(off.items.iter().any(|i| i.file == "flesh_to_leather.hmod" && !i.enabled), "its name stays");
+        assert!(m.list("horizon", ContentKind::ResourcePacks).items.iter().all(|i| i.toggle_supported));
     }
 
     #[test]

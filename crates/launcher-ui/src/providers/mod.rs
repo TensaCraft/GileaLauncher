@@ -178,8 +178,7 @@ mod tests {
 
     #[test]
     fn a_source_made_for_a_build_s_client_serves_it_without_a_loader() {
-        let mut horizon =
-            provider("horizon", vec![ContentKind::ShaderPacks, ContentKind::ResourcePacks], false);
+        let mut horizon = provider("horizon", ContentKind::ALL.to_vec(), false);
         horizon.content_clients = vec!["Horizon".into()];
         let all = vec![provider("modrinth", ContentKind::ALL.to_vec(), true), horizon];
         let ids = |kind, client| {
@@ -187,7 +186,8 @@ mod tests {
         };
         assert_eq!(ids(ContentKind::ShaderPacks, Some("Horizon")), ["horizon"], "its registry alone");
         assert_eq!(ids(ContentKind::ResourcePacks, Some("Horizon")), ["horizon", "modrinth"]);
-        assert!(ids(ContentKind::Mods, Some("Horizon")).is_empty(), "no Java mods");
+        assert_eq!(ids(ContentKind::Mods, Some("Horizon")), ["horizon"], "its own mods, no Java ones");
+        assert_eq!(ids(ContentKind::Mods, Some("Fabric")), ["modrinth"], "a Java build keeps its sources");
         assert_eq!(ids(ContentKind::ShaderPacks, Some("Fabric")), ["modrinth"], "other builds as before");
         assert!(ids(ContentKind::ShaderPacks, Some("Minecraft")).is_empty());
     }

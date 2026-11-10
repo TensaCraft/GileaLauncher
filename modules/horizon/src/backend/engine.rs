@@ -12,7 +12,7 @@ use std::sync::{Arc, OnceLock, Weak};
 
 use launcher_core::core_app::CoreApp;
 use launcher_core::feedback::{OperationHandle, OperationSpec};
-use launcher_core::launch::engine::{EngineContext, EngineFuture, GameEngine};
+use launcher_core::launch::engine::{EngineContent, EngineContext, EngineFuture, GameEngine};
 use launcher_core::launch::options::{FULLSCREEN_OPTION, resolution};
 use launcher_core::launch::process::{GameCommand, prepare_launch_log};
 use launcher_core::minecraft::InstallProgress;
@@ -25,6 +25,15 @@ use super::args::{self, Progress, Start};
 use super::install::{self, Installed};
 use crate::MINECRAFT;
 
+/// Where Horizon keeps the content it switches itself (`docs/api/content.md` in its repository).
+pub const CONTENT: EngineContent = EngineContent {
+    mods: "horizon-mods",
+    mods_list: "horizon-mods.txt",
+    mod_manifest: "horizon-mod.toml",
+    graphics: "horizon-graphics.txt",
+    shader_pick: "pickedShaderPack",
+};
+
 pub struct HorizonEngine {
     /// The launcher's core, once it has started (weak: the core keeps this engine).
     pub core: Arc<OnceLock<Weak<CoreApp>>>,
@@ -33,6 +42,10 @@ pub struct HorizonEngine {
 impl GameEngine for HorizonEngine {
     fn id(&self) -> &'static str {
         crate::ENGINE
+    }
+
+    fn content(&self) -> Option<EngineContent> {
+        Some(CONTENT)
     }
 
     fn command<'a>(&'a self, ctx: &'a EngineContext<'a>) -> EngineFuture<'a> {
