@@ -96,7 +96,7 @@ hound = "3.5"
 getrandom = "0.3"
 tokio-util = "0.7"
 fs4 = "1.1"
-sha1 = "0.10"
+sha1 = "0.11"
 zip = { version = "9.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 lzma-rs = "0.3"
 fastnbt = "2"
