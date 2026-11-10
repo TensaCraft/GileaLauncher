@@ -93,7 +93,7 @@ ring = "0.17"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 rodio = { version = "0.23", default-features = false, features = ["playback"] }
 hound = "3.5"
-getrandom = "0.3"
+getrandom = "0.4"
 tokio-util = "0.7"
 fs4 = "1.1"
 sha1 = "0.10"
