@@ -302,12 +302,7 @@ impl BuildService {
             }
             Err(e) => {
                 tracing::error!("Installing build {name} ({}) failed: {}", spec.component_id(), e.detail);
-                op.fail(
-                    Text::key("version_install_error")
-                        .param("client", spec.kind.display_name())
-                        .param("version", name)
-                        .param("error", e.detail.clone()),
-                );
+                op.fail(crate::feedback::install_failed(spec.kind.display_name(), name, &e));
                 Err(e)
             }
         }

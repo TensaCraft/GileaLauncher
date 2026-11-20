@@ -206,6 +206,7 @@
   "unknown_client": "Помилка: невідомий клієнт '{client}'",
   "version_install_success": "Збірку {version} успішно встановлено",
   "version_install_error": "Помилка встановлення {client} збірки {version}: {error}",
+  "version_install_network_down": "Зник зв'язок з інтернетом під час встановлення {version}. Уже завантажене збережено: перевірте інтернет і спробуйте ще раз — встановлення продовжиться з того ж місця.",
   "installation_started": "Інсталяція розпочата",
   "installing_minecraft_version": "Встановлення Minecraft {version}",
   "repairing_minecraft_version": "Відновлення Minecraft {version}",

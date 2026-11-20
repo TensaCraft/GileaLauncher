@@ -541,8 +541,41 @@ fn plain(text: &Text) -> String {
     }
 }
 
+/// What a failed install tells the player: when the network stayed down it says so plainly (what
+/// came is kept, so another try goes on from there); otherwise it names the error.
+pub fn install_failed(client: &str, version: &str, error: &launcher_shared::AppError) -> Text {
+    if error.code == launcher_shared::ErrorCode::Network
+        && error.params.get("network").map(String::as_str) == Some("down")
+    {
+        return Text::key("version_install_network_down").param("version", version);
+    }
+    Text::key("version_install_error")
+        .param("client", client)
+        .param("version", version)
+        .param("error", error.detail.clone())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_install_the_network_cut_off_says_so_plainly() {
+        let down =
+            launcher_shared::AppError::new(launcher_shared::ErrorCode::Network, "99 file(s) failed: a: down")
+                .with_param("network", "down");
+        assert_eq!(
+            install_failed("TensaCraft", "Lite", &down),
+            Text::key("version_install_network_down").param("version", "Lite")
+        );
+        let other = launcher_shared::AppError::new(launcher_shared::ErrorCode::DownloadFailed, "a: HTTP 404");
+        assert_eq!(
+            install_failed("TensaCraft", "Lite", &other),
+            Text::key("version_install_error")
+                .param("client", "TensaCraft")
+                .param("version", "Lite")
+                .param("error", "a: HTTP 404")
+        );
+    }
+
     use super::*;
 
     #[derive(Default)]

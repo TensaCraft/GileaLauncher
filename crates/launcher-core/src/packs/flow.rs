@@ -122,12 +122,7 @@ pub async fn install_pack(
             if let Err(gone) = fs::remove_dir_all(&game) {
                 tracing::warn!("the failed modpack's folder {} stays: {gone}", game.display());
             }
-            op.fail(
-                Text::key("version_install_error")
-                    .param("client", kind.provider)
-                    .param("version", &name)
-                    .param("error", e.detail.clone()),
-            );
+            op.fail(crate::feedback::install_failed(kind.provider, &name, &e));
             Err(e)
         }
     }
@@ -289,12 +284,7 @@ pub async fn update_pack(
             Ok(PackUpdated { key: build.key.clone(), version_number: number, backups, skipped })
         }
         Err(e) => {
-            op.fail(
-                Text::key("version_install_error")
-                    .param("client", kind.provider)
-                    .param("version", &build.name)
-                    .param("error", e.detail.clone()),
-            );
+            op.fail(crate::feedback::install_failed(kind.provider, &build.name, &e));
             Err(e)
         }
     }

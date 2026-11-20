@@ -206,6 +206,7 @@
   "unknown_client": "Error: unknown client '{client}'",
   "version_install_success": "Build {version} successfully installed",
   "version_install_error": "Error installing {client} build {version}: {error}",
+  "version_install_network_down": "The internet connection was lost while installing {version}. What was downloaded is kept: check your connection and try again, and the install will pick up where it stopped.",
   "installation_started": "Installation started",
   "installing_minecraft_version": "Installing Minecraft {version}",
   "repairing_minecraft_version": "Repairing Minecraft {version}",
