@@ -3004,7 +3004,7 @@ name = "launcher-core"
 version = "0.1.5"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "dirs 6.0.0",
  "fastnbt",
@@ -3554,7 +3554,7 @@ dependencies = [
 name = "module-horizon"
 version = "0.1.5"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "launcher-core",
  "launcher-shared",
  "leptos",
@@ -3612,7 +3612,7 @@ name = "module-skins"
 version = "0.1.5"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "hex",
  "image",
  "js-sys",
