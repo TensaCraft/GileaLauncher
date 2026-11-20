@@ -761,6 +761,7 @@ pub struct Downloader {
 /// A client with the downloader's settings and `redirects`.
 fn client_with(cfg: &DownloaderConfig, redirects: reqwest::redirect::Policy) -> reqwest::Result<Client> {
     Client::builder()
+        .dns_resolver(crate::net::dns::shared())
         .user_agent(format!("{APP_NAME}/{VERSION}"))
         .connect_timeout(cfg.timeout)
         .read_timeout(cfg.timeout)

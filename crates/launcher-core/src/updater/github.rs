@@ -83,6 +83,7 @@ impl GithubClient {
             }
         });
         let http = Client::builder()
+            .dns_resolver(crate::net::dns::shared())
             .user_agent(user_agent)
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)

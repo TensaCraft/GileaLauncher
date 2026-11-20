@@ -85,6 +85,7 @@ impl AuthHttp {
         let _ = rustls::crypto::ring::default_provider().install_default();
         // Redirects follow the downloader's rules: a password never goes on to plain http.
         let client = Client::builder()
+            .dns_resolver(crate::net::dns::shared())
             .user_agent(format!("{APP_NAME}/{VERSION}"))
             .timeout(timings.http_timeout)
             .redirect(crate::net::redirect_policy())

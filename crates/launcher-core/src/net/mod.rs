@@ -1,6 +1,7 @@
 //! Network and disk plumbing shared by installs: the downloader, metadata requests and storage
 //! preflight.
 
+pub mod dns;
 pub mod downloader;
 pub mod meta;
 pub mod preflight;
@@ -120,6 +121,7 @@ fn client_with(
 ) -> AppResult<reqwest::Client> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::builder()
+        .dns_resolver(crate::net::dns::shared())
         .user_agent(user_agent)
         .connect_timeout(connect)
         .read_timeout(read)

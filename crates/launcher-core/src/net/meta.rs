@@ -43,6 +43,7 @@ impl MetaClient {
     pub fn new(timeout: Duration, ttl: Duration) -> AppResult<MetaClient> {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let client = Client::builder()
+            .dns_resolver(crate::net::dns::shared())
             .user_agent(format!("{APP_NAME}/{VERSION}"))
             .connect_timeout(timeout)
             .timeout(timeout)
