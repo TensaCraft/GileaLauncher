@@ -16,6 +16,7 @@ fn fast() -> DownloaderConfig {
     DownloaderConfig {
         retry_delay: Duration::from_millis(1),
         timeout: Duration::from_secs(5),
+        outage_wait: Duration::from_millis(300),
         ..DownloaderConfig::default()
     }
 }
@@ -192,6 +193,30 @@ async fn a_server_asking_to_wait_is_waited_for() {
     let report = run(vec![task(&server, "busy.jar", dir.path(), &body)]).await.unwrap();
     assert_eq!(report.downloaded, 1);
     assert!(started.elapsed() >= Duration::from_millis(900), "Retry-After is kept: {:?}", started.elapsed());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_network_that_stalls_for_a_while_is_waited_for() {
+    // Every request hangs for the first second: all of them time out, as on a dropped Wi-Fi.
+    let server = fake_files::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let tasks: Vec<DownloadTask> = (0..40)
+        .map(|i| {
+            let body = content(1024, i as u8);
+            server.put(&format!("f{i}"), Served { body: body.clone(), ..Served::default() });
+            task(&server, &format!("f{i}"), dir.path(), &body)
+        })
+        .collect();
+    server.stall(Duration::from_secs(1));
+    let patient = Downloader::new(DownloaderConfig {
+        timeout: Duration::from_millis(200),
+        outage_wait: Duration::from_secs(5),
+        ..fast()
+    })
+    .unwrap();
+    let report = patient.download_all(tasks, false, &|_| {}).await.unwrap();
+    assert!(report.failed.is_empty(), "the batch goes on once the network is back: {:?}", report.failed);
+    assert_eq!(report.into_result().unwrap().downloaded, 40);
 }
 
 #[tokio::test(flavor = "multi_thread")]

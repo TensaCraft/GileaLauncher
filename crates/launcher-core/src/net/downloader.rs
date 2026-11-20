@@ -7,8 +7,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use futures_util::{StreamExt, TryStreamExt};
 use launcher_shared::branding::{APP_NAME, VERSION};
@@ -243,6 +243,8 @@ pub struct DownloadReport {
 pub const NETWORK_DOWN: &str = "the network is unreachable";
 /// How many failures in a row (no connection, no answer) mean the network is down.
 const OUTAGE_AFTER: usize = 6;
+/// While the network is down, how often a file tries again to see whether it is back.
+const PROBE_EVERY: Duration = Duration::from_secs(5);
 /// How many failures an error names; the rest are counted.
 const NAMED_FAILURES: usize = 5;
 /// The longest a server's `Retry-After` is waited for.
@@ -277,6 +279,9 @@ pub struct DownloaderConfig {
     /// Pause before retry `n` is `retry_delay × 4ⁿ⁻¹` (or what the server asks for).
     pub retry_delay: Duration,
     pub timeout: Duration,
+    /// How long the network may stay down before the files left fail: a dropped Wi-Fi or a
+    /// stalled line comes back within it, and the batch goes on.
+    pub outage_wait: Duration,
     /// Limit for files of unknown size.
     pub max_size: u64,
     /// Files of a known size up to this are fetched whole into memory and written in one go:
@@ -291,6 +296,7 @@ impl Default for DownloaderConfig {
             retries: 3,
             retry_delay: Duration::from_millis(250),
             timeout: Duration::from_secs(30),
+            outage_wait: Duration::from_secs(60),
             max_size: 8 * 1024 * 1024 * 1024,
             in_memory_up_to: 4 * 1024 * 1024,
         }
@@ -363,6 +369,8 @@ struct Counters {
     bytes_total: u64,
     /// Failures in a row that reached no one, across the batch.
     unreached: AtomicUsize,
+    /// When those failures first meant the network is down.
+    down_since: Mutex<Option<Instant>>,
 }
 
 impl Counters {
@@ -382,10 +390,27 @@ impl Counters {
 
     fn reached(&self) {
         self.unreached.store(0, Ordering::Relaxed);
+        if self.down_since.lock().unwrap_or_else(|e| e.into_inner()).take().is_some() {
+            tracing::info!("The network is back; the download goes on");
+        }
     }
 
-    fn unreached(&self) {
-        self.unreached.fetch_add(1, Ordering::Relaxed);
+    /// One more attempt reached no one (`reason`); the one that makes the network down is logged.
+    fn unreached(&self, reason: &str) {
+        if self.unreached.fetch_add(1, Ordering::Relaxed) + 1 >= OUTAGE_AFTER {
+            let mut since = self.down_since.lock().unwrap_or_else(|e| e.into_inner());
+            if since.is_none() {
+                tracing::warn!(
+                    "The network looks down ({OUTAGE_AFTER} failures in a row, the last: {reason})"
+                );
+                *since = Some(Instant::now());
+            }
+        }
+    }
+
+    /// The network has been down for `wait` or longer.
+    fn down_for(&self, wait: Duration) -> bool {
+        self.down_since.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() >= wait)
     }
 
     /// Moves one file's contribution from `reported` to `now` bytes.
@@ -797,6 +822,7 @@ impl Downloader {
             bytes_done: AtomicU64::new(0),
             bytes_total: pending.iter().filter_map(|t| t.size).sum(),
             unreached: AtomicUsize::new(0),
+            down_since: Mutex::new(None),
         };
         progress(counters.snapshot());
         let counters = &counters;
@@ -843,13 +869,19 @@ impl Downloader {
         progress: ProgressFn<'_>,
     ) -> Result<(), Failed> {
         let mut reported = 0;
-        let mut last = Failed { reason: String::from("no attempt was made"), mismatch: false };
+        let mut last: Failed;
         let attempts = self.cfg.retries.max(1);
-        for attempt in 1..=attempts {
+        let mut attempt = 0;
+        loop {
             if counters.network_down() {
-                counters.set_file_bytes(&mut reported, 0);
-                return Err(Failed { reason: NETWORK_DOWN.into(), mismatch: false });
+                if counters.down_for(self.cfg.outage_wait) {
+                    counters.set_file_bytes(&mut reported, 0);
+                    return Err(Failed { reason: NETWORK_DOWN.into(), mismatch: false });
+                }
+                // Wait for the network, then this attempt looks whether it is back.
+                tokio::time::sleep(PROBE_EVERY.min(self.cfg.outage_wait / 4)).await;
             }
+            attempt += 1;
             let mut wait = None;
             match self.download_once(task, counters, progress, &mut reported).await {
                 Ok(()) => {
@@ -862,7 +894,12 @@ impl Downloader {
                 }
                 Err(Failure::Retry(e)) => last = Failed { reason: e, mismatch: false },
                 Err(Failure::Unreachable(e)) => {
-                    counters.unreached();
+                    counters.unreached(&e);
+                    if counters.network_down() {
+                        // Not this file's fault: it tries again once the network is back.
+                        attempt -= 1;
+                        continue;
+                    }
                     last = Failed { reason: e, mismatch: false };
                 }
                 Err(Failure::Wait(e, after)) => {
@@ -871,14 +908,14 @@ impl Downloader {
                 }
                 Err(Failure::Mismatch(e)) => last = Failed { reason: e, mismatch: true },
             }
-            if attempt < attempts {
-                // Longer each time (×4): a busy server gets room, unless it says how long itself.
-                let backoff = self.cfg.retry_delay * 4u32.saturating_pow(attempt - 1);
-                tokio::time::sleep(wait.unwrap_or(backoff)).await;
+            if attempt >= attempts {
+                counters.set_file_bytes(&mut reported, 0);
+                return Err(last);
             }
+            // Longer each time (×4): a busy server gets room, unless it says how long itself.
+            let backoff = self.cfg.retry_delay * 4u32.saturating_pow(attempt - 1);
+            tokio::time::sleep(wait.unwrap_or(backoff)).await;
         }
-        counters.set_file_bytes(&mut reported, 0);
-        Err(last)
     }
 
     async fn download_once(

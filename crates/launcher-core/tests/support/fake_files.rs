@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -54,6 +54,8 @@ pub struct Seen {
 struct Files {
     served: HashMap<String, Served>,
     seen: Vec<Seen>,
+    /// Until then every request hangs unanswered, as when the network stalls.
+    stalled_until: Option<Instant>,
 }
 
 pub struct FileServer {
@@ -79,6 +81,11 @@ impl FileServer {
 
     pub fn seen(&self, name: &str) -> Vec<Seen> {
         self.files.lock().unwrap().seen.iter().filter(|s| s.name == name).cloned().collect()
+    }
+
+    /// Every request in the next `time` hangs without an answer until that time is over.
+    pub fn stall(&self, time: Duration) {
+        self.files.lock().unwrap().stalled_until = Some(Instant::now() + time);
     }
 
     pub fn total_requests(&self) -> usize {
@@ -109,6 +116,11 @@ async fn serve(
     Path(name): Path<String>,
     headers: HeaderMap,
 ) -> Response {
+    let stalled = files.lock().unwrap().stalled_until.and_then(|t| t.checked_duration_since(Instant::now()));
+    if let Some(stalled) = stalled {
+        tokio::time::sleep(stalled).await;
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     let delay = files.lock().unwrap().served.get(&name).and_then(|s| s.delay);
     if let Some(delay) = delay {
         tokio::time::sleep(delay).await;
